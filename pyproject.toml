@@ -1,0 +1,18 @@
+[project]
+name = "cognitive-agent"
+version = "0.1.0"
+description = "4.5-layer cognitive architecture AI agent"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.0.0",
+    "pyyaml>=6.0",
+    "duckduckgo_search>=7.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

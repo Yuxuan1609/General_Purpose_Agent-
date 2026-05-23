@@ -1,0 +1,15 @@
+main_llm:
+  provider: deepseek           # deepseek | openrouter
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  base_url: https://api.deepseek.com
+
+auxiliary_llm:
+  provider: deepseek
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  base_url: https://api.deepseek.com
+
+max_iterations: 50
+l1_max_rules: 20
+l1_max_rule_length: 100
