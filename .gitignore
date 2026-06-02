@@ -9,3 +9,4 @@ logs/
 baselines/
 DouZero-1.1.0/
 douzero_checkpoints/
+alpha-zero-general/

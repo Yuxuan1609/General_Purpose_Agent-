@@ -232,8 +232,11 @@ Batch₂: Task₆ → Task₇ → ... → Task₁₀ → Batch Reflect₂
 
 - **Phase 1 使用 RLCard 卡牌游戏环境**，环境直接返回客观评估信号（赢/输/得分），解决 A4 中"评估信号从哪里来"的问题
 - **分阶段推进难度**：
-  - **Phase 1a**: Leduc Hold'em（简化德州扑克，信息集 10²，使用预训练 CFR 模型作为对手）
-  - **Phase 1b**: Dou Dizhu（斗地主，信息集 10⁵³~10⁸³，使用 DouZero 预训练权重作为对手）
+- **Phase 1a**: Leduc Hold'em（简化德州扑克，信息集 10²，使用预训练 CFR 模型作为对手）
+  - **Leduc 仅用于跑通 Agent 的迭代学习闭环（Execute → Reflect → Learn）**，验证 L0.5/L1/L2/L3 层间通信和知识演化机制是否正常工作。Leduc 是简化环境，不做深度博弈优化。
+- **Phase 1b**: Dou Dizhu（斗地主，信息集 10⁵³~10⁸³，使用 DouZero 预训练权重作为对手）
+  - 验证 Agent 在复杂不完全信息博弈中的自适应能力
+- **后续方向**: 转向通用博弈智能 —— 参考 AlphaGo General 思路，从单一卡牌游戏泛化到多游戏、多领域决策，目标是构建领域无关的认知决策架构
 - **L4 暂不实现**，仅保留 L0.5 + L1 + L2 + 极简 L3
   - L3 保留 skills 框架但内容从简
   - 工具代码保留但不作为 Phase 1 测试重点
@@ -393,12 +396,50 @@ LLM Agent 决策 → 提交 action → 获取下一步
 循环（多局 batch 后批量反思）
 ```
 
-**DouZero 权重**（Phase 1b，需单独下载）：
+#### Phase 1b 架构 — DouZero + LLM Agent
 
+Phase 1b 使用 DouZero 原生 GameEnv 作为游戏引擎，将 LLM Agent 作为三个玩家之一接入，与 DouZero 预训练 DeepAgent 对局。
+
+```
+GameEnv.step()
+  │
+  ├─ ① 取当前玩家 infoset (InfoSet)
+  ├─ ② player.act(infoset) → list[int]        ← 所有 Agent 统一接口
+  │       │
+  │       ├─ DeepAgent:  模型前向推理 → argmax
+  │       ├─ LLMAgent:   build_prompt → LLM.chat() → parse_action
+  │       └─ RandomAgent: random.choice(legal_actions)
+  │
+  ├─ ③ 处理出牌 → 更新 hand_cards / played_cards / action_seq / bomb_num
+  ├─ ④ 判断 game_over
+  └─ ⑤ 切换 acting_player_position → 生成新 infoset → 下一轮
+```
+
+```
+示例对局:
+  landlord      → DeepAgent (baselines/douzero_ADP/landlord.ckpt)
+  landlord_up   → DouZeroLLMAgent (DeepSeek API)
+  landlord_down → DeepAgent (baselines/douzero_ADP/landlord_down.ckpt)
+```
+
+**用法：**
 ```bash
-# 下载预训练 checkpoint
-wget https://github.com/kwai/DouZero/releases/download/v1.0/checkpoints.zip
-unzip checkpoints.zip -d douzero_checkpoints
+# 不完全信息（默认，与人类玩家信息对等）
+python scripts/run_douzero_llm.py --llm_position landlord_up --episodes 10 --step_verbose
+
+# 完美信息（与 DeepAgent 信息对等，可看到对手手牌）
+python scripts/run_douzero_llm.py --llm_position landlord_up --episodes 10 --step_verbose --perfect_info
+
+# dry-run 快速验证流程
+python scripts/run_douzero_llm.py --dry_run --episodes 10
+```
+
+**DouZero 权重**（已预置）：
+```
+baselines/
+  douzero_ADP/   # ADP 奖励训练的 DouZero
+  douzero_WP/    # WP 奖励训练的 DouZero
+  sl/            # 监督学习基线
 ```
 
 ## 各层详解

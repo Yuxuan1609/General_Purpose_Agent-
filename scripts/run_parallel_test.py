@@ -16,13 +16,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 SCRIPT = Path(__file__).resolve().parent / "run_llm_leduc.py"
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs" / "parallel"
 
 
 def run_one(run_id: int, episodes: int, log_dir: Path) -> tuple[int, list[str], str]:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--episodes", str(episodes), "--log-dir", str(log_dir)],
-        capture_output=True, text=True, timeout=600,
+        capture_output=True, text=True, timeout=1800,
     )
     lines = result.stdout.strip().splitlines()
     summary = [l.strip() for l in lines if l.startswith("Log saved") or l.startswith("  ")]
@@ -58,8 +58,9 @@ def main():
 
     all_wins = 0
     all_total = 0
+    all_score = 0
     with open(summary_path, "w", encoding="utf-8") as f:
-        f.write("Parallel Test Results\n")
+        f.write("Parallel Test Results (score-focused)\n")
         f.write(f"Runs: {args.runs} x {args.episodes} episodes\n")
         f.write(f"Time: {datetime.now().isoformat()}\n")
         f.write(f"{'='*50}\n\n")
@@ -69,17 +70,22 @@ def main():
             for line in summary:
                 f.write(f"  {line}\n")
             for line in summary:
-                m = re.search(r"(\d+)/(\d+)", line)
+                m = re.search(r"Total Score:\s*([+-]?\d+)", line)
                 if m:
+                    all_score += int(m.group(1))
+                m = re.search(r"(\d+)/(\d+)", line)
+                if m and "Wins" in line or "wins" in line.lower():
                     all_wins += int(m.group(1))
                     all_total += int(m.group(2))
             f.write("\n")
 
         f.write(f"{'='*50}\n")
-        f.write(f"Total: {all_wins}/{all_total} wins ({all_wins / all_total * 100:.1f}%)\n")
+        f.write(f"Total Score: {all_score:+d} chips\n")
+        f.write(f"Total Wins:  {all_wins}/{all_total} ({all_wins / all_total * 100:.1f}%)\n")
 
     print(f"\nSummary written to: {summary_path}")
-    print(f"Total: {all_wins}/{all_total} wins ({all_wins / all_total * 100:.1f}%)")
+    print(f"Total Score: {all_score:+d} chips")
+    print(f"Total Wins:  {all_wins}/{all_total} ({all_wins / all_total * 100:.1f}%)")
 
 
 if __name__ == "__main__":

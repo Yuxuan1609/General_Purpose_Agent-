@@ -16,12 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 logger = logging.getLogger(__name__)
 
-RULES_SYSTEM_PROMPT = """You are playing Leduc Hold'em.
+RULES_SYSTEM_PROMPT = """You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips per hand (EV).
+
+OBJECTIVE: Chips are unlimited — there is no bankroll constraint. Focus purely on expected value: every decision should maximize the average chips you win. Fold when negative EV, bet/raise when positive EV. The only metric that matters is long-run chip profit.
 
 Cards: 6 cards total — K(ing), Q(ueen), J(ack) in spades(SP) and hearts(HR).
        Suit ranking: SP > HR.
 
-Setup: 2 players, each gets 1 private card. 200 chips each (infinite supply, no limit betting).
+Setup: 2 players, each gets 1 private card. Infinite chips, no betting limit.
        Player 0 posts 1 chip (small blind) and acts first. Player 1 posts 2 chips (big blind).
 
 Pre-flop round:
@@ -50,7 +52,7 @@ Showdown (winning):
 Actions:
   call    — match the opponent's bet to stay in. Cost = opponent's bet - your bet.
   raise   — increase the bet. Forces opponent to match or fold.
-  fold    — give up the hand. Lose chips in pot, but save more chips.
+  fold    — give up the hand. Cut losses when EV is negative.
   check   — pass without betting. Only available post-flop when no active bet.
 
 Output ONLY one word: call, raise, fold, or check."""
@@ -169,7 +171,7 @@ def main():
     parser.add_argument("--episodes", type=int, default=5, help="对局数 (default: 5)")
     parser.add_argument("--model", default=None, help="模型名称 (default: 从 config.yaml 读取)")
     parser.add_argument("--temperature", type=float, default=0.1, help="LLM temperature (default: 0.1)")
-    parser.add_argument("--log-dir", default="logs", help="日志目录 (default: logs)")
+    parser.add_argument("--log-dir", default="logs/leduc", help="日志目录 (default: logs/leduc)")
     args = parser.parse_args()
 
     import rlcard
@@ -187,8 +189,8 @@ def main():
     total_reward = 0
     wins = 0
 
-    with open(log_path, "w", encoding="utf-8") as f:
-        f.write(f"LLM Leduc Hold'em Log\n")
+     with open(log_path, "w", encoding="utf-8") as f:
+        f.write(f"LLM Leduc Hold'em — Score-Driven Log\n")
         f.write(f"Model: {args.model or llm_client.model}\n")
         f.write(f"Temperature: {args.temperature}\n")
         f.write(f"Episodes: {args.episodes}\n")
@@ -200,23 +202,26 @@ def main():
             total_reward += reward
             if reward > 0:
                 wins += 1
+            f.write(f"  Episode {ep:2d} | reward={reward:+.0f} chips | cumulative={total_reward:+d}\n")
 
         avg = total_reward / args.episodes
         win_rate = wins / args.episodes
 
         f.write(f"\n{'='*60}\n")
-        f.write(f"SUMMARY\n")
-        f.write(f"  Model:      {args.model or llm_client.model}\n")
-        f.write(f"  Episodes:   {args.episodes}\n")
-        f.write(f"  Avg Reward: {avg:+.2f}\n")
-        f.write(f"  Win Rate:   {win_rate*100:.1f}%\n")
-        f.write(f"  Total Wins: {wins}/{args.episodes}\n")
+        f.write(f"SUMMARY (score-focused)\n")
+        f.write(f"  Model:         {args.model or llm_client.model}\n")
+        f.write(f"  Episodes:      {args.episodes}\n")
+        f.write(f"  Total Score:   {total_reward:+d} chips\n")
+        f.write(f"  Avg Score/Ep:  {avg:+.2f} chips\n")
+        f.write(f"  Win Rate:      {win_rate*100:.1f}%\n")
+        f.write(f"  Wins:          {wins}/{args.episodes}\n")
 
     print(f"Log saved to: {log_path}")
-    print(f"  Episodes:   {args.episodes}")
-    print(f"  Avg Reward: {avg:+.2f}")
-    print(f"  Win Rate:   {win_rate*100:.1f}%")
-    print(f"  Total Wins: {wins}/{args.episodes}")
+    print(f"  Episodes:      {args.episodes}")
+    print(f"  Total Score:   {total_reward:+d} chips")
+    print(f"  Avg Score/Ep:  {avg:+.2f}")
+    print(f"  Win Rate:      {win_rate*100:.1f}%")
+    print(f"  Wins:          {wins}/{args.episodes}")
 
 
 if __name__ == "__main__":
