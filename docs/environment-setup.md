@@ -1,124 +1,113 @@
-# WSL + TextWorld 环境设置
+# RLCard + 环境设置
 
 ## 环境概览
 
-| 组件 | 版本/状态 |
-|------|-----------|
-| WSL 版本 | 2 |
-| Ubuntu 版本 | 22.04 |
-| Python | 3.10.12 |
-| TextWorld | 1.7.0 |
-| 虚拟环境 | ~/tw-env |
-| 项目路径 (WSL) | /mnt/c/Users/micha/PycharmProjects/cognitive-agent |
+| 组件 | 说明 |
+|------|------|
+| RLCard | 1.2.0 (pip install rlcard[torch]) |
+| 操作系统 | Windows (原生，无需 WSL) |
+| 验证路径 | Phase 1a: Leduc Hold'em → Phase 1b: Dou Dizhu (DouZero) |
 
-## WSL 操作
-
-### 启动 WSL
+## 已安装
 
 ```bash
-# 从 Windows PowerShell / CMD 进入 WSL
-wsl
-
-# 或单条命令执行
-wsl <command>
+pip install rlcard[torch]   # 卡牌游戏环境 + PyTorch
+pip install douzero          # 斗地主 AI 框架（Phase 1b）
 ```
 
-### 激活 TextWorld 环境
+## RLCard 基础用法
 
-```bash
-source ~/tw-env/bin/activate
-```
-
-退出环境：`deactivate`
-
-### 项目目录对应
-
-```
-Windows: C:\Users\micha\PycharmProjects\cognitive-agent\
-WSL:     /mnt/c/Users/micha/PycharmProjects/cognitive-agent/
-```
-
-## 运行流程
-
-### 1. 激活环境并进入项目目录
-
-```bash
-wsl
-source ~/tw-env/bin/activate
-cd /mnt/c/Users/micha/PycharmProjects/cognitive-agent
-```
-
-### 2. 运行测试
-
-```bash
-cd /mnt/c/Users/micha/PycharmProjects/cognitive-agent
-source ~/tw-env/bin/activate
-python -m pytest tests/ -v          # 全部测试
-python -m pytest tests/ -v -k test_agent  # 按名称过滤
-```
-
-### 3. 运行 Agent
-
-```bash
-cd /mnt/c/Users/micha/PycharmProjects/cognitive-agent
-source ~/tw-env/bin/activate
-python main.py                          # 启动并打印各层状态
-python main.py "你的问题"               # 执行任务
-```
-
-### 4. 单条命令模式（无需进入交互式 shell）
-
-```bash
-wsl bash -c "cd /mnt/c/Users/micha/PycharmProjects/cognitive-agent && source ~/tw-env/bin/activate && python -m pytest tests/ -v"
-```
-
-## TextWorld 使用
-
-### 生成游戏
-
-```bash
-source ~/tw-env/bin/activate
-tw-make custom --world-size 5 --nb-objects 10 --quest-length 5 --seed 1234 --output tw_games/custom_game.z8
-```
-
-### 终端中游玩
-
-```bash
-tw-play tw_games/custom_game.z8
-```
-
-### Python Gym 接口
+### 创建环境
 
 ```python
-import textworld.gym
+import rlcard
 
-env_id = textworld.gym.register_game("tw_games/custom_game.z8", max_episode_steps=50)
-env = textworld.gym.make(env_id)
-obs, infos = env.reset()
+# Leduc Hold'em — Phase 1a
+env = rlcard.make('leduc-holdem', config={'seed': 42})
+
+# Dou Dizhu — Phase 1b
+env = rlcard.make('doudizhu')
 ```
 
-## 重新安装
+### 核心接口
 
-如需从头重建环境，运行项目中的一键脚本：
+```python
+# 重置
+state, player_id = env.reset()
+
+# 执行动作
+next_state, next_player_id = env.step(action)
+
+# 获取 payoff（结束后）
+payoffs = env.get_payoffs()
+
+# 检查是否结束
+done = env.is_over()
+```
+
+`state` 是一个 dict，包含：
+- `state['obs']` — 观测向量
+- `state['legal_actions']` — 合法动作集合
+- `state['raw_obs']` — 原始观测（自然语言可读）
+- `state['raw_legal_actions']` — 原始合法动作
+
+### 加载预设 AI 对手
+
+```python
+from rlcard.models.registration import model_registry
+
+# Leduc Hold'em CFR (纳什均衡级)
+cfr_agent = model_registry.load('leduc-holdem-cfr')
+
+# Dou Dizhu 规则模型 v1 (Phase 1b 过渡)
+rule_agent = model_registry.load('doudizhu-rule-v1')
+```
+
+### 完整对局示例
+
+```python
+import rlcard
+from rlcard.agents import RandomAgent
+from rlcard.models.registration import model_registry
+
+env = rlcard.make('leduc-holdem')
+cfr_agent = model_registry.load('leduc-holdem-cfr')
+
+# Agent 0 = LLM Agent (此处用 Random 占位)
+# Agent 1 = CFR 对手
+env.set_agents([RandomAgent(env.num_actions), cfr_agent])
+
+trajectories, payoffs = env.run()
+print(f"Payoffs: {payoffs}")  # [agent0_score, agent1_score]
+```
+
+## 预设模型一览
+
+| 模型 ID | 类型 | 难度 | 适用 |
+|---------|------|------|------|
+| `leduc-holdem-cfr` | 预训练 CFR | 高（纳什均衡） | Phase 1a 主对手 |
+| `leduc-holdem-rule-v1/v2` | 规则 | 低 | Leduc 热身 |
+| `doudizhu-rule-v1` | 规则 | 低 | Phase 1b 过渡 |
+| `limit-holdem-rule-v1` | 规则 | 中 | 备选 |
+| `uno-rule-v1` | 规则 | 低 | 备选 |
+
+## Phase 1b: DouZero
+
+当前 `pip install douzero` 不包含预训练权重，需单独下载：
 
 ```bash
-bash scripts/setup-wsl-env.sh
+# 下载 DouZero checkpoints
+curl -L -o checkpoints.zip https://github.com/kwai/DouZero/releases/download/v1.0/checkpoints.zip
+unzip checkpoints.zip -d douzero_checkpoints
 ```
 
-## 常见问题
+使用：
 
-### sudo 需要密码
+```python
+from douzero.evaluation.deep_agent import DeepAgent
 
-已在 `/etc/sudoers.d/tonyyang-nopasswd` 配置免密 sudo。如需移除：
-
-```bash
-sudo rm /etc/sudoers.d/tonyyang-nopasswd
+# 三个位置各需一个 checkpoint
+landlord = DeepAgent('landlord', 'douzero_checkpoints/landlord.ckpt')
+landlord_up = DeepAgent('landlord_up', 'douzero_checkpoints/landlord_up.ckpt')
+landlord_down = DeepAgent('landlord_down', 'douzero_checkpoints/landlord_down.ckpt')
 ```
-
-### 中文编码问题
-
-WSL 中 UTF-8 编码正常。Windows PowerShell 对中文路径支持差——所有开发操作建议在 WSL 中完成。
-
-### TextWorld 网络安装失败
-
-Repo 默认分支是 `main`。脚本使用 `pip install textworld`（PyPI 包），无需从 GitHub 源码安装。

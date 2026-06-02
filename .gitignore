@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 tw_logs/
 tw_games/
+*game_s42*
+logs/

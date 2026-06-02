@@ -30,6 +30,7 @@ class LLMClient:
 
     def chat(self, messages: list, tools: list | None = None, **kwargs) -> LLMResponse:
         params = {"model": self.model, "messages": messages}
+        params.update(kwargs)
         if tools:
             params["tools"] = [
                 {"type": "function", "function": t["function"]}

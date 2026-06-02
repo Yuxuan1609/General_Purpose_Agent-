@@ -230,15 +230,18 @@ Batch₂: Task₆ → Task₇ → ... → Task₁₀ → Batch Reflect₂
 
 #### 环境与范围
 
-- **Phase 1 使用 TextWorld / 游戏模拟环境**，环境直接返回客观评估信号（成功/失败/得分），解决 A4 中"评估信号从哪里来"的问题
+- **Phase 1 使用 RLCard 卡牌游戏环境**，环境直接返回客观评估信号（赢/输/得分），解决 A4 中"评估信号从哪里来"的问题
+- **分阶段推进难度**：
+  - **Phase 1a**: Leduc Hold'em（简化德州扑克，信息集 10²，使用预训练 CFR 模型作为对手）
+  - **Phase 1b**: Dou Dizhu（斗地主，信息集 10⁵³~10⁸³，使用 DouZero 预训练权重作为对手）
 - **L4 暂不实现**，仅保留 L0.5 + L1 + L2 + 极简 L3
-  - L3 保留 skills 框架但内容从简，视 TextWorld 实际需求裁剪
+  - L3 保留 skills 框架但内容从简
   - 工具代码保留但不作为 Phase 1 测试重点
 - 核心验证目标：L1↔L2 的学习闭环能否在闭环环境反馈下自主演化
 
 #### 评估策略（双轨）
 
-**轨道 A — 环境反馈：** TextWorld 直接返回任务成功/失败/得分。客观信号，无 LLM bias。
+**轨道 A — 环境反馈：** RLCard 直接返回赢/输/得分。客观信号，无 LLM bias。
 
 **轨道 B — 对话片段评估：**
 
@@ -353,43 +356,50 @@ python main.py "explain how Python's asyncio works"
 ### 运行测试
 
 ```bash
-# Windows (原生, 不含 TextWorld 测试)
 pytest tests/ -v
-
-# WSL (Linux, 含 TextWorld)
-wsl ~/tw-env/bin/pytest /mnt/d/General_Purpose_Agent--master/General_Purpose_Agent--master/tests/ -v
 ```
 
-### TextWorld 环境 (Phase 1)
+### RLCard 环境 (Phase 1)
 
-TextWorld 为 Linux/macOS 项目，需在 WSL 中运行。
+RLCard 为卡牌游戏强化学习环境，无需 WSL，Windows 原生运行。
 
-**一次性环境搭建：**
-
-```powershell
-# Windows 管理员 PowerShell
-wsl --install -d Ubuntu        # 安装 WSL + Ubuntu（需重启）
-
-# WSL 终端
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv
-python3 -m venv ~/tw-env
-~/tw-env/bin/pip install https://github.com/Microsoft/TextWorld/archive/master.zip
-~/tw-env/bin/pip install openai pyyaml duckduckgo_search pytest
-```
-
-**在 WSL 中运行项目：**
+**安装：**
 
 ```bash
-# Windows 终端
-wsl
-
-# 进入 WSL 后
-source ~/tw-env/bin/activate
-cd /mnt/d/General_Purpose_Agent--master/General_Purpose_Agent--master/
-python main.py "find the key and open the cabinet"
+pip install rlcard[torch]
 ```
 
-> Windows 项目目录通过 `/mnt/<盘符>/` 自动挂载到 WSL，无需手动复制。
+**可用游戏：**
+
+| 游戏 | 状态空间 | 动作空间 | 预设 AI 对手 |
+|------|---------|---------|------------|
+| Leduc Hold'em | 10² | 4 | 预训练 CFR（纳什均衡级） |
+| Dou Dizhu（斗地主） | 10⁵³~10⁸³ | ~27K | 规则模型 v1（→ Phase 1b 换 DouZero） |
+| Limit Texas Hold'em | 10¹⁴ | 4 | 规则模型 v1 |
+| Mahjong（麻将） | 10¹²¹ | 38 | — |
+| No-limit Hold'em | 10¹⁶² | 5(抽象) | — |
+| UNO | 10¹⁶³ | 61 | 规则模型 v1 |
+| Gin Rummy / Bridge | — | 110/91 | Gin Rummy novice / Bridge 规则 |
+
+**Phase 1a 验证路径：**
+
+```
+RLCard(Leduc) → env.step(action) → 状态 + reward
+       ↓
+LLM Agent 决策 → 提交 action → 获取下一步
+       ↓
+执行完毕 → 评估输赢 → Reflect & Learn 更新 L1/L2/L3
+       ↓
+循环（多局 batch 后批量反思）
+```
+
+**DouZero 权重**（Phase 1b，需单独下载）：
+
+```bash
+# 下载预训练 checkpoint
+wget https://github.com/kwai/DouZero/releases/download/v1.0/checkpoints.zip
+unzip checkpoints.zip -d douzero_checkpoints
+```
 
 ## 各层详解
 
