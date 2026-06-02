@@ -6,3 +6,6 @@ tw_logs/
 tw_games/
 *game_s42*
 logs/
+baselines/
+DouZero-1.1.0/
+douzero_checkpoints/
