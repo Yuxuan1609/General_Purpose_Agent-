@@ -353,8 +353,43 @@ python main.py "explain how Python's asyncio works"
 ### 运行测试
 
 ```bash
+# Windows (原生, 不含 TextWorld 测试)
 pytest tests/ -v
+
+# WSL (Linux, 含 TextWorld)
+wsl ~/tw-env/bin/pytest /mnt/d/General_Purpose_Agent--master/General_Purpose_Agent--master/tests/ -v
 ```
+
+### TextWorld 环境 (Phase 1)
+
+TextWorld 为 Linux/macOS 项目，需在 WSL 中运行。
+
+**一次性环境搭建：**
+
+```powershell
+# Windows 管理员 PowerShell
+wsl --install -d Ubuntu        # 安装 WSL + Ubuntu（需重启）
+
+# WSL 终端
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv
+python3 -m venv ~/tw-env
+~/tw-env/bin/pip install https://github.com/Microsoft/TextWorld/archive/master.zip
+~/tw-env/bin/pip install openai pyyaml duckduckgo_search pytest
+```
+
+**在 WSL 中运行项目：**
+
+```bash
+# Windows 终端
+wsl
+
+# 进入 WSL 后
+source ~/tw-env/bin/activate
+cd /mnt/d/General_Purpose_Agent--master/General_Purpose_Agent--master/
+python main.py "find the key and open the cabinet"
+```
+
+> Windows 项目目录通过 `/mnt/<盘符>/` 自动挂载到 WSL，无需手动复制。
 
 ## 各层详解
 

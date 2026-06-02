@@ -1,2 +1,6 @@
 __pycache__/
+**/__pycache__/
 .env
+*.pyc
+tw_logs/
+tw_games/
