@@ -27,15 +27,32 @@ def _setup_logging():
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = PROJECT_ROOT / "logs" / "leduc_cognitive" / stamp
     log_dir.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(log_dir / "game.log", encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter("%(name)s | %(message)s"))
-    root_logger = logging.getLogger()
-    root_logger.addHandler(fh)
-    root_logger.setLevel(logging.DEBUG)
+
+    fmt = logging.Formatter("%(asctime)s | %(message)s")
+
     # Suppress http noise
     for noisy in ("httpx", "httpcore", "openai", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # Console: INFO only, no propagation from agent loggers
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
+    root.addHandler(ch)
+
+    # Per-agent file handlers
+    for logger_name, file_name in [("l0_5_1", "l0_5_1"), ("l2", "l2"),
+                                    ("l3", "l3"), ("core.executor", "executor")]:
+        lg = logging.getLogger(logger_name)
+        lg.setLevel(logging.DEBUG)
+        lg.propagate = False
+        fh = logging.FileHandler(str(log_dir / f"{file_name}.log"), encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        lg.addHandler(fh)
+
     return log_dir
 
 
@@ -213,7 +230,7 @@ def main():
         env.set_agents([agent, cfr])
         state, player_id = env.reset()
         step = 0
-        agent._step = 0
+        agent.reset_session(f"leduc_ep{ep}")
 
         logger.info("=== Episode %d ===", ep)
         while not env.is_over():

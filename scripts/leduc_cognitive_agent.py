@@ -39,12 +39,17 @@ class LeducCognitiveAgent:
         self._temperature = temperature
         self.use_raw = False
         self._step = 0
+        self._session_id = ""
 
     def eval_step(self, state):
         return self._decide(state)
 
     def step(self, state):
         return self._decide(state)
+
+    def reset_session(self, session_id: str = ""):
+        self._step = 0
+        self._session_id = session_id
 
     def _decide(self, state):
         raw = state["raw_obs"]
@@ -60,6 +65,11 @@ class LeducCognitiveAgent:
             },
             state=self._build_state(raw),
             history=None,
+            session={
+                "id": self._session_id,
+                "task_type": "game/leduc",
+                "step_index": self._step,
+            } if self._session_id else None,
         )
 
         result = self._executor.execute(obs)

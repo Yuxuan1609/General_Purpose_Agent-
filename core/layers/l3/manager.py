@@ -26,10 +26,17 @@ class L3Manager(LayerManager):
             domain = Domain("general", "general")
 
         matched = self._skill_layer.match(domain)
-        obs.meta["l3_skills"] = [
-            {"name": s.name, "description": s.description, "domain": s.domain.path}
-            for s in matched
-        ]
+        obs.meta["l3_skills"] = []
+        for s in matched:
+            content = ""
+            if s.skill_dir:
+                skill_file = s.skill_dir / "SKILL.md"
+                if skill_file.exists():
+                    content = skill_file.read_text(encoding="utf-8")
+            obs.meta["l3_skills"].append({
+                "name": s.name, "description": s.description,
+                "domain": s.domain.path, "content": content,
+            })
         logger.debug("── L3 ──")
         logger.debug("  received: domain=%s", domain_path)
         logger.debug("  response: %d skills  (names: %s)",

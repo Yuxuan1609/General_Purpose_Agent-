@@ -97,11 +97,17 @@ class Executor:
 
     def _build_system_prompt(self, context: dict) -> str:
         meta = context.get("meta", {})
+        state = context.get("state", {})
         rules = meta.get("l1_rules", [])
         cards = meta.get("l2_cards", [])
         skills = meta.get("l3_skills", [])
 
         parts = []
+        # Task-specific instructions from comm layer
+        task_system = state.get("system_prompt", "")
+        if task_system:
+            parts.append("[任务说明]\n" + task_system)
+
         if rules:
             parts.append("[行为准则]\n" + "\n".join(f"- {r}" for r in rules))
         if cards:
@@ -113,24 +119,31 @@ class Executor:
                 )
             )
         if skills:
-            parts.append(
-                "[可用技能]\n" + ", ".join(s["name"] for s in skills)
-            )
+            skill_lines = []
+            for s in skills:
+                skill_lines.append(f"## {s['name']}: {s['description']}")
+                if s.get("content"):
+                    skill_lines.append(s["content"])
+            parts.append("[可用技能]\n" + "\n".join(skill_lines))
         return "\n\n".join(parts) if parts else ""
 
     def _build_user_prompt(self, context: dict) -> str:
         state = context.get("state", {})
-        lines = []
-        for key, value in state.items():
-            lines.append(f"{key}: {value}")
-        return "\n".join(lines)
+        # Use the comm-layer-prepared prompt field if present
+        prompt = state.get("prompt", "")
+        if prompt:
+            return prompt
+        # Fallback: format key fields that represent game state
+        fields = {k: v for k, v in state.items()
+                  if k not in ("system_prompt", "prompt", "legal_actions", "hand_raw")}
+        return "\n".join(f"{k}: {v}" for k, v in fields.items())
 
     def _write_pending(self, obs: TaskObservation, notify_layers: dict,
                        result: dict) -> None:
         pending_dir = self._learning_dir / "pending"
         pending_dir.mkdir(parents=True, exist_ok=True)
 
-        session = obs.state.get("session", {}) if isinstance(obs.state, dict) else {}
+        session = obs.session or {}
         rec = ExecutionRecord(
             session=session,
             observation={"meta": obs.meta, "state": obs.state, "history": obs.history},
