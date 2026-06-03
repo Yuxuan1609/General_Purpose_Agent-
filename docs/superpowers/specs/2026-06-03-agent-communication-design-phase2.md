@@ -293,3 +293,73 @@ Phase 2 所有组件依赖 Phase 1 的以下接口：
 | `build_chain()` | Phase 2 链中追加 Comm/Reflection |
 
 Phase 2 不得修改 Phase 1 的公开接口签名，只能扩展。
+
+---
+
+## 9. L2 Domain Graph 设计
+
+### 9.1 核心思路
+
+L2 以**带权图**描述 Domain 之间的相关度，L3/L4 挂在 L2 Node 下。L3/L4 **不需要独立的图链接结构**——跨域资源访问由 L2 图的扩散激活完成。
+
+### 9.2 图结构
+
+```
+Domain Graph (≤100 nodes, 规则发起合并/拆分，LLM 确认):
+
+  coding/python ──0.8──→ coding/rust
+       │ 0.7                │ 0.7
+       ▼                    ▼
+  coding/general ──0.4──→ game/scripting
+       │
+       │ 0.9
+       ▼
+  game/doudizhu ──0.9──→ game/leduc
+       │                    │
+  ┌────┴────┐         ┌────┴────┐
+  │ L3 skills│         │ L3 skills│
+  │ L4 docs  │         │ L4 docs  │
+  └─────────┘         └─────────┘
+```
+
+- **Node**: 一个特定领域（如 `coding/python`, `game/doudizhu`）
+- **Edge**: 带权无向边，权重 = 两个 Domain 的相关度 (0.0~1.0)
+- **Node 维护**: 规则发起（边权重 <0.3 持续 N 次→拆分 / >0.9 持续 N 次→合并），LLM 确认
+- **Edge 权重**: 从任务执行反馈中学习调整——成功的跨域引用增加权重，失败的跨域引用降低权重
+- **总 Node 数**: ≤100，高内聚原则
+
+### 9.3 L1 → L2 检索流程
+
+```
+L1 QUERY(domain="game/doudizhu", task_context) → L2:
+
+  1. 平铺扫描: 从 task domain 出发，BFS 沿边扩散
+     score(neighbor) = source_score × edge_weight × decay(step)
+     扩散步数上限: 2 跳
+
+  2. 锁定 top-k Nodes（按扩散得分排序）
+
+  3. 对每个命中 Node:
+     a. 拉取 Node 内 L2 知识卡片（按激活值 top-5）
+     b. 拉取挂载的 L3 skills（优先级: specific > exportable）
+     c. 拉取挂载的 L4 docs（如有）
+
+  4. 按 graph distance 加权排序 → RESPONSE 给 L1
+```
+
+### 9.4 L3/L4 挂载方式
+
+L3/L4 不建独立图。每个 L3 skill / L4 doc 声明 `domain` 字段，L2 图自动将其挂载到对应 Node。
+
+**跨域场景**：当 Domain A 的 L3 不足时，L2 图扩散自动拉取邻近 Domain B 的 L3 资源。无需 L3 层自己建边。
+
+**挂载学习**：L3 skill 的 `domain` 归属也从任务执行反馈中学习——如果一个 skill 在 domain B 中被频繁成功使用，其 domain 可能应调整为 B。
+
+### 9.5 待确认
+
+| # | 问题 | 状态 |
+|---|------|------|
+| 1 | Node 合并/拆分的具体触发规则 | 待细化 |
+| 2 | Edge weight 从任务反馈学习的算法 | 待细化 |
+| 3 | L3 挂载到 L2 Node 的学习机制 | 待细化 |
+| 4 | 初始 Node 拓扑和 edge weight 的引导数据 | 待细化 |
