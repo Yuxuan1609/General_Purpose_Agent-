@@ -1,0 +1,44 @@
+# L2 — Flexible Knowledge Layer 配置
+# 知识卡片系统参数：激活计算、衰减率、反馈步长
+
+# 激活值计算参数
+activation:
+  domain_weight: 0.6       # 领域匹配权重 (domain_match_score * 0.6)
+  recency_weight: 0.4      # 时间新近度权重 (recency_score * 0.4)
+  top_k: 5                 # 每次检索返回的 top-k 活跃卡片
+
+# 领域匹配得分
+domain_match:
+  exact: 1.0               # 精确路径匹配
+  parent: 0.7              # 卡片是任务域的父级
+  child: 0.5               # 卡片是任务域的子级
+  general: 0.4             # 通用卡片（总是适用）
+  unrelated: 0.0           # 不相关
+
+# 卡片默认值
+card_defaults:
+  confidence: 0.5
+  activation: 0.5
+  decay_rate: 0.01         # 每天衰减 1%
+
+# 反馈调整步长
+feedback:
+  boost_confidence: 0.05   # 成功时置信度增量
+  boost_activation: 0.10   # 成功时激活值增量
+  penalty_confidence: 0.10 # 失败时置信度减量
+  min_confidence: 0.1      # 置信度下限
+  max_confidence: 1.0      # 置信度上限
+
+# 扩散激活
+spreading:
+  steps: 2                 # BFS 最大步数
+  decay: 0.5               # 每步衰减系数
+  relation_weights:
+    parent_child: 0.8
+    analogous: 0.7
+    cross_reference: 0.6
+    prerequisite: 0.5
+
+# 持久化路径
+index_path: knowledge/l2_index.json
+knowledge_dir: knowledge/

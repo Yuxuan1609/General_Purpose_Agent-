@@ -1,0 +1,21 @@
+# L3 — Skill Layer 配置
+# 技能系统参数：编译阈值、匹配逻辑
+
+# L2 → L3 编译条件
+compilation:
+  min_cards: 3             # 同精确域下最少卡片数
+  min_avg_activation: 0.7  # 卡片平均激活值达标
+
+# 技能匹配得分（用于 SkillLayer.match()）
+match_scores:
+  exact: 3                 # 精确 domain 匹配
+  parent: 2                # 父级 domain 匹配
+  cross_domain: 1          # 跨域通用技能
+  same_top_level: 1        # 相同顶级 domain
+
+# 技能名验证
+name_regex: "^[a-z0-9][a-z0-9._-]*$"
+name_max_length: 64
+
+# 技能持久化路径
+skills_dir: skills/
