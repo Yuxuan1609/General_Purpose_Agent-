@@ -30,8 +30,9 @@ class L3Manager(LayerManager):
             {"name": s.name, "description": s.description, "domain": s.domain.path}
             for s in matched
         ]
-        logger.debug("[L3] received: domain=%s", domain_path)
-        logger.debug("[L3] response: %d skills (names: %s)",
+        logger.debug("── L3 ──")
+        logger.debug("  received: domain=%s", domain_path)
+        logger.debug("  response: %d skills  (names: %s)",
                      len(matched), [s.name for s in matched])
         return {"status": "ok", "skills_matched": len(matched)}
 

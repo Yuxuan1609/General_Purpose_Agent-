@@ -36,8 +36,9 @@ class L2Manager(LayerManager):
             for c in active
         ]
         domains = list({c.domain.path for c in active})
-        logger.debug("[L2] received: domain=%s", domain_path)
-        logger.debug("[L2] response: %d cards (nodes: %s)", len(active), domains)
+        logger.debug("── L2 ──")
+        logger.debug("  received: domain=%s", domain_path)
+        logger.debug("  response: %d cards  (nodes: %s)", len(active), domains)
         return {"status": "ok", "cards_found": len(active)}
 
     def notify(self) -> Any:

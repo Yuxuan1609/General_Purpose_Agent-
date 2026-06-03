@@ -26,12 +26,13 @@ class L0_5_1Manager(LayerManager):
     def process(self, data: Any) -> dict:
         obs: TaskObservation = data
         domain = obs.meta.get("domain", "general")
-        logger.debug("[L0_5_1] received: domain=%s", domain)
+        logger.debug("── L(0.5+1) ──")
+        logger.debug("  received: domain=%s", domain)
 
         rules = self._philosophy.all_rules()
         obs.meta["l1_rules"] = [r.content for r in rules]
 
-        logger.debug("[L0_5_1] response: %d rules", len(rules))
+        logger.debug("  response: %d rules", len(rules))
         return {"status": "ok", "rules_count": len(rules)}
 
     def notify(self) -> Any:

@@ -38,6 +38,7 @@ class LeducCognitiveAgent:
         self._executor = executor
         self._temperature = temperature
         self.use_raw = False
+        self._step = 0
 
     def eval_step(self, state):
         return self._decide(state)
@@ -48,11 +49,13 @@ class LeducCognitiveAgent:
     def _decide(self, state):
         raw = state["raw_obs"]
         legal_names = raw["legal_actions"]
+        self._step += 1
 
         obs = TaskObservation(
             meta={
                 "domain": "game/leduc",
                 "role": "Player 0",
+                "step": self._step,
                 "enable_learning": True,
             },
             state=self._build_state(raw),

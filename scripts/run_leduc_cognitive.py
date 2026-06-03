@@ -29,10 +29,13 @@ def _setup_logging():
     log_dir.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(log_dir / "game.log", encoding="utf-8")
     fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(message)s"))
+    fh.setFormatter(logging.Formatter("%(name)s | %(message)s"))
     root_logger = logging.getLogger()
     root_logger.addHandler(fh)
     root_logger.setLevel(logging.DEBUG)
+    # Suppress http noise
+    for noisy in ("httpx", "httpcore", "openai", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     return log_dir
 
 
@@ -210,6 +213,7 @@ def main():
         env.set_agents([agent, cfr])
         state, player_id = env.reset()
         step = 0
+        agent._step = 0
 
         logger.info("=== Episode %d ===", ep)
         while not env.is_over():

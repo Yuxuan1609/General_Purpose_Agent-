@@ -12,6 +12,11 @@ from core.layer_message import LayerMessage, MessageType
 logger = logging.getLogger(__name__)
 
 
+def _indent(text: str, spaces: int) -> str:
+    prefix = " " * spaces
+    return prefix + text.replace("\n", "\n" + prefix)
+
+
 class Executor:
     """Independent decision-maker outside the layer system.
 
@@ -35,13 +40,10 @@ class Executor:
         self._temperature = temperature
 
     def execute(self, obs: TaskObservation) -> dict:
-        """Execute one action cycle through the cognitive chain.
-
-        Returns: dict with keys:
-            action_text: str   - LLM's raw response text
-            context: dict      - assembled context sent to LLM
-            notify_layers: dict - {layer_name: payload} from all layers
-        """
+        """Execute one action cycle through the cognitive chain."""
+        step = obs.meta.get("step", 0)
+        domain = obs.meta.get("domain", "")
+        logger.debug("══════ Step %d  [%s] ══════", step, domain)
         trace_id = uuid.uuid4().hex[:12]
         msg = LayerMessage(
             source="executor", target=self._root.name,
@@ -78,10 +80,11 @@ class Executor:
         l1_count = len(context.get("meta", {}).get("l1_rules", []))
         l2_count = len(context.get("meta", {}).get("l2_cards", []))
         l3_count = len(context.get("meta", {}).get("l3_skills", []))
-        logger.debug("[Executor] ctx: l1_rules=%d l2_cards=%d l3_skills=%d",
+        logger.debug("── Executor ──")
+        logger.debug("  context: l1=%d l2=%d l3=%d",
                      l1_count, l2_count, l3_count)
-        logger.debug("[Executor] system_prompt:\n%s", system)
-        logger.debug("[Executor] user_prompt:\n%s", user)
+        logger.debug("  system:\n%s", _indent(system, 4))
+        logger.debug("  user:\n%s", _indent(user, 4))
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -89,6 +92,7 @@ class Executor:
         resp = self._llm.chat(messages=messages)
         action_text = resp.text if hasattr(resp, 'text') else str(resp)
         logger.info("[Executor] action: %s", action_text)
+        logger.debug("── end Executor ──\n")
         return action_text
 
     def _build_system_prompt(self, context: dict) -> str:
