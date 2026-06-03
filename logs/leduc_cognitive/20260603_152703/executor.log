@@ -1,0 +1,213 @@
+2026-06-03 15:27:06,505 | ══════ Step 1  [game/leduc] ══════
+2026-06-03 15:27:06,507 | ── Executor ──
+2026-06-03 15:27:06,507 |   context: l1=3 l2=3 l3=2
+2026-06-03 15:27:06,507 |   system:
+    [任务说明]
+    You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.
+    
+    Cards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.
+    2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.
+    
+    Pre-flop: call, raise(2 chips), or fold. Max 2 raises per round.
+    Post-flop: public card dealt. check/call, raise(4 chips), or fold.
+    
+    Pair (card matches public) beats no pair. Higher rank wins ties, then suit.
+    Output ONLY one word: call, raise, fold, or check.
+    
+    [行为准则]
+    - 面对不确定信息时优先搜索验证，不要直接假设答案
+    - 当同一种方法连续失败时，主动换策略而非坚持原路径
+    - 棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。避免因单局短期结果改变长期策略。
+    
+    [相关知识]
+    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
+    - [game/leduc] 持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。 (confidence:0.8)
+    - [game/leduc] 翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。 (confidence:0.7)
+    
+    [可用技能]
+    ## leduc-postflop-pair: 翻牌后成对加注
+    ---
+    name: leduc-postflop-pair
+    description: 翻牌后成对加注
+    domain: game/leduc
+    relevance_domain: game/leduc
+    ---
+    # 翻牌后成对加注
+    
+    公共牌与手牌配对时，你有最高牌型。
+    max 2 raises per round，尽量打满加注。每次加注4筹码。
+    
+    ## 对手信号
+    - 对手call → 对手可能也有较高单张
+    - 对手fold → 收底池
+    - 对手re-raise → 评估对手是否可能已成对
+    ## leduc-preflop-raise: 翻牌前加注策略
+    ---
+    name: leduc-preflop-raise
+    description: 翻牌前加注策略
+    domain: game/leduc
+    relevance_domain: game/leduc
+    ---
+    # 翻牌前加注策略
+    
+    持有K时强制加注，持有Q时根据对手行为判断，持有J时倾向call观察。
+    加注迫使弱牌fold或支付更高代价看公共牌。
+    
+    ## 决策树
+    - K → raise
+    - Q → 对手raise则fold，对手call则call
+    - J → call/fold，避免主动加注
+2026-06-03 15:27:06,509 |   user:
+    === Round: pre-flop ===
+    Your card: J♠
+    Public card: not yet dealt
+    Your bet this round: 1
+    Opponent bet this round: 2
+    Total pot: 3
+    Legal actions: call, raise, fold
+    Choose:
+2026-06-03 15:27:12,482 | [Executor] action: call
+2026-06-03 15:27:12,483 | ── end Executor ──
+
+2026-06-03 15:27:12,485 | ══════ Step 2  [game/leduc] ══════
+2026-06-03 15:27:12,487 | ── Executor ──
+2026-06-03 15:27:12,487 |   context: l1=3 l2=3 l3=2
+2026-06-03 15:27:12,487 |   system:
+    [任务说明]
+    You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.
+    
+    Cards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.
+    2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.
+    
+    Pre-flop: call, raise(2 chips), or fold. Max 2 raises per round.
+    Post-flop: public card dealt. check/call, raise(4 chips), or fold.
+    
+    Pair (card matches public) beats no pair. Higher rank wins ties, then suit.
+    Output ONLY one word: call, raise, fold, or check.
+    
+    [行为准则]
+    - 面对不确定信息时优先搜索验证，不要直接假设答案
+    - 当同一种方法连续失败时，主动换策略而非坚持原路径
+    - 棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。避免因单局短期结果改变长期策略。
+    
+    [相关知识]
+    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
+    - [game/leduc] 持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。 (confidence:0.8)
+    - [game/leduc] 翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。 (confidence:0.7)
+    
+    [可用技能]
+    ## leduc-postflop-pair: 翻牌后成对加注
+    ---
+    name: leduc-postflop-pair
+    description: 翻牌后成对加注
+    domain: game/leduc
+    relevance_domain: game/leduc
+    ---
+    # 翻牌后成对加注
+    
+    公共牌与手牌配对时，你有最高牌型。
+    max 2 raises per round，尽量打满加注。每次加注4筹码。
+    
+    ## 对手信号
+    - 对手call → 对手可能也有较高单张
+    - 对手fold → 收底池
+    - 对手re-raise → 评估对手是否可能已成对
+    ## leduc-preflop-raise: 翻牌前加注策略
+    ---
+    name: leduc-preflop-raise
+    description: 翻牌前加注策略
+    domain: game/leduc
+    relevance_domain: game/leduc
+    ---
+    # 翻牌前加注策略
+    
+    持有K时强制加注，持有Q时根据对手行为判断，持有J时倾向call观察。
+    加注迫使弱牌fold或支付更高代价看公共牌。
+    
+    ## 决策树
+    - K → raise
+    - Q → 对手raise则fold，对手call则call
+    - J → call/fold，避免主动加注
+2026-06-03 15:27:12,488 |   user:
+    === Round: post-flop ===
+    Your card: J♠
+    Public card: Q♥
+    Your bet this round: 2
+    Opponent bet this round: 2
+    Total pot: 4
+    Legal actions: raise, fold, check
+    Choose:
+2026-06-03 15:27:52,237 | [Executor] action: check
+2026-06-03 15:27:52,238 | ── end Executor ──
+
+2026-06-03 15:27:52,240 | ══════ Step 3  [game/leduc] ══════
+2026-06-03 15:27:52,242 | ── Executor ──
+2026-06-03 15:27:52,242 |   context: l1=3 l2=3 l3=2
+2026-06-03 15:27:52,242 |   system:
+    [任务说明]
+    You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.
+    
+    Cards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.
+    2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.
+    
+    Pre-flop: call, raise(2 chips), or fold. Max 2 raises per round.
+    Post-flop: public card dealt. check/call, raise(4 chips), or fold.
+    
+    Pair (card matches public) beats no pair. Higher rank wins ties, then suit.
+    Output ONLY one word: call, raise, fold, or check.
+    
+    [行为准则]
+    - 面对不确定信息时优先搜索验证，不要直接假设答案
+    - 当同一种方法连续失败时，主动换策略而非坚持原路径
+    - 棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。避免因单局短期结果改变长期策略。
+    
+    [相关知识]
+    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
+    - [game/leduc] 持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。 (confidence:0.8)
+    - [game/leduc] 翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。 (confidence:0.7)
+    
+    [可用技能]
+    ## leduc-postflop-pair: 翻牌后成对加注
+    ---
+    name: leduc-postflop-pair
+    description: 翻牌后成对加注
+    domain: game/leduc
+    relevance_domain: game/leduc
+    ---
+    # 翻牌后成对加注
+    
+    公共牌与手牌配对时，你有最高牌型。
+    max 2 raises per round，尽量打满加注。每次加注4筹码。
+    
+    ## 对手信号
+    - 对手call → 对手可能也有较高单张
+    - 对手fold → 收底池
+    - 对手re-raise → 评估对手是否可能已成对
+    ## leduc-preflop-raise: 翻牌前加注策略
+    ---
+    name: leduc-preflop-raise
+    description: 翻牌前加注策略
+    domain: game/leduc
+    relevance_domain: game/leduc
+    ---
+    # 翻牌前加注策略
+    
+    持有K时强制加注，持有Q时根据对手行为判断，持有J时倾向call观察。
+    加注迫使弱牌fold或支付更高代价看公共牌。
+    
+    ## 决策树
+    - K → raise
+    - Q → 对手raise则fold，对手call则call
+    - J → call/fold，避免主动加注
+2026-06-03 15:27:52,243 |   user:
+    === Round: post-flop ===
+    Your card: J♠
+    Public card: Q♥
+    Your bet this round: 2
+    Opponent bet this round: 6
+    Total pot: 8
+    Legal actions: call, raise, fold
+    Choose:
+2026-06-03 15:28:11,577 | [Executor] action: fold
+2026-06-03 15:28:11,577 | ── end Executor ──
+
