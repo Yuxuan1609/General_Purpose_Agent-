@@ -14,10 +14,13 @@ class TaskObservation:
                  Populated by comm layer.
         history: Past interactions. None = history not needed for this task type.
                  When present, already trimmed by comm layer.
+        session: Session context {id, datetime, task_type, meta_hash}.
+                 Populated by comm layer. Used by learning pipeline.
     """
     meta: dict = field(default_factory=dict)
     state: dict = field(default_factory=dict)
     history: list | None = None
+    session: dict | None = None
 
 
 @dataclass

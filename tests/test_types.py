@@ -8,6 +8,7 @@ class TestTaskObservation:
         assert obs.meta == {}
         assert obs.state == {}
         assert obs.history is None
+        assert obs.session is None
 
     def test_with_history(self):
         obs = TaskObservation(history=[{"role": "agent", "action": "33"}])
@@ -19,6 +20,11 @@ class TestTaskObservation:
         obs.meta["enable_learning"] = True
         assert obs.meta["domain"] == "game/doudizhu"
         assert obs.meta["enable_learning"] is True
+
+    def test_session_field(self):
+        obs = TaskObservation(session={"id": "s1", "task_type": "game/doudizhu"})
+        assert obs.session["id"] == "s1"
+        assert obs.session["task_type"] == "game/doudizhu"
 
 
 class TestExecutionRecord:

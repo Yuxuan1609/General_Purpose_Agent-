@@ -35,14 +35,15 @@ L(0.5+1) 内部：
 
 ### 3.1 各层 LLM 调用
 
-每层 Manager **独立决定**是否及何时调用 LLM。各层 LLM 调用之间没有依赖关系（不等待其他层的 LLM 结果）。
+下层 Manager 在上层 QUERY 到达后才可能调用 LLM。调用决策由 chain 驱动（上层决定是否引发下层处理），但不阻塞上层——上层发出 QUERY 后不等待下层 LLM 完成才继续。
 
-| 层 | LLM 调用的典型场景 |
-|----|-------------------|
-| L(0.5+1).Manager | 反思分析 (原有 MetaDriver::run_reflection) |
-| L2.Manager | L2→L3 编译判断：知识卡片量大时由 LLM 辅助提取模式 |
-| L3.Manager | Skill 创建/编辑：LLM 生成 SKILL.md 内容 |
-| Executor | 最终任务执行决策：组装各层结果 → prompt → LLM.chat() → parse action |
+**Phase 1（Execute）**：仅 Executor 调用 LLM。层 Manager 为确定性逻辑（规则注入、卡片检索、技能匹配）。
+
+**Phase 2（Reflect）**：各层 Manager/ReflectionAgent 可能调用 LLM。典型场景待细化。
+
+### 3.2 提示词集中配置
+
+所有 LLM prompt 模板统一存放在 `config/prompts/` 目录下，按层/角色分文件（如 `executor_system.yaml`、`l0_5_1_reflect.yaml`）。避免散落在各层代码中。Phase 1 的 Executor 提示词为硬编码占位，Phase 2 迁移到集中配置。
 
 ## 4. Execute 阶段通信流程
 
@@ -91,24 +92,50 @@ L(0.5+1) 内部：
 ```python
 @dataclass
 class TaskObservation:
-    meta:    dict       # 任务元信息：角色、目标、领域 (通信层填充)
-    state:   dict       # 当前局面：任务特异性 (通信层填充)
-    history: list | None  # None = 不需要历史, [...] = 已裁剪好的历史 (通信层决定)
+    meta:    dict              # 任务元信息：角色、目标、领域 (通信层填充)
+    state:   dict              # 当前局面：任务特异性 (通信层填充)
+    history: list | None       # None = 不需要历史, [...] = 已裁剪好的历史 (通信层决定)
+    session: dict | None = None # 所属 Session {id, datetime, task_type, meta_hash} (通信层填充)
 ```
 
 - `build_prompt(env_input) → TaskObservation` 由通信层（脚本）实现
 - history 管理由通信层负责——每个任务自行决定保留多少历史、如何裁剪
 - Agent 层只消费 TaskObservation，往 `meta` 上叠加各层信息
 
-## 6. Tool Use 解耦
+## 6. Tool Use 解耦与集中配置
 
 工具不绑定特定层。每个工具声明其可用层级（`allowed_layers`），ToolRegistry 按层过滤。
 
+工具定义集中在 `config/tools.yaml`：
+```yaml
+tools:
+  skills_list:
+    handler: l3.skills_list
+    allowed_layers: [l3]
+    description: "列出所有已注册技能"
+  terminal:
+    handler: tools.terminal
+    allowed_layers: [l2, l0_5_1, executor]
+    description: "命令行执行"
+  todo:
+    handler: tools.todo
+    allowed_layers: [executor, l0_5_1]
+    description: "子任务跟踪"
+  web_search:
+    handler: tools.web_search
+    allowed_layers: [l2, l0_5_1, executor]
+    description: "网络搜索"
+```
+
+工具归属逻辑（按本质决定可用层）：
 | 工具 | 可用层 | 理由 |
 |------|--------|------|
 | `skills_list/view/manage` | L3 | 技能管理是 L3 本职 |
 | `terminal` | L2+, Executor | 知识验证和执行需要 |
 | `todo` | Executor, L(0.5+1) | 任务规划在边界 |
+| `web_search` | L2+, Executor | 所有需要外部信息的层 |
+
+Phase 1 不迁移到集中配置，维持代码内注册。Phase 2 迁移。
 
 ## 7. Executor 存档格式
 
@@ -124,121 +151,45 @@ class ExecutionRecord:
     result:        Any        # 环境返回的 reward / outcome
 ```
 
-## 8. Session 与 Task Decomposer
+## 8. Session 与 Task Decomposer (概述)
 
-### 8.1 Session
+> 详细设计见 `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md`
 
-通信层（脚本）负责定义 Session 边界。一个 Session 包含至少一个完整学习单元。
+通信层（脚本）定义 Session 边界。Decomposer 将 Session 拆解为 Task，现阶段用规则做特殊处理（DouZero = 不拆）。
 
-Session 字段（通信层附带）：
-```python
-session = {
-    "id":         str,    # 唯一标识
-    "datetime":   str,    # ISO 时间戳
-    "task_type":  str,    # 如 "game/doudizhu", "coding/session"
-    "meta_hash":  str,    # hash of {domain, task_type, position, ...} — 用于快速去重/匹配
-}
-# 其余信息由 AgentRuntime 从原始日志解析
-```
+Phase 1 不实现 Decomposer，Executor 直接用通信层提供的 TaskObservation。
 
-不同任务类型的 Session-LearningUnit 映射：
+## 9. 学习管道 (概述)
 
-| task_type | 1 Session | 1 Task | Decomposer 行为 |
-|-----------|-----------|--------|-----------------|
-| `game/doudizhu` | 1 局游戏 | 1 局游戏 | stub，不拆 |
-| `game/leduc` | 1 局游戏 | 1 局游戏 | stub，不拆 |
-| `coding/session` | 1 段对话 | N 个意图片段 | LLM 切分 |
+> 详细设计见 `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md`
 
-### 8.2 Task Decomposer
+核心概念：
+- Task 附带 `meta.enable_learning`（手动开启）
+- Execute 结束后写 `ExecutionRecord` 到 `pending/`
+- 按 Domain 分组积攒，达标触发 Reflect
+- Reflect 完成后归档到 `learned/{domain}/`（不删除）
 
-独立模块 `core/orchestrator/task_decomposer.py`。现阶段用规则做 special case，终极目标是 LLM 通用化处理。
+Phase 1 仅实现 pending/ 写入（Executor._write_pending），不实现触发/归档。
 
-```python
-class TaskDecomposer:
-    def decompose(self, session: dict, raw_log: Path) -> list[Task]:
-        strategy = self._select_strategy(session)
-        return strategy(session, raw_log)
+## 10. Reflect 阶段 (概述)
 
-    def _select_strategy(self, session):
-        # 现阶段: task_type → 规则函数
-        # 未来: LLM 判断策略
-```
+> 详细设计见 `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md`
 
-## 9. 学习触发与归档
+核心流程：
+1. Executor（Reflect 模式）审核 pending/ 中 NOTIFY
+2. 按层分发问题
+3. 每层 ReflectionAgent 递归判责修复
+4. 归档到 learned/
 
-### 9.1 待学习文件夹
+Phase 1 不实现 Reflect。全局 Reflect 链路与每层反思编排链路分离。
 
-Task 附带 `meta.enable_learning`（手动开启）。Executor 每次 execute 后将 `ExecutionRecord` 写入 `data/learning/pending/`。文件名格式 `{session_id}_{step_index}.json`，避免同 session 内多次 action 相互覆盖。
-
-通信层（脚本）在 Session 结束时将原始执行日志写入 `data/learning/raw/`，供 Decomposer 使用。DouZero 类简单任务不需要 raw log（Decomposer 为 stub）。
-
-### 9.2 触发条件
-
-每次 Execute 结束后 Executor 检查 `pending/` 积攒量。按 **Domain 分组**评估：
-
-```
-score(domain) = task_count_weight × count + complexity_weight × total_tokens / baseline_tokens
-```
-
-当 `score(domain) ≥ threshold` 时触发该 domain 的 Reflect。
-`baseline_tokens` 和两个 `weight`、`threshold` 在 config.yaml 可配。
-
-优先按 domain 检查是否已有映射/处理好的 domain，避免重复处理。
-
-### 9.3 归档结构
-
-```
-data/learning/
-  pending/              ← 待学习 (execution records)
-    {session_id}.json
-  learned/              ← 已学习 (Reflect 完成后移入，不删除)
-    {domain}/
-      {session_id}.json
-```
-
-## 10. Reflect 阶段
-
-### 10.1 触发方式
-
-每次 Execute 结束后 Executor 检查 `pending/` 积攒量。按 Domain 分组评估评分，达标则触发该 domain 的 Reflect。
-
-Reflect 由 Executor 兼任协调（不同阶段、不同行为，但同一实体）。全局 Reflect 链路与每层的反思编排链路分离。
-
-### 10.2 整体流程
-
-**全局 Reflect（Coordinator = Executor）：**
-1. 读取 `pending/` 中目标 domain 的所有 `ExecutionRecord`
-2. 审核每层的 NOTIFY 是否有潜在问题（从宽）
-3. 将有问题的 NOTIFY 按层分发回各层
-
-**每层 Reflect（ReflectionAgent 主导，与全局链路分离）：**
-```
-L(0.5+1).ReflectionAgent 收到分发的问题
-  │
-  ├─ 判断: 自己是根因 → 通过 Manager 更新本层
-  │
-  └─ 判断: 可能是 L2 的问题
-       │ QUERY: "调查这个问题"
-       ▼
-     L2.ReflectionAgent
-       │
-       ├─ 自己的问题 → 更新 + RESPONSE
-       └─ 可能是 L3 的问题
-            │ QUERY
-            ▼
-          L3.ReflectionAgent → 检查 → RESPONSE ← 沿链返回
-```
-
-通信格式使用 LayerMessage（A2），`type=QUERY/RESPONSE`，subtype 标识反思用途。
-
-### 10.3 每层 Agent 列表
-
+每层 Agent 列表（Phase 2 完整实现）：
 | Agent | 职责 | 类型 |
 |-------|------|------|
-| Manager | 本层局部编排者、核心数据管理、可能调 LLM | 混合 |
-| UpwardComm | 与上一层通信（QUERY/RESPONSE） | 确定性 |
-| DownwardComm | 与下一层通信（QUERY/RESPONSE） | 确定性 |
-| ReflectionAgent | 反思编排：判责、触发下层反思对话、通过 Manager 写回结果 | 混合（可调 LLM） |
+| Manager | 本层局部编排者、核心数据管理 | 混合 |
+| UpwardComm | 与上一层通信 | 确定性 |
+| DownwardComm | 与下一层通信 | 确定性 |
+| ReflectionAgent | 反思编排：判责→修复（Phase 2） | 混合 |
 
 ## 11. 设计原则保留
 

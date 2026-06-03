@@ -9,7 +9,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `TaskObservation` | `@dataclass(meta:dict, state:dict, history:list\|None)` | 环境观测的统一格式。meta=任务元信息, state=当前局面, history=None 表示不需要 | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.process() |
+| `TaskObservation` | `@dataclass(meta:dict, state:dict, history:list\|None, session:dict\|None)` | 环境观测的统一格式。session={id,datetime,task_type,meta_hash} | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.process() |
 | `ExecutionRecord` | `@dataclass(session:dict, observation:dict, notify_layers:dict, action:Any, result:Any)` | Execute 后的存档记录，写入 data/learning/pending/ | Executor._write_pending() | ReflectCoordinator.audit(), ThresholdScorer |
 | `Task.enable_learning` | `bool = False` | 学习开关，手动开启。True 时 Executor 写 pending/ | Task 定义 | Executor.execute() |
 
