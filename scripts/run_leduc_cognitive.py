@@ -53,6 +53,14 @@ def _setup_logging():
         fh.setFormatter(fmt)
         lg.addHandler(fh)
 
+    # Game summary log
+    game_logger = logging.getLogger("leduc_cognitive")
+    game_logger.setLevel(logging.DEBUG)
+    game_fh = logging.FileHandler(str(log_dir / "game.log"), encoding="utf-8")
+    game_fh.setLevel(logging.DEBUG)
+    game_fh.setFormatter(fmt)
+    game_logger.addHandler(game_fh)
+
     return log_dir
 
 
@@ -265,17 +273,22 @@ def main():
     win_rate = wins / args.episodes
     avg_steps = sum(step_counts) / len(step_counts)
 
-    print()
-    print("=" * 55)
-    print("  Leduc Hold'em — Cognitive Agent Results")
-    print("=" * 55)
-    print(f"  Episodes:    {args.episodes}")
-    print(f"  Total Score: {total_reward:+.1f} chips")
-    print(f"  Avg/Ep:      {avg_reward:+.2f} chips")
-    print(f"  Win Rate:    {win_rate*100:.0f}% ({wins}/{args.episodes})")
-    print(f"  Avg Steps:   {avg_steps:.1f}")
-    print(f"  Log:         {log_dir / 'game.log'}")
-    print("=" * 55)
+    summary = [
+        "",
+        "=" * 55,
+        "  Leduc Hold'em — Cognitive Agent Results",
+        "=" * 55,
+        f"  Episodes:    {args.episodes}",
+        f"  Total Score: {total_reward:+.1f} chips",
+        f"  Avg/Ep:      {avg_reward:+.2f} chips",
+        f"  Win Rate:    {win_rate*100:.0f}% ({wins}/{args.episodes})",
+        f"  Avg Steps:   {avg_steps:.1f}",
+        f"  Log:         {log_dir / 'game.log'}",
+        "=" * 55,
+    ]
+    for line in summary:
+        print(line)
+        logger.info(line)
 
 
 if __name__ == "__main__":

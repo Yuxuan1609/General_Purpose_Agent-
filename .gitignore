@@ -6,6 +6,7 @@ tw_logs/
 tw_games/
 *game_s42*
 logs/
+!logs/leduc_cognitive/
 baselines/
 DouZero-1.1.0/
 douzero_checkpoints/
