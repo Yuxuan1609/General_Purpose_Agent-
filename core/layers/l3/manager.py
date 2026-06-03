@@ -8,8 +8,9 @@ from core.layers.base import LayerManager
 class L3Manager(LayerManager):
     """L3 Manager — wraps SkillLayer, matches skills to task domain."""
 
-    def __init__(self, skill_layer, downstream: LayerManager | None = None):
-        super().__init__("l3", downstream)
+    def __init__(self, skill_layer, downstream: LayerManager | None = None,
+                 upward=None, downward=None):
+        super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
 
     def process(self, data: Any) -> dict:

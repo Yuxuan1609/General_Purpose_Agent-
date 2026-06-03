@@ -2,10 +2,12 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
 from core.types import TaskObservation, ExecutionRecord
+from core.layer_message import LayerMessage, MessageType
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,13 @@ class Executor:
             context: dict      - assembled context sent to LLM
             notify_layers: dict - {layer_name: payload} from all layers
         """
-        self._root.query(obs)
+        trace_id = uuid.uuid4().hex[:12]
+        msg = LayerMessage(
+            source="executor", target=self._root.name,
+            type=MessageType.QUERY,
+            payload=obs, trace_id=trace_id,
+        )
+        self._root.query(msg, trace_id)
         notify_layers = self._root.collect_notify()
 
         context = self._assemble_context(obs)

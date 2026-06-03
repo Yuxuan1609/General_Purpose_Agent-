@@ -13,8 +13,9 @@ class L0_5_1Manager(LayerManager):
     """
 
     def __init__(self, meta_driver, philosophy, auxiliary_llm=None,
-                 downstream: LayerManager | None = None):
-        super().__init__("l0_5_1", downstream)
+                 downstream: LayerManager | None = None,
+                 upward=None, downward=None):
+        super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._meta = meta_driver
         self._philosophy = philosophy
         self._aux_llm = auxiliary_llm

@@ -8,8 +8,9 @@ from core.layers.base import LayerManager
 class L2Manager(LayerManager):
     """L2 Manager — wraps FlexibleKnowledge, retrieves top-k active cards."""
 
-    def __init__(self, knowledge, downstream: LayerManager | None = None):
-        super().__init__("l2", downstream)
+    def __init__(self, knowledge, downstream: LayerManager | None = None,
+                 upward=None, downward=None):
+        super().__init__("l2", downstream, upward=upward, downward=downward)
         self._knowledge = knowledge
 
     def process(self, data: Any) -> dict:

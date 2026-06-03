@@ -36,14 +36,21 @@
 | `Executor._build_user_prompt` | `(context:dict) → str` | 从 context.state 拼 user prompt | _call_llm() | — |
 | `Executor._write_pending` | `(obs, notify_layers, result) → None` | enable_learning=True 时写 ExecutionRecord 到 pending/ | execute() | 文件系统 |
 
+## core/layers/comm.py (Phase 1.5)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
+| `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
+
 ## core/layers/base.py (NEW in Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `LayerManager` | `__init__(name:str, downstream:LayerManager\|None)` | ABC，所有层 Manager 的基类 | build_chain() | 子类 |
+| `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
-| `LayerManager.query` | `(data:Any) → None` | QUERY 入口：process 本层 → 传下游 | 上层 Manager / Executor | process(), 下游.query() |
+| `LayerManager.query` | `(msg:LayerMessage\|Any, trace_id) → None` | QUERY 入口：通过 UpwardComm 解包 → process → DownwardComm 包装 → 下游 | Executor / 上层 | process(), downstream.query() |
 | `LayerManager.collect_notify` | `() → dict{layer_name: payload}` | 收集本层+所有下游的 NOTIFY | Executor.execute() | notify(), 下游.collect_notify() |
 | `LayerManager.apply_update` | `(key:str, value) → None` | Phase 2: ReflectionAgent 修复时写回数据 | ReflectionAgent.fix() | 子类实现 |
 | `ReflectionAgent` | `__init__(layer_name, manager, downstream)` | Phase 2: 反思编排 Agent ABC | ReflectCoordinator.run_reflect() | investigate(), fix(), query_downstream() |

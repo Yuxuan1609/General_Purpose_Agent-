@@ -1,4 +1,4 @@
-"""Layer package — three-layer cognitive chain."""
+"""Layer package — three-layer cognitive chain with Comm Agents (A2)."""
 
 from core.layers.base import LayerManager
 from core.layers.l0_5_1.manager import L0_5_1Manager
@@ -10,12 +10,22 @@ def build_chain(meta_driver, philosophy, flexible_knowledge, skill_layer,
                 auxiliary_llm=None) -> L0_5_1Manager:
     """Build the three-layer chain bottom-up.
 
+    Each layer is wired with UpwardComm + DownwardComm for LayerMessage protocol.
     Returns the root (L0.5+1 Manager) which has L2 and L3 wired in.
     """
-    l3 = L3Manager(skill_layer)
-    l2 = L2Manager(flexible_knowledge, downstream=l3)
+    from core.layers.l3.upward_comm import UpwardComm as L3Upward
+    from core.layers.l3.downward_comm import DownwardComm as L3Downward
+    from core.layers.l2.upward_comm import UpwardComm as L2Upward
+    from core.layers.l2.downward_comm import DownwardComm as L2Downward
+    from core.layers.l0_5_1.upward_comm import UpwardComm as L1Upward
+    from core.layers.l0_5_1.downward_comm import DownwardComm as L1Downward
+
+    l3 = L3Manager(skill_layer, upward=L3Upward(), downward=L3Downward())
+    l2 = L2Manager(flexible_knowledge, downstream=l3,
+                   upward=L2Upward(), downward=L2Downward())
     l1 = L0_5_1Manager(meta_driver, philosophy, auxiliary_llm=auxiliary_llm,
-                       downstream=l2)
+                       downstream=l2,
+                       upward=L1Upward(), downward=L1Downward())
     return l1
 
 

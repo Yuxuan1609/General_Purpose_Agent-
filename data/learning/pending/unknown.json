@@ -1,0 +1,46 @@
+{
+  "session": {},
+  "observation": {
+    "meta": {
+      "domain": "game/leduc",
+      "role": "Player 0",
+      "enable_learning": true,
+      "l1_rules": [
+        "面对不确定信息时优先搜索验证，不要直接假设答案",
+        "当同一种方法连续失败时，主动换策略而非坚持原路径"
+      ],
+      "l2_cards": [],
+      "l3_skills": []
+    },
+    "state": {
+      "system_prompt": "You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.\n\nCards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.\n2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.\n\nPre-flop: call, raise(2 chips), or fold. Max 2 raises per round.\nPost-flop: public card dealt. check/call, raise(4 chips), or fold.\n\nPair (card matches public) beats no pair. Higher rank wins ties, then suit.\nOutput ONLY one word: call, raise, fold, or check.",
+      "prompt": "=== Round: pre-flop ===\nYour card: K♠\nPublic card: not yet dealt\nYour bet this round: 4\nOpponent bet this round: 6\nTotal pot: 10\nLegal actions: call, fold\nChoose:",
+      "hand": "SK",
+      "public_card": "None",
+      "legal_actions": [
+        "call",
+        "fold"
+      ],
+      "round": "pre-flop",
+      "my_chips": 4,
+      "pot": 10
+    },
+    "history": null
+  },
+  "notify_layers": {
+    "l0_5_1": {
+      "status": "ok",
+      "layer": "l0_5_1"
+    },
+    "l2": {
+      "status": "ok",
+      "layer": "l2"
+    },
+    "l3": {
+      "status": "ok",
+      "layer": "l3"
+    }
+  },
+  "action": "call",
+  "result": null
+}
