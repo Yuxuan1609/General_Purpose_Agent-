@@ -1,8 +1,11 @@
 from __future__ import annotations
 from typing import Any
+import logging
 from core.task import Domain
 from core.types import TaskObservation
 from core.layers.base import LayerManager
+
+logger = logging.getLogger("l3")
 
 
 class L3Manager(LayerManager):
@@ -27,6 +30,9 @@ class L3Manager(LayerManager):
             {"name": s.name, "description": s.description, "domain": s.domain.path}
             for s in matched
         ]
+        logger.debug("[L3] received: domain=%s", domain_path)
+        logger.debug("[L3] response: %d skills (names: %s)",
+                     len(matched), [s.name for s in matched])
         return {"status": "ok", "skills_matched": len(matched)}
 
     def notify(self) -> Any:

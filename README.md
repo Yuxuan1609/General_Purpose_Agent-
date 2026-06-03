@@ -39,6 +39,8 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 - **Manager**: 各层业务逻辑，只消费业务 dict
 - **Executor**: 独立决策者，组装各层 NOTIFY → prompt → LLM → action
 
+> **Note**: 当前层间通信为**单次 QUERY-RESPONSE** 模式。后续可能改为**对话式**交互——允许多轮往返，如同层间"讨论"直到确认信息充分。此变更将影响通信协议和日志格式。
+
 ### 事件循环（Agent Loop）
 
 > *Phase 1 + 1.5 重构后：星型通信已替换为链式相邻传递（A1-A4）。Executor 作为执行入口。*

@@ -78,16 +78,17 @@ class Executor:
         l1_count = len(context.get("meta", {}).get("l1_rules", []))
         l2_count = len(context.get("meta", {}).get("l2_cards", []))
         l3_count = len(context.get("meta", {}).get("l3_skills", []))
-        logger.info("LLM call | l1_rules=%d l2_cards=%d l3_skills=%d", l1_count, l2_count, l3_count)
-        logger.debug("[SYSTEM PROMPT]\n%s", system)
-        logger.debug("[USER PROMPT]\n%s", user)
+        logger.debug("[Executor] ctx: l1_rules=%d l2_cards=%d l3_skills=%d",
+                     l1_count, l2_count, l3_count)
+        logger.debug("[Executor] system_prompt:\n%s", system)
+        logger.debug("[Executor] user_prompt:\n%s", user)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
         resp = self._llm.chat(messages=messages)
         action_text = resp.text if hasattr(resp, 'text') else str(resp)
-        logger.debug("[LLM RESPONSE]\n%s", action_text)
+        logger.info("[Executor] action: %s", action_text)
         return action_text
 
     def _build_system_prompt(self, context: dict) -> str:
