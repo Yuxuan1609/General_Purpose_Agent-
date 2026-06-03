@@ -19,15 +19,19 @@
 
 ## 2. 事件循环（Agent Loop）
 
-| README 中的阶段 | 代码位置 |
+**新架构（Phase 1 + 1.5）**：Execute 入口为 `Executor.execute()`，通过 LayerMessage 链驱动各层。
+
+| 阶段 | 代码位置 |
 |---|---|
-| ① PRE-LLM：注入 L1 规则 + top-5 L2 卡片 + L3 技能 | `core/layer_context.py` → `LayerContext.build_context(task)` 方法 |
-| ② LLM 调用 | `core/agent_loop.py` → `AgentLoop.run(task)` 内 `while` 循环中 `resp = self.llm_client.chat(messages, tools=tool_defs)` |
-| ③ PRE-TOOL：危险过滤 | `core/layer_context.py` → `LayerContext.filter_tool_calls(tool_calls)` → 委托给 `MetaDriver.filter_dangerous()` |
-| ④ 工具分发 | `core/agent_loop.py` → `ToolRegistry.dispatch(...)` 调用 |
-| ⑤ POST-TOOL：更新 L2 激活值 | `core/layer_context.py` → `LayerContext.on_tool_results(...)` → `self.l2.boost(...)` |
-| ⑥ COMPLETION 检查 | `core/layer_context.py` → `LayerContext.check_completion(...)` → 委托给 `MetaDriver.check_completion(...)` |
-| POST-TASK：反思 + 学习闭环 | `core/layer_context.py` → `LayerContext.post_task(task)` 方法 |
+| Executor 入口 | `core/executor.py` → `Executor.execute()` — 包装 LayerMessage(QUERY)，调用 `layer_root.query()` |
+| L(0.5+1) 处理 | `core/layers/l0_5_1/manager.py` → `L0_5_1Manager.process()` — 注入 L1 规则 |
+| L2 处理 | `core/layers/l2/manager.py` → `L2Manager.process()` — 检索 top-5 知识卡片 |
+| L3 处理 | `core/layers/l3/manager.py` → `L3Manager.process()` — 匹配领域技能 |
+| NOTIFY 收集 | `core/layers/base.py` → `LayerManager.collect_notify()` — 链式收集各层通知 |
+| Prompt 组装 | `core/executor.py` → `Executor._build_system_prompt()/_build_user_prompt()` |
+| LLM 调用 | `core/executor.py` → `Executor._call_llm()` |
+
+**旧架构（逐步淘汰）**：`core/agent_loop.py` → `AgentLoop.run()` while 循环 + `core/layer_context.py` 桥接。
 
 ---
 
@@ -37,40 +41,29 @@
 
 | README 中的概念 | 代码位置 |
 |---|---|
-| A1-1: 相邻传递规则 | 待实现；当前代码中 LayerContext 为中心的星型通信违反了此规则 |
-| A1-2: Orchestrator 角色 | `core/agent_loop.py` → `AgentLoop` 类（当前版本 Orchestrator 与事件循环合一） |
-| A1-3: 违规点 — build_context 跨层访问 | `core/layer_context.py:17-46` → `LayerContext.build_context()` 内 `self.l1.active_rules + self.l2.active_cards + self.l3.matching_skills` |
-| A1-3: 违规点 — post_task 跨层操作 | `core/layer_context.py:58-93` → `LayerContext.post_task()` 内 `meta→l2→l1→l3` 直接调用链 |
-| A1-3: 违规点 — build_system_prompt 读 L1 | `core/agent_loop.py:104-125` → `_build_system_prompt()` 内 `self.layers.l1.all_rules()` |
-| A1: 当前桥接层（星型枢纽） | `core/layer_context.py` → `LayerContext` 类（需重构为链式转发） |
+| A1-1: 相邻传递规则 | ✅ 已实现。`core/layers/base.py` → `LayerManager.query()` 链式传递，Executor 通过 `build_chain()` 构建 `L(0.5+1)→L2→L3` 链 |
+| A1-2: 旧桥接层（星型枢纽 — 逐步淘汰） | `core/layer_context.py` → `LayerContext` 类（新架构中已不再作为主要通信路径） |
+| A1-3: 新架构 EXECUTE 入口 | `core/executor.py` → `Executor.execute()` → 包装 LayerMessage(QUERY) → `layer_root.query()` |
+| A1-3: 新架构链式构建 | `core/layers/__init__.py` → `build_chain()` 自底向上构建三层 Management + Comm Agent |
 
 ### 架构原则 A2 — 统一层间消息信封
 
 | README 中的概念 | 代码位置 |
 |---|---|
-| A2-1: `LayerMessage` 定义 | 待创建 → `core/layer_message.py`（新模块，独立于各层实现） |
-| A2-2: `MessageType` 枚举（6 种基础类型） | 待创建 → `core/layer_message.py` → `class MessageType(Enum)` |
-| A2-3: `subtype` 字段（层级定制预留） | 待创建 → `core/layer_message.py` → `LayerMessage.subtype: str` |
-| A2-4: 当前无统一格式的体现 | `core/meta_driver.py:235` → `L1ProposalProxy` vs `core/philosophy.py:28` → `L1Proposal`（同名概念两种类）、`core/layer_context.py:73-74` → `dict` 格式的 knowledge_updates |
+| A2-1: `LayerMessage` 定义 | `core/layer_message.py` → `LayerMessage(source, target, type, payload, trace_id, subtype, timestamp, metadata)` |
+| A2-2: `MessageType` 枚举 | `core/layer_message.py` → `MessageType(QUERY, RESPONSE, PROPOSAL, APPROVAL, REJECTION, NOTIFY)` |
+| A2-3: Comm Agent 协议处理 | `core/layers/comm.py` → `UpwardComm.receive()/wrap_response()/wrap_notify()` + `DownwardComm.receive()/wrap_query()` |
+| A2-4: Executor 使用 LayerMessage | `core/executor.py:45-48` → `execute()` 中构造 `LayerMessage(QUERY)` 并传递 `trace_id` |
 
 ### 架构原则 A3 — 层内 Agent 分工与信息隔离
 
 | README 中的概念 | 代码位置/现状 |
 |---|---|
-| A3: LayerManager Agent 角色 | 当前映射：`Philosophy` 类 ≈ L1 Manager, `FlexibleKnowledge` 类 ≈ L2 Manager, `SkillLayer` 类 ≈ L3 Manager, `MetaDriver` 类 ≈ L0.5 Manager |
-| A3: UpwardComm / DownwardComm Agent | **待新建**：当前不存在通讯 Agent，LayerContext 以星型枢纽代替了所有通讯逻辑 |
-| A3: 确定性 Agent 示例 | `core/flexible_knowledge.py:46-65` → `compute_activation()` 和 `_domain_match_score()`（纯数学计算）；`core/skill_layer.py:51-65` → `match()`（模式匹配） |
-| A3: LLM Agent 示例 | `core/meta_driver.py:174-199` → `_llm_reflection()`（反思分析）；`core/skill_layer.py:138-164` → `propose_and_create()`（L2→L3 编译） |
-| A3: 信息隔离违反点 | 见 A1 违规表 — LayerContext 直接访问所有层数据，破坏了"每层只暴露最小信息集"原则 |
-| A3: 当前层内结构 | 每层当前是**单体类**（如 `Philosophy` 同时承担管理+通讯），需拆分为 Manager + 2 Comm Agent |
-
-**Agent 依赖图**（A1+A3 支撑数据结构）：
-
-| README 中的概念 | 代码位置/现状 |
-|---|---|
-| 图结构定义 | **待新建** → `core/agent_graph.py`（有向图，节点=Agent，边=通信通道） |
-| 静态路由表 | 待实现 → 从图推导的 `ROUTES` dict，Agent 发消息只指定 direction+type，目标由图解析 |
-| 影响范围分析 | 待实现 → BFS 从任意节点出发，获取受改动影响的所有 Agent 集合 |
+| A3: Manager Agent | ✅ `core/layers/l0_5_1/manager.py` → `L0_5_1Manager`, `core/layers/l2/manager.py` → `L2Manager`, `core/layers/l3/manager.py` → `L3Manager` |
+| A3: UpwardComm / DownwardComm Agent | ✅ 已实现。`core/layers/comm.py` 基类 + 每层 `upward_comm.py`/`downward_comm.py`。确定性协议处理，不涉及 LLM |
+| A3: Manager 与 Comm Agent 分离 | ✅ Manager 只处理业务 dict，Comm Agent 处理 LayerMessage 包装/解包 |
+| A3: 确定性 Agent 示例 | `core/flexible_knowledge.py:46-65` → `compute_activation()` 和 `_domain_match_score()`；`core/skill_layer.py:51-65` → `match()` |
+| A3: 信息隔离状态 | ✅ 新架构中每层 Manager 通过 Comm Agent 相邻通信，不跨层访问数据 |
 | 启动拓扑排序 | 待实现 → 图拓扑排序驱动 L0.5→L3 逐层初始化 / 反向关闭 |
 | 消息流追踪 | 需配合 A2 的 `trace_id` — 图回溯异常消息路径，定位问题节点 |
 | 单节点最大出度 | 理论值 ≤ 4（同层 Manager + 邻居 Comm Agent × 2 方向），稀疏图保证可控 |

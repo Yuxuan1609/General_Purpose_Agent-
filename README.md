@@ -4,36 +4,58 @@
 
 ## 架构概览
 
+L0.5 和 L1 合并为 **L(0.5+1)**，三层链式通信：
+
 ```
-L0.5  元驱动层（Meta-Driver）        ← 硬编码触发器 + 验证器，Agent 不可修改
-L1    行为准则层（Philosophy）         ← 注入系统提示词的可演化行为规则；Agent 可修改，需 L0.5 审批
-L2    柔性知识层（FlexibleKnowledge）  ← 概率性知识卡片，带置信度/激活值/衰减；领域感知
-L3    半静态技能层（SkillLayer）       ← SKILL.md 格式的过程性记忆；支持 L2→L3 编译
-L4    静态知识库                       ← Phase 1 暂缓，已预留扩展点
+AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
+                              ↑ 链式相邻传递 (A1)
 ```
+
+| 层 | 原对应 | 职责 |
+|----|--------|------|
+| **L(0.5+1)** | L0.5 + L1 | 不可变宪法（触发器/验证器/安全过滤）+ 可演化行为规则 |
+| **L2** | FlexibleKnowledge | 概率性知识卡片，带置信度/激活值/衰减；领域感知 |
+| **L3** | SkillLayer | SKILL.md 格式的过程性记忆；支持 L2→L3 编译 |
+
+### 通信协议 (Phase 1.5)
+
+```
+每步动作:
+  AgentRuntime ──TaskObservation──→ Executor
+     │  LayerMessage(QUERY)                │
+     ▼                                     │
+  L(0.5+1).UpwardComm → Manager → DownwardComm
+     │  LayerMessage(QUERY)                │  ← LayerMessage(NOTIFY)
+     ▼                                     │
+  L2.UpwardComm → Manager → DownwardComm   │
+     │  LayerMessage(QUERY)                │
+     ▼                                     │
+  L3.UpwardComm → Manager                  │
+     │                                     │
+     链式 RESPONSE 返回 ────────────────────┘
+```
+
+- **Comm Agent** (UpwardComm/DownwardComm): 确定性协议处理，不涉及 LLM
+- **Manager**: 各层业务逻辑，只消费业务 dict
+- **Executor**: 独立决策者，组装各层 NOTIFY → prompt → LLM → action
 
 ### 事件循环（Agent Loop）
 
-> *Phase 1 重构后：Execute 和 Reflect 已分离为独立阶段。星型通信将在后续重构为链式相邻传递（A1-A4）。*
+> *Phase 1 + 1.5 重构后：星型通信已替换为链式相邻传递（A1-A4）。Executor 作为执行入口。*
 
 ```
-  ┌──────────────────────────────────────────────────┐
-  │  PHASE 1: EXECUTE (agent_loop.run)                │
-  │  while iteration < max_iterations:                │
-  │    ① PRE-LLM:   注入 L1 规则 + top-5 L2 卡片 +      │
-  │                  匹配的 L3 技能到用户消息              │
-  │    ② LLM 调用                                      │
-  │    ③ PRE-TOOL:  MetaDriver.filter_dangerous()     │
-  │    ④ 工具分发:  ToolRegistry.dispatch()             │
-  │    ⑤ POST-TOOL: 更新 L2 激活值，跟踪进展停滞          │
-  │    ⑥ COMPLETION: MetaDriver.check_completion()     │
-  │  ──────────────────────────────────────────────── │
-  │  PHASE 2: REFLECT & LEARN (agent_loop.reflect)    │
-  │    → MetaDriver.run_reflection() 反思分析           │
-  │    → 更新 L2 知识卡片（boost/penalize）               │
-  │    → 提议 L1 规则变更（经 L0.5 验证器审批）            │
-  │    → 检查 L2→L3 编译条件（≥3 张卡片，平均激活值 > 0.7）   │
-  └──────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────┐
+  │  PHASE 1: EXECUTE (Executor.execute)                │
+  │  Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3  │
+  │  各层 Manager.process() 富化 TaskObservation         │
+  │  RESPONSE 链返回 → 各层 NOTIFY → Executor 组装 prompt │
+  │  Executor 调用 LLM → parse action → AgentRuntime    │
+  │  ────────────────────────────────────────────────── │
+  │  enable_learning=True → ExecutionRecord → pending/   │
+  │  ────────────────────────────────────────────────── │
+  │  PHASE 2: REFLECT & LEARN (未实现)                   │
+  │  pending/ 积攒 → 阈值触发 → ReflectionAgent 递归判责   │
+  └────────────────────────────────────────────────────┘
 ```
 
 ## 设计原则
@@ -65,11 +87,12 @@ L4    静态知识库                       ← Phase 1 暂缓，已预留扩展
 
 **当前代码中违反此原则的已知点**（供后续重构参照）：
 
+> Phase 1 + 1.5 重构后，星型通信已替换为链式相邻传递。以下违规点为旧架构残留：
+
 | 违规点 | 位置 | 当前行为 | 目标行为 |
 |--------|------|----------|----------|
-| L0.5 通过 LayerContext 直接读 L2/L3 | `core/layer_context.py:build_context()` | 一次调用同时访问 L1+L2+L3 | L1 向 L2 查询再汇总，L0.5 仅从 L1 取结果 |
-| L0.5 直接写 L2/L3 的学习闭环 | `core/layer_context.py:post_task()` | MetaDriver 对 L1/L2/L3 直接操作 | 反思结果→L1→L2→L3，逐级转发 |
-| 事件循环直接读 L1 规则构建 prompt | `core/agent_loop.py:_build_system_prompt()` | 直接调用 `layers.l1.all_rules()` | 通过 `layers.get_system_context()` 统一入口 |
+| POST-TASK 学习闭环 | `core/layer_context.py:post_task()` | MetaDriver 对 L1/L2/L3 直接操作 | 反思结果→L1→L2→L3 逐级转发（Phase 2） |
+| 事件循环直接读 L1 规则 | `core/agent_loop.py:_build_system_prompt()` | 直接调用 `layers.l1.all_rules()` | 通过 `build_chain()` 统一入口（已部分修复） |
 
 #### A2：统一层间消息信封
 
@@ -457,7 +480,7 @@ baselines/
 
 注入到 LLM 系统提示词的可演化行为规则集合。
 
-- 持久化存储于 `data/l1_rules.json`
+- 持久化存储于 `data/l1_rules.json`；种子配置在 `config/l1.yaml`
 - 支持 `add_rule`、`modify_rule`（版本递增）、`remove_rule`
 - 受 L0.5 验证器约束：不得重复、不得矛盾
 - 容量控制：`l1_max_rules: 20`，单条 `l1_max_rule_length: 100`
@@ -499,45 +522,61 @@ SKILL.md 格式的过程性记忆，基于 agentskills.io 约定。
 ## 项目结构
 
 ```
-General_Purpose_Agent--master/
+cognitive-agent/
   main.py                     # 入口：配置加载 → Agent 初始化 → 任务执行
   config.yaml                 # 用户配置
   pyproject.toml              # 项目元数据与依赖
+  config/                     # 分层配置文件 (Phase 1.5)
+    l1.yaml                   # L1 行为规则种子、容量控制
+    l2.yaml                   # L2 激活权重、衰减率、反馈参数
+    l3.yaml                   # L3 编译阈值、技能匹配分数
   core/                       # 核心源代码
+    types.py                  # TaskObservation, ExecutionRecord (NEW)
+    executor.py               # Executor 独立决策者 (NEW)
     llm_client.py             # LLMResponse dataclass + LLMClient 适配器
     layer_message.py          # 层间消息信封 LayerMessage + MessageType (A2)
     agent.py                  # CognitiveAgent 主类
-    agent_loop.py             # 事件循环（run/reflect 两阶段）
+    agent_loop.py             # 事件循环（run/reflect 两阶段 — 旧架构）
     config.py                 # AgentConfig 数据类
-    layer_context.py          # LayerContext 桥接层（星型→链式 待重构）
-    task.py                   # Domain, Task, TaskResult(eval_result/eval_score), TaskContext
+    layer_context.py          # LayerContext 桥接层（旧星型架构，逐步淘汰）
+    task.py                   # Domain, Task, TaskResult, TaskContext
     meta_driver.py            # L0.5 元驱动（触发器 + 验证器）
     philosophy.py             # L1 行为准则层
     flexible_knowledge.py     # L2 柔性知识层
     skill_layer.py            # L3 半静态技能层
+    layers/                   # 三层链式 Manager + Comm Agent (NEW Phase 1/1.5)
+      base.py                 # LayerManager ABC, ReflectionAgent ABC
+      comm.py                 # UpwardComm/DownwardComm 基类
+      __init__.py             # build_chain() 工厂
+      l0_5_1/                 # L(0.5+1): manager, upward_comm, downward_comm
+      l2/                     # L2: manager, upward_comm, downward_comm
+      l3/                     # L3: manager, upward_comm, downward_comm
     env/                      # 环境适配器接口
       base.py                 # Environment ABC + EnvState + EnvStep
-    orchestrator/             # Orchestrator Agent 桩
-      task_decomposer.py      # Task Decomposer
-      task_runner.py          # Task Runner
-      meta_learner.py         # Meta Learner
-    l0_5/                     # L0.5 Agent 骨架（元驱动层）
-    l1/                       # L1 Agent 骨架（行为准则层）
-    l2/                       # L2 Agent 骨架（柔性知识层）
-    l3/                       # L3 Agent 骨架（技能层）
-    l4/                       # L4 Agent 骨架（静态知识 — Phase 2+）
+    orchestrator/             # Phase 2: Decomposer, ThresholdScorer, ReflectCoordinator
+    l0_5/                     # 旧 L0.5 Agent stub (逐步淘汰)
+    l1/                       # 旧 L1 Agent stub
+    l2/                       # 旧 L2 Agent stub
+    l3/                       # 旧 L3 Agent stub
     tools/
       registry.py             # 线程安全单例 ToolRegistry
       todo_tool.py            # 子任务跟踪工具
       terminal_tool.py        # 命令行执行工具
       web_search_tool.py      # DuckDuckGo 网络搜索工具
+  scripts/                    # 环境通信脚本
+    douzero_agent.py          # DouZeroLLMAgent + DouZeroCognitiveAgent
+    run_douzero_llm.py        # DouZero 对局脚本 (--mode cognitive)
+    leduc_cognitive_agent.py  # LeducCognitiveAgent (NEW)
+    run_leduc_cognitive.py    # Leduc 对局脚本 (NEW)
   data/
-    l1_rules.json             # L1 种子行为规则
+    l1_rules.json             # L1 运行时持久化（Agent 可修改）
+    learning/                 # 学习管道 pending/ + learned/
   knowledge/
     l2_index.json             # L2 知识索引（章节 + 关系）
   skills/                     # L3 技能 SKILL.md 文件
-  tests/                      # pytest 测试套件 (111 tests)
+  tests/                      # pytest 测试套件 (135 tests)
   docs/                       # 设计文档与参考文献
+    superpowers/specs/        # 架构 design spec
     superpowers/plans/        # 实现计划
 ```
 
@@ -545,8 +584,9 @@ General_Purpose_Agent--master/
 
 | 阶段 | 文档 | 状态 |
 |------|------|------|
-| Phase 1 — Execute 链路 | `docs/superpowers/plans/2026-06-03-agent-communication-implementation.md` | 待执行 |
-| Phase 2 — Reflect & Learning | `docs/superpowers/plans/2026-06-03-agent-communication-implementation-phase2.md` | 设计完成 |
+| Phase 1 — Execute 链路 | `docs/superpowers/plans/...-implementation.md` | ✅ 已完成 |
+| Phase 1.5 — Comm Agent + LayerMessage | `docs/superpowers/plans/...-implementation-phase1.5.md` | ✅ 已完成 |
+| Phase 2 — Reflect & Learning | `docs/superpowers/plans/...-implementation-phase2.md` | 待执行 |
 
 ## 架构设计文档
 

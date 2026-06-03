@@ -1,8 +1,10 @@
 # Agent Communication & Architecture Design — Phase 2
 
-> 日期: 2026-06-03 | 状态: 讨论完成
+> 日期: 2026-06-03 | 状态: 设计完成
 
-Phase 2 覆盖 Phase 1（Execute 链路）之后的内容：反射学习管道、Task Decomposer、每层 ReflectionAgent、Comm Agent 分离、Tool 解耦。
+Phase 2 覆盖 Phase 1/1.5（Execute + Comm Agent）之后的内容：反射学习管道、Task Decomposer、每层 ReflectionAgent、Tool 解耦。
+
+> **已完成于 Phase 1.5**: Comm Agent 分离（UpwardComm/DownwardComm）+ LayerMessage 协议。Phase 2 不再包含 Comm Agent 实现。
 
 ---
 
@@ -154,58 +156,16 @@ class ReflectionAgent(ABC):
 
 ---
 
-## 4. Comm Agent 分离
+## 4. Comm Agent 分离 ✅ (Phase 1.5)
 
-Phase 1 中 Manager 直接处理 QUERY/RESPONSE。Phase 2 将通信职责拆到独立 Comm Agent。
+Comm Agent 分离已在 Phase 1.5 完成，不再属于 Phase 2 范围。
 
-### 4.1 接口
+实现位置：`core/layers/comm.py`（基类）+ 每层 `upward_comm.py`/`downward_comm.py`。
 
-```python
-class UpwardComm:
-    """确定性 Agent，无需 LLM。"""
-    def receive(self, msg: LayerMessage) -> None: ...
-    def forward_to_manager(self, msg: LayerMessage) -> LayerMessage: ...
-    def send_response(self, manager_reply: Any) -> LayerMessage: ...
-
-class DownwardComm:
-    """确定性 Agent，无需 LLM。"""
-    def receive(self, msg: LayerMessage) -> None: ...
-    def query_down(self, subtype: str, payload: Any) -> LayerMessage: ...
-    def send_to_manager(self, msg: LayerMessage) -> Any: ...
+通信流程（已实现）：
 ```
-
-### 4.2 文件结构
-
+上层 UpwardComm.receive() → Manager.process() → DownwardComm.wrap_query() → 下层
 ```
-core/layers/l0_5_1/
-  manager.py
-  upward_comm.py        ← 覆盖现有 stub
-  downward_comm.py      ← 覆盖现有 stub
-  reflection_agent.py   ← 新增
-
-core/layers/l2/
-  manager.py
-  upward_comm.py
-  downward_comm.py
-  reflection_agent.py
-
-core/layers/l3/
-  manager.py
-  upward_comm.py
-  downward_comm.py
-  reflection_agent.py
-```
-
-### 4.3 Manager 与 Comm Agent 关系
-
-Manager 不再直接收发 LayerMessage。流程变为：
-
-```
-上层 UpwardComm → 本层 UpwardComm.receive() → Manager.process()
-                                               → DownwardComm.query_down() → 下层
-```
-
-Manager 专注于业务逻辑，Comm Agent 处理协议。
 
 ---
 

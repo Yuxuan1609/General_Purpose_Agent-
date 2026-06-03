@@ -36,6 +36,14 @@
 | `Executor._build_user_prompt` | `(context:dict) → str` | 从 context.state 拼 user prompt | _call_llm() | — |
 | `Executor._write_pending` | `(obs, notify_layers, result) → None` | enable_learning=True 时写 ExecutionRecord 到 pending/ | execute() | 文件系统 |
 
+## config/ (Phase 1.5)
+
+| 文件 | 内容 | 使用者 |
+|------|------|--------|
+| `config/l1.yaml` | L1 种子规则、max_rules、max_rule_length | Philosophy 初始化 |
+| `config/l2.yaml` | L2 激活权重、decay_rate、domain_match 分数 | FlexibleKnowledge 初始化 |
+| `config/l3.yaml` | L3 编译阈值、技能匹配分数 | SkillLayer 初始化 |
+
 ## core/layers/comm.py (Phase 1.5)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
@@ -57,6 +65,34 @@
 | `ReflectionAgent.investigate` | `(issues:list[dict], context:dict) → dict` | 判断问题归属（自己 vs 下层） | ReflectCoordinator / 上层 ReflectionAgent | — |
 | `ReflectionAgent.fix` | `(my_issues:list[dict]) → dict` | 修复确认的问题，通过 Manager.apply_update() | investigate() | Manager.apply_update() |
 | `ReflectionAgent.query_downstream` | `(issues, context) → dict` | 将问题递交给下层 ReflectionAgent | investigate() | 下层.investigate() |
+
+## core/layers/comm.py (Phase 1.5)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
+| `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
+
+## core/layers/l0_5_1/upward_comm.py, downward_comm.py (Phase 1.5)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `UpwardComm` | extends `comm.UpwardComm` | L0.5+1→Executor 通信 | Executor | L0_5_1Manager |
+| `DownwardComm` | extends `comm.DownwardComm` | L0.5+1→L2 通信 | L0_5_1Manager | L2 UpwardComm |
+
+## core/layers/l2/upward_comm.py, downward_comm.py (Phase 1.5)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `UpwardComm` | extends `comm.UpwardComm` | L2→L0.5+1 通信 | L0_5_1 DownwardComm | L2Manager |
+| `DownwardComm` | extends `comm.DownwardComm` | L2→L3 通信 | L2Manager | L3 UpwardComm |
+
+## core/layers/l3/upward_comm.py, downward_comm.py (Phase 1.5)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `UpwardComm` | extends `comm.UpwardComm` | L3→L2 通信 | L2 DownwardComm | L3Manager |
+| `DownwardComm` | extends `comm.DownwardComm` | L3→L4 通信（预留） | L3Manager | — |
 
 ## core/layers/l3/manager.py (NEW in Phase 1)
 

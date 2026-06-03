@@ -1400,9 +1400,6 @@ git commit -m "test: verify full test suite and cognitive mode end-to-end"
 ## Phase 2 (Subsequent — not in this plan)
 
 1. **Task Decomposer** (`core/orchestrator/task_decomposer.py`) — rule-based strategy selector, DouZero stub
-2. **Reflection pipeline** — pent/learned folder monitoring, domain-threshold scorer, Reflect coordinator
+2. **Reflection pipeline** — pending/learned folder monitoring, domain-threshold scorer, Reflect coordinator
 3. **ReflectionAgent per layer** — independent agent per layer for reflection dialogue
-4. **Comm agents** — UpwardComm/DownwardComm per layer (separate from Manager)
-5. **Tool decoupling** — `allowed_layers` on tools, per-layer tool filtering
-6. **Config updates** — learning thresholds, weights, paths in config.yaml
-7. **Full script migration** — Leduc, parallel tests use new architecture
+4. **Leduc script integration** — ✅ 已完成 (`scripts/leduc_cognitive_agent.py`, `scripts/run_leduc_cognitive.py`)
