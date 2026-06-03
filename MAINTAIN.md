@@ -20,7 +20,7 @@
 | `Domain` | `@dataclass(frozen=True, path:str, level:str)` | 层级领域标识，frozen 可用作 dict key | Task 定义 | L2 激活计算, L3 技能匹配 |
 | `Domain.parent` | `property → Domain\|None` | 返回上一级领域 | L2._domain_match_score() | — |
 | `Domain.is_ancestor_of` | `(other:Domain) → bool` | 判断是否祖先领域 | L2._domain_match_score() | — |
-| `Task` | `@dataclass(description, domain, context, needs_decomposition, subtasks, enable_learning, token_count)` | 最小学习单元 | AgentRuntime, TaskDecomposer | Executor.execute() |
+| `Task` | `@dataclass(description, domain, context, needs_decomposition, subtasks, enable_learning)` | 最小学习单元 | AgentRuntime, TaskDecomposer | Executor.execute() |
 | `TaskResult` | `@dataclass(success, final_response, new_knowledge_cards, l1_changes, l1_rejections, new_skills, iterations_used, summary, eval_result, eval_score)` | 任务完成结果 | AgentLoop.reflect() | 调用者统计 |
 | `TaskContext` | `@dataclass(task, consecutive_no_progress, eval_result, rounds)` | Execute 阶段的可变上下文 | AgentLoop.run() | MetaDriver.evaluate_triggers() |
 
