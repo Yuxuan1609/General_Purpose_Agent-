@@ -15,7 +15,6 @@ class LayerManager(ABC):
     def __init__(self, name: str, downstream: LayerManager | None = None):
         self.name = name
         self._downstream = downstream
-        self._last_notify: Any = None
 
     @abstractmethod
     def process(self, data: Any) -> dict:
@@ -32,7 +31,11 @@ class LayerManager(ABC):
         ...
 
     def query(self, data: Any) -> None:
-        """Entry point: process this layer, then propagate downstream."""
+        """Entry point: process this layer, then propagate downstream.
+
+        process() return value is intentionally dropped — RESPONSE values
+        are collected separately via collect_notify().
+        """
         self.process(data)
         if self._downstream:
             self._downstream.query(data)
@@ -40,6 +43,7 @@ class LayerManager(ABC):
     def collect_notify(self) -> dict:
         """Collect NOTIFY payloads from this layer and all downstream layers.
 
+        Precondition: called after query() has completed the full chain.
         Returns: {layer_name: notify_payload, ...}
         """
         result: dict = {}
