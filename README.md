@@ -262,6 +262,7 @@ Batch₂: Task₆ → Task₇ → ... → Task₁₀ → Batch Reflect₂
 - **Phase 1b**: Dou Dizhu（斗地主，信息集 10⁵³~10⁸³，使用 DouZero 预训练权重作为对手）
   - 验证 Agent 在复杂不完全信息博弈中的自适应能力
 - **后续方向**: 转向通用博弈智能 —— 参考 AlphaGo General 思路，从单一卡牌游戏泛化到多游戏、多领域决策，目标是构建领域无关的认知决策架构
+- **棋类扩展**: `python-chess` + Stockfish（限制 ELO 1200-1800）作为更强的棋类对手。纳什均衡级 bot（如 RLCard 预训练 CFR）已被现代 LLM 达到 ~50% 胜率，不再构成挑战。Game 环境仅是验证手段，跑通后转移到真实世界任务
 - **L4 暂不实现**，仅保留 L0.5 + L1 + L2 + 极简 L3
   - L3 保留 skills 框架但内容从简
   - 工具代码保留但不作为 Phase 1 测试重点
