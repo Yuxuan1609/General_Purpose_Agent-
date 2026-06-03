@@ -1,5 +1,10 @@
 # L3 — Skill Layer 配置
-# 技能系统参数：编译阈值、匹配逻辑
+# 技能系统参数：编译阈值、匹配逻辑、容量限制
+
+# 容量限制（软约束 — 写入 Manager prompt，超限时向上请求拆解）
+limits:
+  max_skills_per_query: 15    # 每次 QUERY 返回的最多技能数
+  max_skill_length: 2000      # 单个 SKILL.md 最大字数
 
 # L2 → L3 编译条件
 compilation:

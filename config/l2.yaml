@@ -1,5 +1,12 @@
 # L2 — Flexible Knowledge Layer 配置
-# 知识卡片系统参数：激活计算、衰减率、反馈步长
+# 知识卡片系统参数：激活计算、衰减率、反馈步长、容量限制
+
+# 容量限制（软约束 — 写入 Manager prompt，超限时向上请求拆解）
+limits:
+  max_cards_per_query: 10     # 每次 QUERY 返回的最多卡片数
+  max_card_length: 2000       # 单张卡片最大字数
+  graph_nodes_max: 100        # Domain Graph 总 Node 数上限
+  bfs_max_steps: 2            # 扩散检索最大步数（硬约束）
 
 # 激活值计算参数
 activation:
