@@ -75,6 +75,10 @@ class Executor:
     def _call_llm(self, context: dict) -> str:
         system = self._build_system_prompt(context)
         user = self._build_user_prompt(context)
+        logger.info("LLM call | l1_rules=%d l2_cards=%d l3_skills=%d",
+                     len(context.get("meta", {}).get("l1_rules", [])),
+                     len(context.get("meta", {}).get("l2_cards", [])),
+                     len(context.get("meta", {}).get("l3_skills", [])))
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},

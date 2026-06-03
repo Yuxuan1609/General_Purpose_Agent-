@@ -76,7 +76,48 @@ def build_chain():
     phil = Philosophy(PROJECT_ROOT / "data" / "l1_rules.json")
     fk = FlexibleKnowledge(PROJECT_ROOT / "knowledge", PROJECT_ROOT / "knowledge" / "l2_index.json")
     sl = SkillLayer(PROJECT_ROOT / "skills", ToolRegistry())
+
+    _seed_knowledge(fk, phil)
     return build_chain(meta, phil, fk, sl)
+
+
+def _seed_knowledge(fk, phil):
+    """Seed game-specific L1 rules + L2 knowledge cards."""
+    from core.task import Domain
+
+    # L1 game-specific rule
+    rule_text = ("棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。"
+                 "手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。"
+                 "避免因单局短期结果改变长期策略。")
+    existing = [r.content for r in phil.all_rules()]
+    if rule_text not in existing:
+        phil.add_rule(rule_text, created_by="seed")
+
+    # L2 knowledge cards — Leduc
+    leduc_domain = Domain("game/leduc", "specific")
+    leduc_cards = [
+        ("持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，"
+         "尽量打满加注次数。" , 0.8),
+        ("公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。"
+         "如对手仍call，说明对手可能也有高牌或已成对。" , 0.85),
+        ("翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。"
+         "fold损失已有投入但避免更大损失。" , 0.7),
+    ]
+    for content, conf in leduc_cards:
+        fk.add_card(content=content, domain=leduc_domain, confidence=conf, source="seed")
+
+    # L2 knowledge cards — Douzero
+    dz_domain = Domain("game/doudizhu", "specific")
+    dz_cards = [
+        ("作为地主上家，核心职责是顶牌——用较大的单张或对子卡住地主的小牌，给下家创造跑牌机会。"
+         "不要只顾自己出完。出单张时尽量出≥10的牌迫使地主消耗大牌。" , 0.8),
+        ("炸弹(4张相同)可管任何牌型，火箭(XD)最大。农民保留炸弹到残局压制地主；"
+         "地主尽早用炸弹确立牌权。追踪已出炸弹数判断剩余威胁。" , 0.85),
+    ]
+    for content, conf in dz_cards:
+        fk.add_card(content=content, domain=dz_domain, confidence=conf, source="seed")
+
+    logger.info("Seeded: L1 rules=%d L2 cards=%d", len(phil.all_rules()), len(fk.cards))
 
 
 def main():

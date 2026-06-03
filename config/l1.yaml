@@ -10,7 +10,7 @@ seed_rules:
 
 # 容量控制
 max_rules: 20
-max_rule_length: 100
+  max_rule_length: 300
 
 # 规则持久化路径（运行时数据，非配置）
 rules_path: data/l1_rules.json
