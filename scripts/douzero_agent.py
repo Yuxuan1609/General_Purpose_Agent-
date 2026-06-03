@@ -8,6 +8,7 @@ DouZero LLM Agent — 使用大语言模型玩斗地主
   python scripts/douzero_agent.py          # 运行示例测试
 """
 
+import logging
 import random
 import re
 import sys
@@ -16,6 +17,9 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.llm_client import LLMClient
+from core.types import TaskObservation
+
+logger = logging.getLogger("douzero_agent")
 
 # ═══════════════════════════════════════════════════════════════
 # Card encoding (from DouZero game.py:5-11)
@@ -153,17 +157,28 @@ class DouZeroLLMAgent:
         if len(infoset.legal_actions) == 1:
             return infoset.legal_actions[0]
 
+        system_prompt = self._build_system_prompt()
+        user_prompt = self.build_prompt_test(infoset)
         messages = [
-            {"role": "system", "content": self._build_system_prompt()},
-            {"role": "user",   "content": self.build_prompt_test(infoset)},
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
         ]
+
+        logger.info("--- LLM Request ---")
+        logger.info("System: %s", system_prompt[:200])
+        for line in user_prompt.strip().splitlines():
+            logger.info("Prompt: %s", line)
 
         chat_kwargs: dict = {}
         if getattr(self._llm, "thinking_enabled", False):
             chat_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
         resp = self._llm.chat(messages=messages, **chat_kwargs)
-        return self.parse_action(resp.text, infoset.legal_actions)
+        logger.info("LLM Response: %s", resp.text)
+
+        action = self.parse_action(resp.text, infoset.legal_actions)
+        logger.info("Parsed Action: %s  (%s)", action, cards_to_str(action) if action else "不出")
+        return action
 
     # ── Prompt builders ────────────────────────────────────────
 
@@ -336,6 +351,77 @@ class DouZeroLLMAgent:
 
         # 4. Random fallback
         return random.choice(legal_actions)
+
+
+# ═══════════════════════════════════════════════════════════════
+# DouZeroCognitiveAgent
+# ═══════════════════════════════════════════════════════════════
+
+
+class DouZeroCognitiveAgent:
+    """DouZero agent that uses the Cognitive Agent architecture (Executor + LayerChain)."""
+
+    def __init__(self, executor, position: str = 'landlord_up'):
+        self._executor = executor
+        self.position = position
+        self._position_cn = POSITION_CN.get(position, position)
+
+    def act(self, infoset) -> list[int]:
+        if len(infoset.legal_actions) == 1:
+            return infoset.legal_actions[0]
+
+        obs = TaskObservation(
+            meta={
+                "domain": "game/doudizhu",
+                "role": self._position_cn,
+                "enable_learning": False,
+            },
+            state=self._build_state(infoset),
+            history=None,
+        )
+
+        result = self._executor.execute(obs)
+        action_text = result["action_text"]
+        action = self.parse_action(action_text, infoset.legal_actions)
+        logger.info("CognitiveAgent action: %s", cards_to_str(action) if action else "pass")
+        return action
+
+    def _build_state(self, infoset) -> dict:
+        hand = cards_to_str(infoset.player_hand_cards)
+        nc = infoset.num_cards_left_dict
+        left_str = (
+            f"地主{nc.get('landlord', '?')}张  "
+            f"上家{nc.get('landlord_up', '?')}张  "
+            f"下家{nc.get('landlord_down', '?')}张"
+        )
+
+        last = infoset.last_move
+        if last:
+            last_pid = POSITION_CN.get(infoset.last_pid, infoset.last_pid or '')
+            last_str = f"{cards_to_str(last)}（由{last_pid}打出）"
+        else:
+            last_str = '无（你是先手）'
+
+        legal_lines = []
+        for i, act in enumerate(infoset.legal_actions, 1):
+            label = f"{i}. 不出（过）" if not act else f"{i}. {cards_to_str(act)}"
+            legal_lines.append(label)
+
+        system_text = _SYSTEM_PROMPT_TEMPLATE.format(position_cn=self._position_cn)
+        user_text = f"你的手牌: {hand}\n剩余牌数: {left_str}\n上一手: {last_str}\n可选: {chr(10).join(legal_lines)}"
+
+        return {
+            "system_prompt": system_text,
+            "prompt": user_text,
+            "hand": hand,
+            "hand_raw": infoset.player_hand_cards if hasattr(infoset, 'player_hand_cards') else [],
+            "legal_actions": infoset.legal_actions,
+        }
+
+    def parse_action(self, llm_response: str, legal_actions: list[list[int]]) -> list[int]:
+        """Reuse DouZeroLLMAgent's parsing logic."""
+        dummy = DouZeroLLMAgent.__new__(DouZeroLLMAgent)
+        return DouZeroLLMAgent.parse_action(dummy, llm_response, legal_actions)
 
 
 # ═══════════════════════════════════════════════════════════════

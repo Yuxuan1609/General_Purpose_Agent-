@@ -19,6 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -28,8 +30,28 @@ sys.path.insert(0, str(DZ_ROOT))
 from douzero.env.game import GameEnv
 from douzero.env.env import deck as DECK
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s", stream=sys.stdout)
+_ch = logging.StreamHandler(sys.stdout)
+_ch.setLevel(logging.INFO)
+_ch.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
+
+logging.basicConfig(level=logging.INFO, handlers=[_ch])
 logger = logging.getLogger("douzero_llm")
+
+
+def _setup_file_logging(task_label: str):
+    """Create timestamped log dir under logs/{task_label}/ and add file handler."""
+    label = task_label.strip("/\\").replace(" ", "_")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = LOG_DIR / label / stamp
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    fh = logging.FileHandler(log_dir / "game.log", encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
+    logger.addHandler(fh)
+
+    logger.info("Run folder: %s", log_dir)
+    return log_dir
 
 
 def _shuffle_deck(seed: int | None = None):
@@ -66,10 +88,34 @@ def _make_agent(
     objective: str,
     llm_client=None,
     perfect_info: bool = False,
+    mode: str = "direct",
+    layers=None,
 ):
     if agent_type == "llm":
-        from scripts.douzero_agent import DouZeroLLMAgent
-        return DouZeroLLMAgent(llm_client=llm_client, position=position, use_perfect_info=perfect_info)
+        if mode == "cognitive":
+            from scripts.douzero_agent import DouZeroCognitiveAgent
+            from core.executor import Executor
+            from core.layers import build_chain
+            if layers is None:
+                from core.meta_driver import MetaDriver, DEFAULT_TRIGGERS, DEFAULT_VALIDATORS
+                from core.philosophy import Philosophy
+                from core.flexible_knowledge import FlexibleKnowledge
+                from core.skill_layer import SkillLayer
+                from core.tools.registry import ToolRegistry
+                from pathlib import Path
+
+                meta = MetaDriver(DEFAULT_TRIGGERS.copy(), DEFAULT_VALIDATORS.copy())
+                phil = Philosophy(Path("./data/l1_rules.json"))
+                fk = FlexibleKnowledge(Path("./knowledge"), Path("./knowledge/l2_index.json"))
+                sl = SkillLayer(Path("./skills"), ToolRegistry())
+                chain = build_chain(meta, phil, fk, sl)
+            else:
+                chain = layers
+            executor = Executor(layer_root=chain, llm_client=llm_client)
+            return DouZeroCognitiveAgent(executor=executor, position=position)
+        else:
+            from scripts.douzero_agent import DouZeroLLMAgent
+            return DouZeroLLMAgent(llm_client=llm_client, position=position, use_perfect_info=perfect_info)
     elif agent_type == "random":
         from douzero.evaluation.random_agent import RandomAgent
         return RandomAgent()
@@ -169,8 +215,16 @@ def main():
     parser.add_argument("--verbose", action="store_true", default=True)
     parser.add_argument("--step_verbose", action="store_true",
                         help="每5步输出一次进度 (LLM模式推荐开启)")
+    parser.add_argument("--mode", default="direct", choices=["direct", "cognitive"],
+                        help="LLM agent mode: direct (bypass layers) or cognitive (full chain)")
 
     args = parser.parse_args()
+
+    task_label = f"douzero_{args.llm_position}"
+    _run_log_dir = _setup_file_logging(task_label)
+
+    logger.info("Config: episodes=%d  seed=%d  llm_pos=%s  opponent=%s  dry_run=%s",
+                args.episodes, args.seed, args.llm_position, args.opponent, args.dry_run)
 
     # LLM client
     llm_client = None
@@ -212,9 +266,11 @@ def main():
         if pos == args.llm_position:
             agent_type = "random" if args.dry_run else "llm"
             players[pos] = _make_agent(pos, agent_type, args.baselines_dir, args.objective,
-                                         llm_client=llm_client, perfect_info=args.perfect_info)
+                                         llm_client=llm_client, perfect_info=args.perfect_info,
+                                         mode=args.mode)
         else:
-            players[pos] = _make_agent(pos, args.opponent, args.baselines_dir, args.objective)
+            players[pos] = _make_agent(pos, args.opponent, args.baselines_dir, args.objective,
+                                         mode=args.mode)
 
     logger.info("Players: landlord=%s  up=%s  down=%s",
                 type(players['landlord']).__name__,
@@ -241,6 +297,8 @@ def main():
     print(f"  Farmer wins:    {results['wins']['farmer']:>4}  ({results['wp_farmer']:.1%})")
     print(f"  ADP landlord:   {results['adp_landlord']:+.2f}")
     print(f"  ADP farmer:     {results['adp_farmer']:+.2f}")
+    print("=" * 55)
+    print(f"  Log:        {_run_log_dir / 'game.log'}")
     print("=" * 55)
 
 
