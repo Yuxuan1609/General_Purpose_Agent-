@@ -529,57 +529,45 @@ cognitive-agent/
   config.yaml                 # 用户配置
   pyproject.toml              # 项目元数据与依赖
   config/                     # 分层配置文件 (Phase 1.5)
-    l1.yaml                   # L1 行为规则种子、容量控制
-    l2.yaml                   # L2 激活权重、衰减率、反馈参数
-    l3.yaml                   # L3 编译阈值、技能匹配分数
+    l1.yaml                   # L1 行为规则种子 (max: 20 rules, ≤300字/rule)
+    l2.yaml                   # L2 激活权重、衰减率、limits (≤10 cards/query, ≤2000字/card)
+    l3.yaml                   # L3 编译阈值、匹配分数、limits (≤15 skills/query, ≤2000字/skill)
   core/                       # 核心源代码
-    types.py                  # TaskObservation, ExecutionRecord (NEW)
-    executor.py               # Executor 独立决策者 (NEW)
-    llm_client.py             # LLMResponse dataclass + LLMClient 适配器
-    layer_message.py          # 层间消息信封 LayerMessage + MessageType (A2)
-    agent.py                  # CognitiveAgent 主类
-    agent_loop.py             # 事件循环（run/reflect 两阶段 — 旧架构）
-    config.py                 # AgentConfig 数据类
-    layer_context.py          # LayerContext 桥接层（旧星型架构，逐步淘汰）
-    task.py                   # Domain, Task, TaskResult, TaskContext
-    meta_driver.py            # L0.5 元驱动（触发器 + 验证器）
-    philosophy.py             # L1 行为准则层
-    flexible_knowledge.py     # L2 柔性知识层
-    skill_layer.py            # L3 半静态技能层
-    layers/                   # 三层链式 Manager + Comm Agent (NEW Phase 1/1.5)
-      base.py                 # LayerManager ABC, ReflectionAgent ABC
+    types.py                  # TaskObservation(含session), ExecutionRecord
+    executor.py               # Executor — 组装 prompt: [任务说明]+[行为准则]+[知识]+[技能] → LLM
+    llm_client.py             # LLMResponse + LLMClient
+    layer_message.py          # LayerMessage 信封 + MessageType 枚举 (A2)
+    agent.py / agent_loop.py  # 旧架构 (逐步淘汰)
+    layer_context.py          # 旧星型桥接 (逐步淘汰)
+    config.py                 # AgentConfig
+    task.py                   # Domain, Task(enable_learning), TaskResult, TaskContext
+    meta_driver.py            # L0.5 触发器 + 验证器 (层内部使用)
+    philosophy.py             # L1 规则管理 (层内部使用)
+    flexible_knowledge.py     # L2 知识卡片 (层内部使用)
+    skill_layer.py            # L3 技能 (层内部使用)
+    layers/                   # 三层链式 Manager + Comm Agent
+      base.py                 # LayerManager ABC (query/process/notify/collect_notify)
       comm.py                 # UpwardComm/DownwardComm 基类
-      __init__.py             # build_chain() 工厂
-      l0_5_1/                 # L(0.5+1): manager, upward_comm, downward_comm
-      l2/                     # L2: manager, upward_comm, downward_comm
-      l3/                     # L3: manager, upward_comm, downward_comm
-    env/                      # 环境适配器接口
-      base.py                 # Environment ABC + EnvState + EnvStep
-    orchestrator/             # Phase 2: Decomposer, ThresholdScorer, ReflectCoordinator
-    l0_5/                     # 旧 L0.5 Agent stub (逐步淘汰)
-    l1/                       # 旧 L1 Agent stub
-    l2/                       # 旧 L2 Agent stub
-    l3/                       # 旧 L3 Agent stub
+      __init__.py             # build_chain() — 自底向上构建 L3→L2→L(0.5+1)
+      l0_5_1/                 # manager, upward_comm, downward_comm
+      l2/                     # manager, upward_comm, downward_comm
+      l3/                     # manager (加载SKILL.md全文), upward_comm, downward_comm
     tools/
       registry.py             # 线程安全单例 ToolRegistry
-      todo_tool.py            # 子任务跟踪工具
-      terminal_tool.py        # 命令行执行工具
-      web_search_tool.py      # DuckDuckGo 网络搜索工具
   scripts/                    # 环境通信脚本
     douzero_agent.py          # DouZeroLLMAgent + DouZeroCognitiveAgent
-    run_douzero_llm.py        # DouZero 对局脚本 (--mode cognitive)
-    leduc_cognitive_agent.py  # LeducCognitiveAgent (NEW)
-    run_leduc_cognitive.py    # Leduc 对局脚本 (NEW)
-  data/
-    l1_rules.json             # L1 运行时持久化（Agent 可修改）
-    learning/                 # 学习管道 pending/ + learned/
-  knowledge/
-    l2_index.json             # L2 知识索引（章节 + 关系）
-  skills/                     # L3 技能 SKILL.md 文件
-  tests/                      # pytest 测试套件 (135 tests)
-  docs/                       # 设计文档与参考文献
-    superpowers/specs/        # 架构 design spec
-    superpowers/plans/        # 实现计划
+    run_douzero_llm.py        # DouZero 对局 (--mode cognitive)
+    leduc_cognitive_agent.py  # LeducCognitiveAgent — RLCard接口+Executor决策
+    run_leduc_cognitive.py    # Leduc 对局 — seed L1/L2/L3 + per-agent日志
+  data/                       # 运行时数据
+    l1_rules.json             # L1 持久化 (Agent 可修改)
+    learning/                 # 学习管道 pending/learned/
+  knowledge/                  # L2 知识 MD 文件 (按 domain 分目录)
+  skills/                     # L3 技能 SKILL.md (挂载到 L2 Node)
+  logs/                       # 运行日志
+    leduc_cognitive/          # 每步: l0_5_1.log, l2.log, l3.log, executor.log
+  tests/                      # pytest (135 tests)
+  docs/                       # 设计文档
 ```
 
 ## 实现计划

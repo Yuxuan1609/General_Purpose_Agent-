@@ -102,3 +102,28 @@
 - Reflexion 反思模式：ReflectionAgent 递归判责借鉴 Reflexion 的 Self-Reflection 模型（`docs/reflexion-architecture-detail.md`）
 - 关键差异：本项目用结构化持久化（JSON/MD）替代 Reflexion 的纯 prompt 存储，突破 context window 限制
 - Session-学习单元映射策略受 Voyager 的 Automatic Curriculum 的"从简单到复杂"递进思想影响
+
+## Session Review: 2026-06-03 — Execute 链路跑通
+
+### 成果
+- **架构设计**: 三层链式 L(0.5+1)→L2→L3，Executor→Comm Agent→LayerMessage 协议
+- **代码**: Phase 1 (10 tasks) + Phase 1.5 (6 tasks)，28 新增 tests，135 total
+- **双环境验证**: DouZero + Leduc，L1 rules + L2 cards + L3 skills 全链流通
+- **日志**: per-agent 分文件 + 干净分隔符 + http 噪音抑制
+
+### 架构决策
+1. **L0.5+L1 合并**: 同属"行为宪法"语义域，减少链长度
+2. **Executor 独立**: 决策者与记忆系统解耦，层可独立演化
+3. **Comm Agent 分离**: Manager 不碰 LayerMessage 协议
+4. **per-agent 分文件日志**: 多 agent 系统中单文件不可读
+
+### 工程教训
+1. **文档积债代价**: Phase 1/1.5 后 6 个文档含大量"待实现"标记，清理耗时约等于一个 task。建议每次 task 即时更新
+2. **Prompt 组装是 Executor 核心**: 从 raw dict dump 改为层次化格式 + 技能全文加载，LLM 决策质量差距明显
+3. **种子 vs 学习闭环**: 当前 L1/L2/L3 手动种子，框架价值取决于 Phase 2 从失败中学习的能力
+4. **双环境暴露接口问题**: RLCard eval_step vs DouZero act，TaskObservation 够灵活但适配仍需定制
+
+### 框架价值的关键前提
+1. **L2 卡片质量 > 通用 LLM 知识** — 种子内容必须包含反直觉的领域经验才有增量价值
+2. **Reflect 闭环正面反馈** — boost/penalize 要区分"坏策略"和"运气差"
+3. **L2 Domain Graph 跨域泛化** — 斗地主和 Leduc 的策略能互相借鉴多少是关键

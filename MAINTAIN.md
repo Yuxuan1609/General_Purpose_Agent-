@@ -98,27 +98,51 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3Manager` | `__init__(skill_layer, downstream)` | L3 层 Manager，包裹 SkillLayer | build_chain() | — |
-| `L3Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 匹配技能，写入 obs.meta["l3_skills"] | LayerManager.query() | SkillLayer.match() |
+| `L3Manager` | `__init__(skill_layer, downstream, upward, downward)` | L3 层 Manager，包裹 SkillLayer | build_chain() | — |
+| `L3Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 匹配技能，**加载 SKILL.md 全文**写入 obs.meta["l3_skills"] | LayerManager.query() | SkillLayer.match() |
 | `L3Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l3"}` | collect_notify() | — |
+| `L3Manager.process` skill 加载 | 从 `SkillMeta.skill_dir/SKILL.md` 读取全文 | 注入 prompt 的技能内容 | — | 文件系统 |
 
-## core/layers/l2/manager.py (NEW in Phase 1)
+## core/layers/l2/manager.py (Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L2Manager` | `__init__(knowledge, downstream)` | L2 层 Manager，包裹 FlexibleKnowledge | build_chain() | — |
-| `L2Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 检索 top-5 活跃卡片，写入 obs.meta["l2_cards"] | LayerManager.query() | FlexibleKnowledge.get_active_cards() |
+| `L2Manager` | `__init__(knowledge, downstream, upward, downward)` | L2 层 Manager，包裹 FlexibleKnowledge | build_chain() | — |
+| `L2Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 检索 top-5 活跃卡片，**标记 Node 归属**写入 obs.meta["l2_cards"] | LayerManager.query() | FlexibleKnowledge.get_active_cards() |
 | `L2Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l2"}` | collect_notify() | — |
 | `L2Manager.apply_update` | `(key, value) → None` | Phase 2: boost_card 或通用 reflect_fix | ReflectionAgent.fix() | KnowledgeCard.boost() |
 
-## core/layers/l0_5_1/manager.py (NEW in Phase 1)
+## core/layers/l0_5_1/manager.py (Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
-| `L0_5_1Manager.process` | `(obs:TaskObservation) → dict` | 注入 L1 规则到 obs.meta["l1_rules"]；过滤危险 tool_calls | LayerManager.query() | Philosophy.all_rules(), MetaDriver.filter_dangerous() |
+| `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream, upward, downward)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
+| `L0_5_1Manager.process` | `(obs:TaskObservation) → dict` | 注入 L1 规则到 obs.meta["l1_rules"] | LayerManager.query() | Philosophy.all_rules() |
 | `L0_5_1Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | collect_notify() | — |
-| `L0_5_1Manager.apply_update` | `(key, value) → None` | Phase 2: modify_rule 或通用 reflect_fix | ReflectionAgent.fix() | Philosophy.modify_rule() |
+| `L0_5_1Manager.apply_update` | `(key, value) → None` | Phase 2: modify_rule 或 reflect_fix | ReflectionAgent.fix() | Philosophy.modify_rule() |
+
+## core/executor.py (Phase 1)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `Executor._build_system_prompt` | `(context:dict) → str` | 组装: [任务说明](state.system_prompt) + [行为准则](L1) + [相关知识](L2 cards) + [可用技能](L3 full content) | _call_llm() | — |
+| `Executor._build_user_prompt` | `(context:dict) → str` | 优先用 state.prompt (通信层预格式)，fallback 序列化 | _call_llm() | — |
+
+## scripts/leduc_cognitive_agent.py (Phase 1)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `LeducCognitiveAgent` | `__init__(executor, temperature)` | RLCard 接口的认知 Agent，通过 Executor 决策 | run_leduc_cognitive.py | Executor.execute() |
+| `LeducCognitiveAgent.reset_session` | `(session_id) → None` | 重置 step 计数 + session_id | 脚本 per-episode | — |
+| `LeducCognitiveAgent._decide` | `(state) → (action_id, {})` | RLCard state → TaskObservation(session) → Executor → parse | env.step() | Executor |
+
+## scripts/run_leduc_cognitive.py (Phase 1)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `_seed_knowledge` | `(fk, phil, sl) → None` | 注入 seed: L1 规则 + L2 卡片 + L3 技能(L2 Node 映射) | build_chain() | fk.add_card(), sl.create_skill() |
+| `_seed_l3_skills` | `(sl) → None` | 创建 leduc + doudizhu 的 L3 技能(含 relevance_domain) | _seed_knowledge() | SkillLayer.create_skill() |
+| `_setup_logging` | `() → log_dir` | 创建 per-agent 文件日志(l0_5_1.log, l2.log, l3.log, executor.log) | main() | logging |
 
 ## core/layers/__init__.py
 
