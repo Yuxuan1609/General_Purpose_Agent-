@@ -32,7 +32,11 @@ class L0_5_1Manager(LayerManager):
         rules = self._philosophy.all_rules()
         obs.meta["l1_rules"] = [r.content for r in rules]
 
+        logger.debug("── L(0.5+1) ──")
+        logger.debug("  received: domain=%s", domain)
         logger.debug("  response: %d rules", len(rules))
+        for i, r in enumerate(rules):
+            logger.debug("    [rule %d] %s", i + 1, r.content)
         return {"status": "ok", "rules_count": len(rules)}
 
     def notify(self) -> Any:

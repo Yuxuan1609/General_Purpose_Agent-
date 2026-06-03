@@ -39,6 +39,10 @@ class L2Manager(LayerManager):
         logger.debug("── L2 ──")
         logger.debug("  received: domain=%s", domain_path)
         logger.debug("  response: %d cards  (nodes: %s)", len(active), domains)
+        for i, c in enumerate(active):
+            logger.debug("    [card %d] conf=%.2f act=%.2f | %s",
+                         i + 1, c.confidence, c.activation,
+                         c.content[:120] + ("..." if len(c.content) > 120 else ""))
         return {"status": "ok", "cards_found": len(active)}
 
     def notify(self) -> Any:

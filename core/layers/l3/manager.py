@@ -39,8 +39,9 @@ class L3Manager(LayerManager):
             })
         logger.debug("── L3 ──")
         logger.debug("  received: domain=%s", domain_path)
-        logger.debug("  response: %d skills  (names: %s)",
-                     len(matched), [s.name for s in matched])
+        logger.debug("  response: %d skills", len(matched))
+        for i, s in enumerate(matched):
+            logger.debug("    [skill %d] %s | %s", i + 1, s.name, s.description)
         return {"status": "ok", "skills_matched": len(matched)}
 
     def notify(self) -> Any:
