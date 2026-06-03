@@ -9,9 +9,9 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `TaskObservation` | `@dataclass(meta:dict, state:dict, history:list\|None, session:dict\|None)` | 环境观测的统一格式。session={id,datetime,task_type,meta_hash} | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.process() |
-| `ExecutionRecord` | `@dataclass(session:dict, observation:dict, notify_layers:dict, action:Any, result:Any)` | Execute 后的存档记录，写入 data/learning/pending/ | Executor._write_pending() | ReflectCoordinator.audit(), ThresholdScorer |
-| `Task.enable_learning` | `bool = False` | 学习开关，手动开启。True 时 Executor 写 pending/ | Task 定义 | Executor.execute() |
+| `TaskObservation` | `@dataclass(meta:str, state:dict, session:dict\|None)` | 环境观测的统一格式。meta 为自然语言任务描述 | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.query() |
+| `ExecutionRecord` | `@dataclass(session, observation, notify_layers, action, result)` | Execute 后的存档记录，写入 data/learning/pending/ | Executor._write_pending() | ReflectCoordinator.audit() |
+| `Task.enable_learning` | `bool = False` | 学习开关，True 时 Executor 写 pending/ | Task 定义 | Executor.execute() |
 
 ## core/task.py
 
@@ -28,12 +28,12 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `Executor` | `__init__(layer_root, llm_client, learning_dir, max_tokens, temperature)` | 独立决策者，不在层体系内 | AgentRuntime / 脚本 | LayerManager.query(), LLMClient.chat() |
-| `Executor.execute` | `(obs:TaskObservation) → dict{action_text, context, notify_layers}` | 执行一次完整动作周期：QUERY 链 → NOTIFY → prompt → LLM | DouZeroCognitiveAgent.act() | LayerManager.query(), collect_notify(), _call_llm() |
-| `Executor._assemble_context` | `(obs:TaskObservation) → dict` | 拼接各层富化后的 meta/state/history | execute() | _call_llm() |
-| `Executor._call_llm` | `(context:dict) → str` | 组装 system+user prompt，调 LLM | execute() | LLMClient.chat() |
-| `Executor._build_system_prompt` | `(context:dict) → str` | 从 context.meta 提取 L1 规则/L2 卡片/L3 技能拼 system prompt | _call_llm() | — |
-| `Executor._build_user_prompt` | `(context:dict) → str` | 从 context.state 拼 user prompt | _call_llm() | — |
+| `Executor` | `__init__(layer_root, llm_client, learning_dir, max_tokens, temperature)` | 独立决策者，只收不发 | AgentRuntime / 脚本 | LayerManager.query(), LLMClient.chat() |
+| `Executor.execute` | `(obs:TaskObservation) → dict{action_text, context, notify_layers}` | 动作周期：LayerMessage(QUERY) 链 → collect_notify → prompt → LLM | DouZeroCognitiveAgent.act() | LayerManager.query(), collect_notify(), _call_llm() |
+| `Executor._assemble_context` | `(obs) → dict{meta, state}` | 拼接 obs.meta + obs.state | execute() | _call_llm() |
+| `Executor._call_llm` | `(context:dict) → str` | _build_system_prompt + _build_user_prompt → LLM | execute() | LLMClient.chat() |
+| `Executor._build_system_prompt` | `(context) → str` | 组装 [任务说明]+[行为准则](state.l1_rules)+[相关知识](state.l2_cards)+[可用技能](state.l3_skills) | _call_llm() | — |
+| `Executor._build_user_prompt` | `(context) → str` | 组装 [对局历史]+[当前局面] 从 state 提取 | _call_llm() | — |
 | `Executor._write_pending` | `(obs, notify_layers, result) → None` | enable_learning=True 时写 ExecutionRecord 到 pending/ | execute() | 文件系统 |
 
 ## config/ (Phase 1.5)
@@ -48,6 +48,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
+| `AgentPacket` | `@dataclass(frozen, source_layer, message_type, content)` | 层内 Agent 通信包，承载在 LayerMessage.payload 中运输 | L1Agent / L2Agent | Comm Agents 包装/解包 |
 | `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
 | `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
 
@@ -65,13 +66,6 @@
 | `ReflectionAgent.investigate` | `(issues:list[dict], context:dict) → dict` | 判断问题归属（自己 vs 下层） | ReflectCoordinator / 上层 ReflectionAgent | — |
 | `ReflectionAgent.fix` | `(my_issues:list[dict]) → dict` | 修复确认的问题，通过 Manager.apply_update() | investigate() | Manager.apply_update() |
 | `ReflectionAgent.query_downstream` | `(issues, context) → dict` | 将问题递交给下层 ReflectionAgent | investigate() | 下层.investigate() |
-
-## core/layers/comm.py (Phase 1.5)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
-| `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
 
 ## core/layers/l0_5_1/upward_comm.py, downward_comm.py (Phase 1.5)
 
@@ -98,35 +92,39 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3Manager` | `__init__(skill_layer, downstream, upward, downward)` | L3 层 Manager，包裹 SkillLayer | build_chain() | — |
-| `L3Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 匹配技能，**加载 SKILL.md 全文**写入 obs.meta["l3_skills"] | LayerManager.query() | SkillLayer.match() |
+| `L3Manager` | `__init__(skill_layer, downstream, upward, downward)` | L3 层 Manager，包裹 SkillLayer，纯确定性 | build_chain() | — |
+| `L3Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 匹配技能，加载 SKILL.md 全文写入 obs.state["l3_skills"] | LayerManager.query() | SkillLayer.match() |
 | `L3Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l3"}` | collect_notify() | — |
-| `L3Manager.process` skill 加载 | 从 `SkillMeta.skill_dir/SKILL.md` 读取全文 | 注入 prompt 的技能内容 | — | 文件系统 |
 
 ## core/layers/l2/manager.py (Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L2Manager` | `__init__(knowledge, downstream, upward, downward)` | L2 层 Manager，包裹 FlexibleKnowledge | build_chain() | — |
-| `L2Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 检索 top-5 活跃卡片，**标记 Node 归属**写入 obs.meta["l2_cards"] | LayerManager.query() | FlexibleKnowledge.get_active_cards() |
-| `L2Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l2"}` | collect_notify() | — |
-| `L2Manager.apply_update` | `(key, value) → None` | Phase 2: boost_card 或通用 reflect_fix | ReflectionAgent.fix() | KnowledgeCard.boost() |
+| `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent | build_chain() | — |
+| `L2Manager.query` | `(msg, trace_id) → None` | 重写：驱动 V-structure 循环 (Stage1→Stage2→propagate→Stage3) | L0_5_1 DownwardComm | L2Agent.stage1/2/3(), _propagate() |
+| `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
+| `L2Manager._enrich_cards` | `(obs, selected_nodes) → None` | 从 selected_nodes 提取知识卡片写入 obs.state["l2_cards"] | query() | FlexibleKnowledge.get_domain_cards() |
+| `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
+| `L2Agent` | `__init__(llm_client, knowledge, domain_nodes)` | L2 层 LLM Agent，三阶段 V-structure | L2Manager | — |
+| `L2Agent.stage1` | `(query, meta, state) → list[dict]` | 对 domain nodes 打分，选 top-5 | L2Manager.query() | _call_llm() |
+| `L2Agent.stage2` | `(query, meta, state, selected_nodes) → dict` | 筛选知识卡片(≤15)，判断是否调 L3 | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
+| `L2Agent.stage3` | `(query, meta, state, selected_nodes, stage2_result) → dict` | 整合 L3 响应 + 上下文 → 最终 NOTIFY | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
+| `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | stage2/stage3 | FlexibleKnowledge.get_domain_cards() |
+| `L2_DOMAIN_NODES` | `list[dict{name, description}]` | 硬编码 seed 领域节点 (game/leduc, game/doudizhu) | L2Agent.stage1 | — |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream, upward, downward)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
-| `L0_5_1Manager.process` | `(obs:TaskObservation) → dict` | 注入 L1 规则到 obs.meta["l1_rules"] | LayerManager.query() | Philosophy.all_rules() |
-| `L0_5_1Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | collect_notify() | — |
-| `L0_5_1Manager.apply_update` | `(key, value) → None` | Phase 2: modify_rule 或 reflect_fix | ReflectionAgent.fix() | Philosophy.modify_rule() |
-
-## core/executor.py (Phase 1)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `Executor._build_system_prompt` | `(context:dict) → str` | 组装: [任务说明](state.system_prompt) + [行为准则](L1) + [相关知识](L2 cards) + [可用技能](L3 full content) | _call_llm() | — |
-| `Executor._build_user_prompt` | `(context:dict) → str` | 优先用 state.prompt (通信层预格式)，fallback 序列化 | _call_llm() | — |
+| `L0_5_1Manager.query` | `(msg, trace_id) → None` | 重写：驱动 V-structure 循环 (Stage1→传给L2→Stage2) | Executor / 上层 | L1Agent.stage1(), downward.wrap_query(), L1Agent.stage2() |
+| `L0_5_1Manager.notify` | `() → dict` | 返回 `{done, result, reasoning}` 或 `{status:"ok"}` | collect_notify() | — |
+| `L0_5_1Manager.process` | `(data) → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | LayerManager.query() | — |
+| `L1Agent` | `__init__(llm_client, philosophy)` | L1 层 LLM Agent，两阶段 V-structure | L0_5_1Manager | — |
+| `L1Agent.stage1` | `(meta, state) → str` | 判断"需要从下层获取什么知识" → query text | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
+| `L1Agent.stage2` | `(meta, state) → dict{done, result, reasoning}` | 整合 L2 知识卡片 + 行为准则 → 最终决策 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
+| `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
+| `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
 
 ## scripts/leduc_cognitive_agent.py (Phase 1)
 

@@ -13,11 +13,13 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 
 | 层 | 原对应 | 职责 |
 |----|--------|------|
-| **L(0.5+1)** | L0.5 + L1 | 不可变宪法（触发器/验证器/安全过滤）+ 可演化行为规则 |
-| **L2** | FlexibleKnowledge | 概率性知识卡片，带置信度/激活值/衰减；领域感知 |
-| **L3** | SkillLayer | SKILL.md 格式的过程性记忆；支持 L2→L3 编译 |
+| **L(0.5+1)** | L0.5 + L1 | 不可变宪法 + 可演化行为规则；含 **L1Agent（两阶段 V-structure）** |
+| **L2** | FlexibleKnowledge | 概率性知识卡片；含 **L2Agent（三阶段 V-structure）** |
+| **L3** | SkillLayer | SKILL.md 格式的过程性记忆；确定性匹配，不含 LLM |
 
-### 通信协议 (Phase 1.5)
+每层 Manager 驱动 V-structure 循环：**Agent（LLM 决策）↔ Manager（编排/状态管理）↔ Comm Agent（确定性协议）**，通过 `AgentPacket` 跨层传递内部 Agent 通信。
+
+### 通信协议 (Phase 1.5 — 已实现 ✅)
 
 ```
 每步动作:
@@ -41,23 +43,33 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 
 > **Note**: 当前层间通信为**单次 QUERY-RESPONSE** 模式。后续可能改为**对话式**交互——允许多轮往返，如同层间"讨论"直到确认信息充分。此变更将影响通信协议和日志格式。
 
-### 事件循环（Agent Loop）
+### 执行路径（双轨）
 
-> *Phase 1 + 1.5 重构后：星型通信已替换为链式相邻传递（A1-A4）。Executor 作为执行入口。*
+项目同时存在两套执行路径：
+
+**新架构（推荐）** — 独立 `Executor` + 链式 `LayerManager`：
 
 ```
   ┌────────────────────────────────────────────────────┐
   │  PHASE 1: EXECUTE (Executor.execute)                │
   │  Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3  │
-  │  各层 Manager.process() 富化 TaskObservation         │
+  │  各层 Manager 驱动 V-structure Agent 循环           │
   │  RESPONSE 链返回 → 各层 NOTIFY → Executor 组装 prompt │
   │  Executor 调用 LLM → parse action → AgentRuntime    │
   │  ────────────────────────────────────────────────── │
   │  enable_learning=True → ExecutionRecord → pending/   │
   │  ────────────────────────────────────────────────── │
-  │  PHASE 2: REFLECT & LEARN (未实现)                   │
+  │  PHASE 2: REFLECT & LEARN (Orchestrator 存 stub)     │
   │  pending/ 积攒 → 阈值触发 → ReflectionAgent 递归判责   │
   └────────────────────────────────────────────────────┘
+```
+
+**旧架构（`main.py` / `CognitiveAgent`）** — 仍用于通用问答任务：
+
+```
+  while 循环:
+    LLM 决策 → 工具分发 → L0.5 安全过滤 → L1/L2/L3 上下文注入
+    → 完成检测 / 最大迭代终止 → post_task() 反思
 ```
 
 ## 设计原则
@@ -78,13 +90,14 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
                     │              │    可观察所有层状态、发送调度指令，
                     └──┬──┬──┬──┬──┘    但不越过相邻传递规则操作层内数据
                        │  │  │  │  (只读观察)
-          ┌────────────┼──┼──┼──┼────────────┐
-          │            │  │  │  │            │
-          ▼            ▼  ▼  ▼  ▼            ▼
-       ┌──────┐    ┌──────┐  ┌──────┐    ┌──────┐
-       │L0.5  │◄──►│ L1   │◄►│ L2   │◄──►│ L3   │
-       └──────┘    └──────┘  └──────┘    └──────┘
-           ▲ 严格相邻传递（通过 LayerMessage）  ▲
+           ┌────────────┼──┼──┼──┼────────────┐
+           │            │  │  │  │            │
+           ▼            ▼  ▼  ▼  ▼            ▼
+        ┌──────────────────┐  ┌──────┐    ┌──────┐
+        │   L(0.5+1)       │◄►│ L2   │◄──►│ L3   │
+        │ (L0.5 + L1 合并)  │  │      │    │      │
+        └──────────────────┘  └──────┘    └──────┘
+            ▲ 严格相邻传递（通过 LayerMessage）  ▲
 ```
 
 **当前代码中违反此原则的已知点**（供后续重构参照）：
@@ -161,8 +174,9 @@ Layer N:
 
 | 类型 | 适用场景 | 示例 |
 |------|----------|------|
-| 确定性 Agent | 规则引擎、数学计算、模式匹配、状态机驱动的协议处理 | L2 激活值计算、L1 重复检查、Comm Agent 消息序列化 |
-| LLM Agent | 反思分析、知识提取、自然语言决策 | MetaDriver 反思、L2→L3 编译 |
+| 确定性 Agent | 规则引擎、协议处理、匹配算法 | L3Manager 技能匹配、Comm Agent 消息序列化、KnowledgeCard 激活值计算 |
+| LLM Agent (V-structure) | 多阶段推理决策 | **L1Agent**（两阶段：知识需求→最终决策）、**L2Agent**（三阶段：节点选择→卡片过滤+L3决策→整合 NOTIFY） |
+| LLM Agent | 反思分析、知识提取 | MetaDriver 反思、L2→L3 编译 |
 | 混合 Agent | 确定性逻辑为主，特定节点委托 LLM | L1 Manager：规则 CRUD 走确定性，规则提案评估可走 LLM |
 
 **信息隔离原则：**
@@ -263,6 +277,10 @@ Batch₂: Task₆ → Task₇ → ... → Task₁₀ → Batch Reflect₂
   - 验证 Agent 在复杂不完全信息博弈中的自适应能力
 - **后续方向**: 转向通用博弈智能 —— 参考 AlphaGo General 思路，从单一卡牌游戏泛化到多游戏、多领域决策，目标是构建领域无关的认知决策架构
 - **棋类扩展**: `python-chess` + Stockfish（限制 ELO 1200-1800）作为更强的棋类对手。纳什均衡级 bot（如 RLCard 预训练 CFR）已被现代 LLM 达到 ~50% 胜率，不再构成挑战。Game 环境仅是验证手段，跑通后转移到真实世界任务
+- **Phase 1.5（已完成）**：Comm Agent + LayerMessage 链式通信 + V-structure Agent 实现
+  - `core/layers/` 三层链式 Manager（L0_5_1 → L2 → L3）
+  - 每层 Manager 驱动 V-structure Agent 循环
+  - Executor 独立决策，旧 CognitiveAgent/AgentLoop 仍用于通用任务
 - **L4 暂不实现**，仅保留 L0.5 + L1 + L2 + 极简 L3
   - L3 保留 skills 框架但内容从简
   - 工具代码保留但不作为 Phase 1 测试重点
@@ -450,10 +468,13 @@ GameEnv.step()
 
 **用法：**
 ```bash
-# 不完全信息（默认，与人类玩家信息对等）
+#  直接 LLM 模式（默认，绕开认知层，独立 prompt）
 python scripts/run_douzero_llm.py --llm_position landlord_up --episodes 10 --step_verbose
 
-# 完美信息（与 DeepAgent 信息对等，可看到对手手牌）
+#  认知链模式（通过 Executor + LayerChain 决策）
+python scripts/run_douzero_llm.py --llm_position landlord_up --episodes 10 --mode cognitive
+
+# 完美信息（可看到对手手牌）
 python scripts/run_douzero_llm.py --llm_position landlord_up --episodes 10 --step_verbose --perfect_info
 
 # dry-run 快速验证流程
@@ -468,106 +489,142 @@ baselines/
   sl/            # 监督学习基线
 ```
 
-## 各层详解
+## 各层详解（新架构）
 
-### L0.5 — Meta Driver（元驱动层）
+### L0.5 数据模块（旧层内部直接使用）
 
-系统的"宪法层"，硬编码不可被 Agent 修改的触发器和验证器。
+仍作为数据对象保留，但不再作为独立层运行：
 
-- **4 个反射触发器**：`stagnation`（连续 3 轮无进展）、`task_failed`、`task_completed`、`domain_shift`（领域切换检测），每个均含冷却时间避免频繁触发
-- **2 个验证规则**：`not_duplicate`（禁止重复规则）、`no_contradiction`（禁止矛盾规则），所有 L1 提案需逐条通过
-- **危险过滤**：预执行前拦截 `["delete_all", "drop_table", "format", "rm -rf"]` 等高危工具调用
-- **反思流程**：调用辅助 LLM 对已完成任务进行复盘，产出知识更新和 L1 提案
+- **MetaDriver** (`core/meta_driver.py`)：4 个反射触发器（stagnation/task_failed/task_completed/domain_shift）、2 个验证器（not_duplicate/no_contradiction）、危险工具过滤
+- **Philosophy** (`core/philosophy.py`)：L1 规则 CRUD，持久化到 `data/l1_rules.json`，种子规则在 `config/l1.yaml`
+- **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard + KnowledgeGraph，MD+JSON 双存
+- **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，L2→L3 编译
 
-### L1 — Philosophy（行为准则层）
+### L(0.5+1) — 合并宪法 + 行为准则层
 
-注入到 LLM 系统提示词的可演化行为规则集合。
+`core/layers/l0_5_1/manager.py` 将 L0.5 和 L1 合并为一个 Manager，由 **L1Agent（两阶段 V-structure）** 驱动：
 
-- 持久化存储于 `data/l1_rules.json`；种子配置在 `config/l1.yaml`
-- 支持 `add_rule`、`modify_rule`（版本递增）、`remove_rule`
-- 受 L0.5 验证器约束：不得重复、不得矛盾
-- 容量控制：`l1_max_rules: 20`，单条 `l1_max_rule_length: 100`
-- 种子规则示例："面对不确定信息时优先搜索验证" / "同种方法连续失败时主动换策略"
+```
+L1Agent.stage1(meta, state)
+  → 判断"需要从下层获取什么知识" → query text
+  → 写入 obs.state["l1_query"] → 通过 AgentPacket 传到 L2
+
+L1Agent.stage2(meta, state)
+  → 整合 L2 返回的知识卡片 + 行为准则 → 最终决策
+  → 输出 {done, result, reasoning}（DeepSeek JSON mode）
+```
+
+- **L1Agent** 系统 prompt 注入：游戏规则 + 行为准则（L1 rules）+ 任务目标
+- **L0_5_1Manager** 编排 V-structure 循环（当前 MAX_LOOPS=1）
+- 通过 `DownwardComm` 将 `AgentPacket(query)` 传递给 L2
 
 ### L2 — Flexible Knowledge（柔性知识层）
 
-概率性知识卡片系统，受 ACT-R 记忆激活理论启发。
+`core/layers/l2/manager.py` 包裹 FlexibleKnowledge，由 **L2Agent（三阶段 V-structure）** 驱动：
 
-- **KnowledgeCard**：`content` + `domain` + `confidence(0-1)` + `activation(0-1)` + `decay_rate` + 成功/失败计数
+```
+L2Agent.stage1(query, meta, state)
+  → LLM 对领域节点打分（name + score + reason）
+  → 选 top-5 节点（目前 seed 两个：game/leduc, game/doudizhu）
+
+L2Agent.stage2(query, meta, state, selected_nodes)
+  → 检索节点下知识卡片 → LLM 筛选 ≤15 张
+  → 判断是否需要调 L3 → {cards, call_l3, l3_task}
+
+L2Agent.stage3(query, meta, state, selected_nodes, stage2_result)
+  → 整合 L3 返回的技能内容 → 最终 NOTIFY
+  → {reply, cards, reasoning}
+```
+
 - **激活值计算**：`activation = confidence × (domain_match_score × 0.6 + recency_score × 0.4)`
 - **领域匹配**：exact=1.0 / parent=0.7 / child=0.5 / general=0.4 / unrelated=0.0
-- **操作**：`boost()`（置信度 +0.05, 激活值 +0.1）、`penalize()`（置信度 -0.1）、`apply_decay()`（指数时间衰减）
-- **KnowledgeGraph**：从 `l2_index.json` 构建邻接表，通过 `spread_activation()` 实现 2 跳扩散激活
-- 持久化：MD 文件（人类可读）+ `l2_index.json`（机器索引）
+- **KnowledgeGraph**：2 跳扩散激活（`spread_activation()`）
 
 ### L3 — Skill Layer（技能层）
 
-SKILL.md 格式的过程性记忆，基于 agentskills.io 约定。
+`core/layers/l3/manager.py` 包裹 SkillLayer，**纯确定性（无 LLM）**：
 
-- 支持 **CRUD**：`create_skill` / `edit_skill` / `patch_skill`（字符串替换）/ `delete_skill`（移至 `.archive/`）
-- **领域匹配**：精确匹配 > 父级匹配 > general 跨域 > 根域
-- **L2→L3 编译**：同精确域下 ≥3 张 L2 卡片且平均激活值 > 0.7 时，调用 LLM 自动编译为 SKILL.md
-- 注册三个工具供 Agent 调用：`skills_list` / `skill_view` / `skill_manage`
+- **匹配**：精确域 > 父域 > general 跨域 > 根域
+- **Skill CRUD**：`create_skill` / `edit_skill` / `patch_skill` / `delete_skill`
+- **L2→L3 编译**：同域 ≥3 卡片且平均激活值 > 0.7 → LLM 编译为 SKILL.md
+- 注册工具：`skills_list` / `skill_view` / `skill_manage`
 
 ## 工具系统
 
 基于单例 `ToolRegistry`，线程安全，支持 `check_fn` 条件过滤和 `toolset` 分组。
 
-| 工具 | 功能 | 注册文件 |
+| 工具 | 功能 | 注册位置 |
 |------|------|----------|
 | `todo` | 子任务跟踪（pending/in_progress/completed/cancelled） | `core/tools/todo_tool.py` |
-| `terminal` | 命令行执行（30s 超时，可选白名单） | `core/tools/terminal_tool.py` |
-| `web_search` | DuckDuckGo 网络搜索 | `core/tools/web_search_tool.py` |
-| `skills_list` | 列出所有已注册技能 | `core/skill_layer.py` |
+| `terminal` | 命令行执行（30s 超时，可选命令白名单） | `core/tools/terminal_tool.py` |
+| `web_search` | DuckDuckGo 网络搜索（无需 API Key） | `core/tools/web_search_tool.py` |
+| `skills_list` | 列出已注册技能 | `core/skill_layer.py` |
 | `skill_view` | 查看技能详细内容 | `core/skill_layer.py` |
-| `skill_manage` | 管理技能（创建/编辑/删除） | `core/skill_layer.py` |
+| `skill_manage` | 创建/编辑/删除技能 | `core/skill_layer.py` |
 
 ## 项目结构
 
 ```
 cognitive-agent/
-  main.py                     # 入口：配置加载 → Agent 初始化 → 任务执行
+  main.py                     # 入口（旧架构）：配置加载 → CognitiveAgent → 任务执行
   config.yaml                 # 用户配置
   pyproject.toml              # 项目元数据与依赖
-  config/                     # 分层配置文件 (Phase 1.5)
-    l1.yaml                   # L1 行为规则种子 (max: 20 rules, ≤300字/rule)
-    l2.yaml                   # L2 激活权重、衰减率、limits (≤10 cards/query, ≤2000字/card)
-    l3.yaml                   # L3 编译阈值、匹配分数、limits (≤15 skills/query, ≤2000字/skill)
+  config/                     # 分层配置文件
+    l1.yaml                   # L1 行为规则种子 (max: 20, ≤300字/rule)
+    l2.yaml                   # L2 激活权重、衰减率、limits (≤10 cards/query)
+    l3.yaml                   # L3 编译阈值、匹配分数、limits (≤15 skills/query)
   core/                       # 核心源代码
-    types.py                  # TaskObservation(含session), ExecutionRecord
-    executor.py               # Executor — 组装 prompt: [任务说明]+[行为准则]+[知识]+[技能] → LLM
+    types.py                  # TaskObservation, ExecutionRecord
+    executor.py               # Executor — 独立决策者（新架构入口）
     llm_client.py             # LLMResponse + LLMClient
     layer_message.py          # LayerMessage 信封 + MessageType 枚举 (A2)
-    agent.py / agent_loop.py  # 旧架构 (逐步淘汰)
-    layer_context.py          # 旧星型桥接 (逐步淘汰)
-    config.py                 # AgentConfig
-    task.py                   # Domain, Task(enable_learning), TaskResult, TaskContext
-    meta_driver.py            # L0.5 触发器 + 验证器 (层内部使用)
-    philosophy.py             # L1 规则管理 (层内部使用)
-    flexible_knowledge.py     # L2 知识卡片 (层内部使用)
-    skill_layer.py            # L3 技能 (层内部使用)
-    layers/                   # 三层链式 Manager + Comm Agent
-      base.py                 # LayerManager ABC (query/process/notify/collect_notify)
-      comm.py                 # UpwardComm/DownwardComm 基类
-      __init__.py             # build_chain() — 自底向上构建 L3→L2→L(0.5+1)
-      l0_5_1/                 # manager, upward_comm, downward_comm
-      l2/                     # manager, upward_comm, downward_comm
-      l3/                     # manager (加载SKILL.md全文), upward_comm, downward_comm
+    config.py                 # AgentConfig dataclass
+    task.py                   # Domain, Task, TaskResult, TaskContext
+    agent.py / agent_loop.py  # CognitiveAgent + AgentLoop（旧架构）
+    layer_context.py          # 旧星型桥接（旧架构用）
+    meta_driver.py            # L0.5 触发器 + 验证器
+    philosophy.py             # L1 规则 CRUD
+    flexible_knowledge.py     # L2 知识卡片 + KnowledgeGraph
+    skill_layer.py            # L3 技能 + L2→L3 编译
+    env/                      # 环境抽象 (ABC)
+      base.py                 # Environment, EnvState, EnvStep
+    layers/                   # 新架构：三层链式 Manager + Comm Agent
+      base.py                 # LayerManager ABC + LayerAgent ABC + ReflectionAgent ABC
+      comm.py                 # UpwardComm/DownwardComm + AgentPacket
+      __init__.py             # build_chain() — 自底向上构建
+      l0_5_1/                 # L(0.5+1)Manager + L1Agent (V-structure)
+      l2/                     # L2Manager + L2Agent (V-structure)
+      l3/                     # L3Manager (确定性，无 LLM)
+    orchestrator/             # Phase 2: 编排器（stub）
+      task_runner.py          # AgentStub
+      task_decomposer.py      # AgentStub
+      meta_learner.py         # AgentStub
     tools/
-      registry.py             # 线程安全单例 ToolRegistry
-  scripts/                    # 环境通信脚本
+      registry.py             # ToolRegistry 单例（线程安全）
+      todo_tool.py            # 子任务跟踪
+      terminal_tool.py        # 命令行执行
+      web_search_tool.py      # DuckDuckGo 搜索
+    l0_5/ l1/ l2/ l3/ l4/    # 旧层 stub（逐步淘汰）
+  scripts/                    # 运行脚本
+    run_leduc_cognitive.py    # Leduc 对局 — seed L1/L2/L3 + chain 日志
+    leduc_cognitive_agent.py  # LeducCognitiveAgent — RLCard接口+Executor
+    run_douzero_llm.py        # DouZero 对局 (--mode direct|cognitive)
     douzero_agent.py          # DouZeroLLMAgent + DouZeroCognitiveAgent
-    run_douzero_llm.py        # DouZero 对局 (--mode cognitive)
-    leduc_cognitive_agent.py  # LeducCognitiveAgent — RLCard接口+Executor决策
-    run_leduc_cognitive.py    # Leduc 对局 — seed L1/L2/L3 + per-agent日志
+    run_rlcard.py             # RLCard 通用测试
+    run_llm_leduc.py          # LLM 直接 vs Leduc（绕开认知层）
+    process_stats.py          # CSV 数据处理
+    run_parallel_test.py      # 并行 Leduc 测试
   data/                       # 运行时数据
-    l1_rules.json             # L1 持久化 (Agent 可修改)
-    learning/                 # 学习管道 pending/learned/
-  knowledge/                  # L2 知识 MD 文件 (按 domain 分目录)
-  skills/                     # L3 技能 SKILL.md (挂载到 L2 Node)
+    l1_rules.json             # L1 持久化
+    learning/pending/         # ExecutionRecord 待反思
+  knowledge/                  # L2 知识 MD + l2_index.json
+    game/leduc/               # Leduc Hold'em 策略
+    game/doudizhu/            # 斗地主策略
+  skills/                     # L3 技能 SKILL.md
+    game/leduc/               # leduc-preflop-raise, leduc-postflop-pair
+    game/doudizhu/            # doudizhu-top-card
   logs/                       # 运行日志
-    leduc_cognitive/          # 每步: l0_5_1.log, l2.log, l3.log, executor.log
-  tests/                      # pytest (135 tests)
+  tests/                      # pytest (19 test files)
   docs/                       # 设计文档
 ```
 
@@ -576,21 +633,51 @@ cognitive-agent/
 | 阶段 | 文档 | 状态 |
 |------|------|------|
 | Phase 1 — Execute 链路 | `docs/superpowers/plans/...-implementation.md` | ✅ 已完成 |
-| Phase 1.5 — Comm Agent + LayerMessage | `docs/superpowers/plans/...-implementation-phase1.5.md` | ✅ 已完成 |
-| Phase 2 — Reflect & Learning | `docs/superpowers/plans/...-implementation-phase2.md` | 待执行 |
+| Phase 1.5 — Comm Agent + LayerMessage + V-structure | `docs/superpowers/plans/...-implementation-phase1.5.md` | ✅ 已完成 |
+| Phase 2 — Reflect & Learning + Orchestrator | `docs/superpowers/plans/...-implementation-phase2.md` | 🚧 Orchestrator stub 就绪，核心逻辑待实现 |
 
 ## 架构设计文档
 
 | 文档 | 说明 |
 |------|------|
-| `docs/superpowers/specs/2026-06-03-agent-communication-design.md` | **当前架构 v2**：三层链式通信、Executor 独立决策、Session/TaskObservation/ExecutionRecord 格式 |
-| `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md` | **Phase 2**：ReflectionAgent 递归判责、Task Decomposer、学习管道、Tool 解耦 |
+| `docs/superpowers/specs/2026-06-03-agent-communication-design.md` | **当前架构 v2**：三层链式通信、Executor 独立决策、V-structure Agent |
+| `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md` | **Phase 2**：ReflectionAgent 递归判责、Task Decomposer、学习管道 |
 | `docs/4.5-layer-agent-design.md` | 初始架构设计，含 TextWorld 验证策略与冷启动方案 |
 | `docs/cognitive-agent-design-v2.md` | 详细设计文档（~1500+ 行），含伪代码与数据结构模式 |
 | `docs/cognitive-agent-phase1-plan.md` | 分阶段实现计划（~1800+ 行），TDD 风格逐步分解 |
 | `docs/4.5-layer-agent-references.md` | 33 篇学术/开源参考文献（CoALA, Reflexion, Voyager, MemGPT, HippoRAG 等） |
-| `docs/voyager-skill-system-detail.md` | Voyager 技能系统详解 — L3 SKILL.md 格式直接参考其 Skill Library 设计 |
-| `docs/reflexion-architecture-detail.md` | Reflexion 架构详解 — ReflectionAgent 递归判责模式受其 Self-Reflection 模型启发 |
+| `docs/voyager-skill-system-detail.md` | Voyager 技能系统详解 — L3 SKILL.md 格式参考 |
+| `docs/reflexion-architecture-detail.md` | Reflexion 架构详解 — ReflectionAgent 递归判责模式 |
+| `docs/environment-setup.md` | RLCard + DouZero 环境配置说明 |
+
+## 长期规划 / Future Work
+
+### 1. Short Circuit：同 Session 信息复用
+
+当前每次 `Executor.execute()` 都完整执行全链路（L1 Stage1 → L2 Stage1/2/3 → L3 → L1 Stage2）。对于同一 session 内的连续步骤（或 `meta` 字段高度相似的任务），大部分层间通信结果可以复用：
+
+- **策略**：检测当前 `meta` + `state.current` 与上一步相比是否发生变化。若未变，直接沿用上一步的 L2/L3 NOTIFY 结果，跳过 LLM 调用
+- **复杂度**：只需在 `Executor` 层维护一个轻量缓存，`_assemble_context()` 中比对 hash 决定是否短路
+- **收益**：典型博弈场景（如 Leduc/DouZero）每步状态变化小而多，可节省 60-80% 的 LLM 调用
+
+### 2. 多轮对话与会话并发
+
+从当前单步决策扩展到多轮对话场景时，需要解决：
+
+- **历史会话管理**：同一 session 的多轮历史不应重复经过层链，需设计增量路由（仅新内容参与 QUERY）
+- **并发控制**：多 session 并发时，各层 Manager 的 `_final_result` 等可变状态需做到 session 级隔离，避免交叉污染
+- **方向**：可参考 `trace_id` 扩展到 `session_id` 粒度的状态隔离，或为每个 session 实例化独立的层链
+
+### 3. 真实世界 Coding 场景
+
+Phase 2.1 — Benchmark 评估：
+- 使用开源基准（如 **SWE-bench**）评估 Agent 在真实代码仓库上的修复/开发能力
+- 评估粒度从"测试是否通过"扩展到**工程质量**（代码风格、模块化程度、可维护性）和**执行效率**（迭代次数、Token 消耗、运行时间）
+
+Phase 2.2 — 对抗性评测：
+- 构建对抗性 Agent，在代码仓库中**人为制造问题**（Bug、性能缺陷、安全隐患），然后验证主 Agent 能否发现并修复
+- 或直接利用 Git 提交记录 / Pull Request 中的真实修复案例作为训练和评估数据
+- 目标：从"通过测试"到"写出好代码"的评估范式迁移
 
 ## 工程文件
 
