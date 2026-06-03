@@ -42,6 +42,7 @@ class Task:
     context: str = ""
     needs_decomposition: bool = False
     subtasks: list[Task] = field(default_factory=list)
+    enable_learning: bool = False
 
 
 @dataclass
