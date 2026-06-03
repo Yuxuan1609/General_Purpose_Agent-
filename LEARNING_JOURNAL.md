@@ -66,3 +66,39 @@
 - Agent 集成测试中 mock LLM client 返回预设 tool_calls/text
 - 短路要保留接口合约——返回合法的 `MagicMock` with `has_tool_calls`/`text`/`tool_calls`
 - 适用：多子系统集成测试中个别系统未就绪或会阻塞全局的场景
+
+## 认知层设计：合并语义相近层减少传递开销
+- L0.5（不可变宪法）和 L1（可演化规则）合并为 L(0.5+1) 一层，内部通过"L0.5 验证器审批 L1 提案"分权
+- 原因：两者同属"行为宪法"语义域，合并后层链从 4 层减为 3 层，减少 A1 相邻传递的往返次数
+- 适用于任何分层架构中语义高度重叠的相邻层
+
+## Executor 独立于层体系：决策者与认知层解耦
+- Executor 不归属任何认知层，职责简单明确：拼接各层结果 → prompt → LLM → action
+- 层只向 Executor NOTIFY，Executor 不反向通信（只收不发）
+- 好处：认知层可独立演化（增删层、改内部逻辑），Executor 接口不变
+
+## 每层 Manager 作为局部编排者
+- 不再设全局 Orchestrator，编排职责分发到每层 Manager
+- Manager 决定：是否向下一层 QUERY、传什么、等 RESPONSE 后怎么聚合
+- 与信息隔离原则（A3）天然契合：每层只管理自己边界内的事
+
+## ReflectionAgent 递归判责模式
+- 每层设独立 ReflectionAgent，反思编排时：判责（自己 vs 下层）→ 是自己则 fix() → 是下层则 QUERY 下层 ReflectionAgent
+- 与 Execute 段相同的链式 QUERY→RESPONSE 模式
+- 两条链路分离：全局 Reflect（Coordinator 审核分发）和每层 Reflect（ReflectionAgent 递归链）
+
+## TaskObservation 三层语义的通信层填充
+- meta（干什么）、state（什么情况）、history（之前发生了什么）三层语义，全部由通信层（脚本）填充
+- history=None 表示任务不需要历史（如完美信息斗地主），由通信层决策
+- 等价于 Reflexion 的短期记忆 + Voyager 的环境反馈的结构化合并
+
+## Comm Agent 分离：Manager 不处理协议
+- UpwardComm/DownwardComm 是确定性 Agent，仅处理 LayerMessage 序列化/反序列化
+- Manager 专注业务逻辑，收发的都是业务 dict，不接触 LayerMessage 格式
+- 适用：任何需要统一通信协议但不想污染业务代码的分层系统
+
+## 参考文献与设计决策记录
+- Voyager 技能系统：L3 SKILL.md 格式借鉴 Voyager 的 Skill Library 设计（`docs/voyager-skill-system-detail.md`）
+- Reflexion 反思模式：ReflectionAgent 递归判责借鉴 Reflexion 的 Self-Reflection 模型（`docs/reflexion-architecture-detail.md`）
+- 关键差异：本项目用结构化持久化（JSON/MD）替代 Reflexion 的纯 prompt 存储，突破 context window 限制
+- Session-学习单元映射策略受 Voyager 的 Automatic Curriculum 的"从简单到复杂"递进思想影响

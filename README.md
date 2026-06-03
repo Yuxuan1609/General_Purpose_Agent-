@@ -541,15 +541,29 @@ General_Purpose_Agent--master/
     superpowers/plans/        # 实现计划
 ```
 
-## 设计文档
+## 实现计划
+
+| 阶段 | 文档 | 状态 |
+|------|------|------|
+| Phase 1 — Execute 链路 | `docs/superpowers/plans/2026-06-03-agent-communication-implementation.md` | 待执行 |
+| Phase 2 — Reflect & Learning | `docs/superpowers/plans/2026-06-03-agent-communication-implementation-phase2.md` | 设计完成 |
+
+## 架构设计文档
 
 | 文档 | 说明 |
 |------|------|
+| `docs/superpowers/specs/2026-06-03-agent-communication-design.md` | **当前架构 v2**：三层链式通信、Executor 独立决策、Session/TaskObservation/ExecutionRecord 格式 |
+| `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md` | **Phase 2**：ReflectionAgent 递归判责、Task Decomposer、学习管道、Tool 解耦 |
 | `docs/4.5-layer-agent-design.md` | 初始架构设计，含 TextWorld 验证策略与冷启动方案 |
 | `docs/cognitive-agent-design-v2.md` | 详细设计文档（~1500+ 行），含伪代码与数据结构模式 |
 | `docs/cognitive-agent-phase1-plan.md` | 分阶段实现计划（~1800+ 行），TDD 风格逐步分解 |
 | `docs/4.5-layer-agent-references.md` | 33 篇学术/开源参考文献（CoALA, Reflexion, Voyager, MemGPT, HippoRAG 等） |
+| `docs/voyager-skill-system-detail.md` | Voyager 技能系统详解 — L3 SKILL.md 格式直接参考其 Skill Library 设计 |
+| `docs/reflexion-architecture-detail.md` | Reflexion 架构详解 — ReflectionAgent 递归判责模式受其 Self-Reflection 模型启发 |
 
-## 相关文件
+## 工程文件
 
-- **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表，设计原则中提到的每个概念均标注了对应的文件路径和行号
+- **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表
+- **[MAINTAIN.md](MAINTAIN.md)** — 函数级维护文档：每个模块的函数签名、参数、上下游调用关系
+- **[LEARNING_JOURNAL.md](LEARNING_JOURNAL.md)** — 可迁移工程技巧记录
+- **[DEBUG_JOURNAL.md](DEBUG_JOURNAL.md)** — 复杂 Bug 排查记录
