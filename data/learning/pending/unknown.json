@@ -30,21 +30,32 @@
           "domain": "game/leduc"
         }
       ],
-      "l3_skills": []
+      "l3_skills": [
+        {
+          "name": "leduc-postflop-pair",
+          "description": "翻牌后成对加注",
+          "domain": "game/leduc"
+        },
+        {
+          "name": "leduc-preflop-raise",
+          "description": "翻牌前加注策略",
+          "domain": "game/leduc"
+        }
+      ]
     },
     "state": {
       "system_prompt": "You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.\n\nCards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.\n2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.\n\nPre-flop: call, raise(2 chips), or fold. Max 2 raises per round.\nPost-flop: public card dealt. check/call, raise(4 chips), or fold.\n\nPair (card matches public) beats no pair. Higher rank wins ties, then suit.\nOutput ONLY one word: call, raise, fold, or check.",
-      "prompt": "=== Round: post-flop ===\nYour card: Q♠\nPublic card: K♥\nYour bet this round: 2\nOpponent bet this round: 2\nTotal pot: 4\nLegal actions: raise, fold, check\nChoose:",
-      "hand": "SQ",
-      "public_card": "HK",
+      "prompt": "=== Round: post-flop ===\nYour card: K♠\nPublic card: J♥\nYour bet this round: 4\nOpponent bet this round: 8\nTotal pot: 12\nLegal actions: call, raise, fold\nChoose:",
+      "hand": "SK",
+      "public_card": "HJ",
       "legal_actions": [
+        "call",
         "raise",
-        "fold",
-        "check"
+        "fold"
       ],
       "round": "post-flop",
-      "my_chips": 2,
-      "pot": 4
+      "my_chips": 4,
+      "pot": 12
     },
     "history": null
   },
@@ -62,6 +73,6 @@
       "layer": "l3"
     }
   },
-  "action": "raise",
+  "action": "call",
   "result": null
 }

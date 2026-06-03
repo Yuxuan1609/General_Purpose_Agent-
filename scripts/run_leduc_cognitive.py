@@ -28,9 +28,11 @@ def _setup_logging():
     log_dir = PROJECT_ROOT / "logs" / "leduc_cognitive" / stamp
     log_dir.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(log_dir / "game.log", encoding="utf-8")
-    fh.setLevel(logging.INFO)
-    fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
-    logger.addHandler(fh)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(message)s"))
+    root_logger = logging.getLogger()
+    root_logger.addHandler(fh)
+    root_logger.setLevel(logging.DEBUG)
     return log_dir
 
 
@@ -77,12 +79,12 @@ def build_chain():
     fk = FlexibleKnowledge(PROJECT_ROOT / "knowledge", PROJECT_ROOT / "knowledge" / "l2_index.json")
     sl = SkillLayer(PROJECT_ROOT / "skills", ToolRegistry())
 
-    _seed_knowledge(fk, phil)
+    _seed_knowledge(fk, phil, sl)
     return build_chain(meta, phil, fk, sl)
 
 
-def _seed_knowledge(fk, phil):
-    """Seed game-specific L1 rules + L2 knowledge cards."""
+def _seed_knowledge(fk, phil, sl=None):
+    """Seed game-specific L1 rules + L2 knowledge cards + L3 skills."""
     from core.task import Domain
 
     # L1 game-specific rule
@@ -117,7 +119,59 @@ def _seed_knowledge(fk, phil):
     for content, conf in dz_cards:
         fk.add_card(content=content, domain=dz_domain, confidence=conf, source="seed")
 
-    logger.info("Seeded: L1 rules=%d L2 cards=%d", len(phil.all_rules()), len(fk.cards))
+    # L3 skills — each maps to L2 Node via Relevance Domain field
+    if sl:
+        _seed_l3_skills(sl)
+
+    logger.info("Seeded: L1 rules=%d L2 cards=%d L3 skills=%d",
+                len(phil.all_rules()), len(fk.cards),
+                len(sl.list_all()) if sl else 0)
+
+
+def _seed_l3_skills(sl):
+    """Create L3 skills with Relevance Domain mapping to L2 Node name."""
+    from core.task import Domain
+
+    leduc_domain = Domain("game/leduc", "specific")
+    leduc_skills = [
+        ("leduc-preflop-raise", "翻牌前加注策略",
+         "---\nname: leduc-preflop-raise\ndescription: 翻牌前加注策略\ndomain: game/leduc\nrelevance_domain: game/leduc\n---\n"
+         "# 翻牌前加注策略\n\n持有K时强制加注，持有Q时根据对手行为判断，持有J时倾向call观察。\n"
+         "加注迫使弱牌fold或支付更高代价看公共牌。\n\n## 决策树\n"
+         "- K → raise\n"
+         "- Q → 对手raise则fold，对手call则call\n"
+         "- J → call/fold，避免主动加注"),
+        ("leduc-postflop-pair", "翻牌后成对加注",
+         "---\nname: leduc-postflop-pair\ndescription: 翻牌后成对加注\ndomain: game/leduc\nrelevance_domain: game/leduc\n---\n"
+         "# 翻牌后成对加注\n\n公共牌与手牌配对时，你有最高牌型。\n"
+         "max 2 raises per round，尽量打满加注。每次加注4筹码。\n\n"
+         "## 对手信号\n"
+         "- 对手call → 对手可能也有较高单张\n"
+         "- 对手fold → 收底池\n"
+         "- 对手re-raise → 评估对手是否可能已成对"),
+    ]
+    for name, desc, content in leduc_skills:
+        try:
+            sl.create_skill(name=name, content=content, domain=leduc_domain)
+        except Exception:
+            pass  # skill already exists
+
+    dz_domain = Domain("game/doudizhu", "specific")
+    dz_skills = [
+        ("doudizhu-top-card", "顶牌策略",
+         "---\nname: doudizhu-top-card\ndescription: 顶牌策略\ndomain: game/doudizhu\nrelevance_domain: game/doudizhu\n---\n"
+         "# 顶牌策略\n\n作为地主上家，核心任务是顶住地主的出牌。出单张时优先出≥10的牌。\n"
+         "迫使地主消耗2或大小王等大牌资源。\n\n"
+         "## 顶牌优先级\n"
+         "- 出单张: 10 → J → Q → K → A → 2\n"
+         "- 出对子: 优先出较大的对子\n"
+         "- 不要出炸弹或火箭作为顶牌（留给残局）"),
+    ]
+    for name, desc, content in dz_skills:
+        try:
+            sl.create_skill(name=name, content=content, domain=dz_domain)
+        except Exception:
+            pass
 
 
 def main():
