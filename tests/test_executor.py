@@ -1,0 +1,113 @@
+import pytest
+from unittest.mock import Mock
+from core.types import TaskObservation
+from core.layers.base import LayerManager
+
+
+class _MockLayer(LayerManager):
+    def __init__(self, name, notify_data=None, downstream=None):
+        super().__init__(name, downstream)
+        self._notify_data = notify_data or {}
+    def process(self, data):
+        data.meta[f"{self.name}_seen"] = True
+        return {"status": "ok"}
+    def notify(self):
+        return self._notify_data
+
+
+@pytest.fixture
+def mock_llm():
+    llm = Mock()
+    llm.chat.return_value = Mock(text="33", tool_calls=[], has_tool_calls=False)
+    return llm
+
+
+@pytest.fixture
+def layer_chain():
+    l3 = _MockLayer("l3", notify_data={"skills": 2})
+    l2 = _MockLayer("l2", notify_data={"cards": 3}, downstream=l3)
+    l1 = _MockLayer("l0_5_1", notify_data={"rules": 5}, downstream=l2)
+    return l1
+
+
+class TestExecutor:
+    def test_execute_runs_full_chain(self, mock_llm, layer_chain):
+        from core.executor import Executor
+
+        executor = Executor(
+            layer_root=layer_chain,
+            llm_client=mock_llm,
+        )
+
+        obs = TaskObservation(
+            meta={"domain": "game/doudizhu", "enable_learning": False},
+            state={"hand": "3 4 5 6 7"},
+        )
+
+        result = executor.execute(obs)
+
+        assert "action_text" in result
+        assert "context" in result
+        assert obs.meta["l0_5_1_seen"]
+        assert obs.meta["l2_seen"]
+        assert obs.meta["l3_seen"]
+
+    def test_execute_returns_notify_data(self, mock_llm, layer_chain):
+        from core.executor import Executor
+
+        executor = Executor(layer_root=layer_chain, llm_client=mock_llm)
+
+        obs = TaskObservation()
+        result = executor.execute(obs)
+
+        assert "notify_layers" in result
+        assert result["notify_layers"]["l0_5_1"]["rules"] == 5
+        assert result["notify_layers"]["l2"]["cards"] == 3
+        assert result["notify_layers"]["l3"]["skills"] == 2
+
+    def test_execute_writes_pending_when_learning_enabled(self, mock_llm, layer_chain, tmp_path):
+        from core.executor import Executor
+        import json
+
+        learning_dir = tmp_path / "data" / "learning"
+        executor = Executor(
+            layer_root=layer_chain,
+            llm_client=mock_llm,
+            learning_dir=learning_dir,
+        )
+
+        obs = TaskObservation(
+            meta={"domain": "game/doudizhu", "enable_learning": True},
+            state={"session": {"id": "test-session", "datetime": "2026-01-01", "meta_hash": "abc"}},
+        )
+
+        executor.execute(obs)
+
+        pending = learning_dir / "pending"
+        assert pending.exists()
+        files = list(pending.glob("*.json"))
+        assert len(files) == 1
+
+        with open(files[0], encoding="utf-8") as f:
+            rec = json.load(f)
+        assert rec["session"]["id"] == "test-session"
+        assert "notify_layers" in rec
+
+    def test_execute_skips_pending_when_learning_disabled(self, mock_llm, layer_chain, tmp_path):
+        from core.executor import Executor
+
+        learning_dir = tmp_path / "data" / "learning"
+        executor = Executor(
+            layer_root=layer_chain,
+            llm_client=mock_llm,
+            learning_dir=learning_dir,
+        )
+
+        obs = TaskObservation(
+            meta={"domain": "game/doudizhu", "enable_learning": False},
+            state={"session": {"id": "s1"}},
+        )
+
+        executor.execute(obs)
+        pending = learning_dir / "pending"
+        assert not pending.exists()
