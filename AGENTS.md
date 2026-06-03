@@ -1,0 +1,36 @@
+# Project Instructions — cognitive-agent
+
+## Maintain Doc
+
+修改任何模块的函数签名、职责、上下游关系后，必须同步更新 `MAINTAIN.md`。
+
+MAINTAIN.md 记录每个公开函数/类的：
+- 签名
+- 作用（一句话）
+- 上游调用者（谁调用它）
+- 下游调用（它调用谁）
+
+新增模块时在 MAINTAIN.md 追加对应表格。删除/重命名时更新受影响的条目。
+
+## 架构原则
+
+- **A1**: 层间严格相邻传递。L(0.5+1) ↔ L2 ↔ L3，不可跳跃
+- **A2**: 所有层间通信使用 LayerMessage 信封
+- **A3**: 每层只处理本层数据，只看到相邻层暴露的最小信息集
+- **A4**: Execute 与 Reflect 严格分离
+- **E1-E8**: 模块化、接口先行、不可变数据、原子持久化、测试先行
+
+## 术语
+
+| 术语 | 含义 |
+|------|------|
+| AgentRuntime | 程序运行时本身，非某个 Agent 实例 |
+| Executor | 独立于层体系的最终决策者，只收不发 |
+| Manager | 每层的主控 Agent，承担局部编排者职责 |
+
+## 关键文件
+
+- `MAINTAIN.md` — 函数级维护文档
+- `COOKBOOK.md` — 概念 ↔ 代码位置映射
+- `docs/superpowers/specs/` — 架构设计 spec
+- `docs/superpowers/plans/` — 实现计划
