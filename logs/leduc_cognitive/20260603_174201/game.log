@@ -1,0 +1,16 @@
+2026-06-03 17:42:01,486 | Config: episodes=1 temperature=0.1 log=C:\Users\micha\PycharmProjects\cognitive-agent\logs\leduc_cognitive\20260603_174201
+2026-06-03 17:42:02,463 | Seeded: L1 rules=3 L2 cards=5 L3 skills=3
+2026-06-03 17:42:04,785 | === Episode 1 ===
+2026-06-03 17:42:04,786 |   Step 0 | hand=SJ public=None legal=['call', 'raise', 'fold'] → fold
+2026-06-03 17:42:04,786 |   Result: reward=+0.5 chips | steps=1
+2026-06-03 17:42:04,786 | 
+2026-06-03 17:42:04,786 | =======================================================
+2026-06-03 17:42:04,786 |   Leduc Hold'em — Cognitive Agent Results
+2026-06-03 17:42:04,786 | =======================================================
+2026-06-03 17:42:04,786 |   Episodes:    1
+2026-06-03 17:42:04,786 |   Total Score: +0.5 chips
+2026-06-03 17:42:04,786 |   Avg/Ep:      +0.50 chips
+2026-06-03 17:42:04,786 |   Win Rate:    100% (1/1)
+2026-06-03 17:42:04,786 |   Avg Steps:   1.0
+2026-06-03 17:42:04,786 |   Log:         C:\Users\micha\PycharmProjects\cognitive-agent\logs\leduc_cognitive\20260603_174201\game.log
+2026-06-03 17:42:04,787 | =======================================================

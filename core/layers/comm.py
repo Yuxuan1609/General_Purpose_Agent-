@@ -6,7 +6,21 @@ DownwardComm: handles communication with the layer below.
 Both are deterministic — no LLM involvement. They only serialize/deserialize
 LayerMessage envelopes, keeping Manager free of protocol concerns.
 """
+from dataclasses import dataclass, field
 from core.layer_message import LayerMessage, MessageType
+
+
+@dataclass(frozen=True)
+class AgentPacket:
+    """Agent-level communication package (E3: immutable).
+
+    Carried inside LayerMessage.payload. Each layer's Agent produces a
+    JSON dict, which becomes the content field. Comm Agents wrap/unwrap
+    AgentPacket into LayerMessage for transport.
+    """
+    source_layer: str
+    message_type: str  # "query" | "response" | "notify"
+    content: dict = field(default_factory=dict)
 
 
 class UpwardComm:

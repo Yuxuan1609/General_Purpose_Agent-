@@ -94,13 +94,13 @@ def build_llm_client(model=None, temperature=0.1):
     return llm
 
 
-def build_chain():
+def build_chain(auxiliary_llm=None):
     from core.meta_driver import MetaDriver, DEFAULT_TRIGGERS, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
     from core.tools.registry import ToolRegistry
-    from core.layers import build_chain
+    from core.layers import build_chain as _build
 
     meta = MetaDriver(DEFAULT_TRIGGERS.copy(), DEFAULT_VALIDATORS.copy())
     phil = Philosophy(PROJECT_ROOT / "data" / "l1_rules.json")
@@ -108,7 +108,7 @@ def build_chain():
     sl = SkillLayer(PROJECT_ROOT / "skills", ToolRegistry())
 
     _seed_knowledge(fk, phil, sl)
-    return build_chain(meta, phil, fk, sl)
+    return _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm)
 
 
 def _seed_knowledge(fk, phil, sl=None):
@@ -215,7 +215,7 @@ def main():
 
     _load_env()
     llm_client = build_llm_client(temperature=args.temperature)
-    chain = build_chain()
+    chain = build_chain(auxiliary_llm=llm_client)
 
     from core.executor import Executor
     executor = Executor(layer_root=chain, llm_client=llm_client,

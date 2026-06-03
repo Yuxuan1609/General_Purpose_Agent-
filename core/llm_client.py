@@ -28,8 +28,11 @@ class LLMClient:
         self._client = client
         self.model = model
 
-    def chat(self, messages: list, tools: list | None = None, **kwargs) -> LLMResponse:
+    def chat(self, messages: list, tools: list | None = None,
+             json_mode: bool = False, **kwargs) -> LLMResponse:
         params = {"model": self.model, "messages": messages}
+        if json_mode:
+            params["response_format"] = {"type": "json_object"}
         params.update(kwargs)
         if tools:
             params["tools"] = [

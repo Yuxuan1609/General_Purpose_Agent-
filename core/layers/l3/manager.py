@@ -18,7 +18,8 @@ class L3Manager(LayerManager):
 
     def process(self, data: Any) -> dict:
         obs: TaskObservation = data
-        domain_path = obs.meta.get("domain", "general")
+        session = obs.session or {}
+        domain_path = session.get("domain", "general")
 
         try:
             domain = Domain(domain_path, "specific")
@@ -26,14 +27,14 @@ class L3Manager(LayerManager):
             domain = Domain("general", "general")
 
         matched = self._skill_layer.match(domain)
-        obs.meta["l3_skills"] = []
+        obs.state["l3_skills"] = []
         for s in matched:
             content = ""
             if s.skill_dir:
                 skill_file = s.skill_dir / "SKILL.md"
                 if skill_file.exists():
                     content = skill_file.read_text(encoding="utf-8")
-            obs.meta["l3_skills"].append({
+            obs.state["l3_skills"].append({
                 "name": s.name, "description": s.description,
                 "domain": s.domain.path, "content": content,
             })

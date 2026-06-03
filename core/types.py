@@ -8,18 +8,15 @@ class TaskObservation:
     """Environment observation consumed by all cognitive layers.
 
     Fields:
-        meta:    Task metadata (role, goal, domain). Populated by comm layer.
-                 Layers append their enrichment to meta during chain processing.
-        state:   Task-specific state (game board, code context, search results).
+        meta:    Natural language task description (what to do, goal).
                  Populated by comm layer.
-        history: Past interactions. None = history not needed for this task type.
-                 When present, already trimmed by comm layer.
-        session: Session context {id, datetime, task_type, meta_hash}.
+        state:   Task-specific state. Keys: "current" (str, current situation),
+                 "history" (str, past context). Populated by comm layer.
+        session: Session context {id, domain, step_index, ...}.
                  Populated by comm layer. Used by learning pipeline.
     """
-    meta: dict = field(default_factory=dict)
+    meta: str = ""
     state: dict = field(default_factory=dict)
-    history: list | None = None
     session: dict | None = None
 
 

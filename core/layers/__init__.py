@@ -1,6 +1,7 @@
 """Layer package — three-layer cognitive chain with Comm Agents (A2)."""
 
-from core.layers.base import LayerManager
+from core.layers.base import LayerManager, LayerAgent
+from core.layers.comm import UpwardComm, DownwardComm, AgentPacket
 from core.layers.l0_5_1.manager import L0_5_1Manager
 from core.layers.l2.manager import L2Manager
 from core.layers.l3.manager import L3Manager
@@ -22,11 +23,13 @@ def build_chain(meta_driver, philosophy, flexible_knowledge, skill_layer,
 
     l3 = L3Manager(skill_layer, upward=L3Upward(), downward=L3Downward())
     l2 = L2Manager(flexible_knowledge, downstream=l3,
-                   upward=L2Upward(), downward=L2Downward())
+                   upward=L2Upward(), downward=L2Downward(),
+                   auxiliary_llm=auxiliary_llm)
     l1 = L0_5_1Manager(meta_driver, philosophy, auxiliary_llm=auxiliary_llm,
                        downstream=l2,
                        upward=L1Upward(), downward=L1Downward())
     return l1
 
 
-__all__ = ["LayerManager", "L0_5_1Manager", "L2Manager", "L3Manager", "build_chain"]
+__all__ = ["LayerManager", "LayerAgent", "UpwardComm", "DownwardComm", "AgentPacket",
+           "L0_5_1Manager", "L2Manager", "L3Manager", "build_chain"]

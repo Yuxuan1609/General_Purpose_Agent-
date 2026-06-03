@@ -41,8 +41,9 @@ class Executor:
 
     def execute(self, obs: TaskObservation) -> dict:
         """Execute one action cycle through the cognitive chain."""
-        step = obs.meta.get("step", 0)
-        domain = obs.meta.get("domain", "")
+        session = obs.session or {}
+        step = session.get("step_index", 0)
+        domain = session.get("domain", "")
         logger.debug("══════ Step %d  [%s] ══════", step, domain)
         trace_id = uuid.uuid4().hex[:12]
         msg = LayerMessage(
@@ -62,7 +63,7 @@ class Executor:
             "notify_layers": notify_layers,
         }
 
-        if obs.meta.get("enable_learning") and self._learning_dir:
+        if self._learning_dir:
             self._write_pending(obs, notify_layers, result)
 
         return result
@@ -71,15 +72,15 @@ class Executor:
         return {
             "meta": obs.meta,
             "state": obs.state,
-            "history": obs.history,
         }
 
     def _call_llm(self, context: dict) -> str:
         system = self._build_system_prompt(context)
         user = self._build_user_prompt(context)
-        l1_count = len(context.get("meta", {}).get("l1_rules", []))
-        l2_count = len(context.get("meta", {}).get("l2_cards", []))
-        l3_count = len(context.get("meta", {}).get("l3_skills", []))
+        state = context.get("state", {})
+        l1_count = len(state.get("l1_rules", []))
+        l2_count = len(state.get("l2_cards", []))
+        l3_count = len(state.get("l3_skills", []))
         logger.debug("── Executor ──")
         logger.debug("  context: l1=%d l2=%d l3=%d",
                      l1_count, l2_count, l3_count)
@@ -96,18 +97,15 @@ class Executor:
         return action_text
 
     def _build_system_prompt(self, context: dict) -> str:
-        meta = context.get("meta", {})
+        meta = context.get("meta", "")
         state = context.get("state", {})
-        rules = meta.get("l1_rules", [])
-        cards = meta.get("l2_cards", [])
-        skills = meta.get("l3_skills", [])
+        rules = state.get("l1_rules", [])
+        cards = state.get("l2_cards", [])
+        skills = state.get("l3_skills", [])
 
         parts = []
-        # Task-specific instructions from comm layer
-        task_system = state.get("system_prompt", "")
-        if task_system:
-            parts.append("[任务说明]\n" + task_system)
-
+        if meta:
+            parts.append("[任务说明]\n" + meta)
         if rules:
             parts.append("[行为准则]\n" + "\n".join(f"- {r}" for r in rules))
         if cards:
@@ -129,14 +127,14 @@ class Executor:
 
     def _build_user_prompt(self, context: dict) -> str:
         state = context.get("state", {})
-        # Use the comm-layer-prepared prompt field if present
-        prompt = state.get("prompt", "")
-        if prompt:
-            return prompt
-        # Fallback: format key fields that represent game state
-        fields = {k: v for k, v in state.items()
-                  if k not in ("system_prompt", "prompt", "legal_actions", "hand_raw")}
-        return "\n".join(f"{k}: {v}" for k, v in fields.items())
+        parts = []
+        history = state.get("history", "")
+        if history:
+            parts.append(f"[对局历史]\n{history}")
+        current = state.get("current", "")
+        if current:
+            parts.append(current)
+        return "\n\n".join(parts) if parts else ""
 
     def _write_pending(self, obs: TaskObservation, notify_layers: dict,
                        result: dict) -> None:
@@ -146,7 +144,7 @@ class Executor:
         session = obs.session or {}
         rec = ExecutionRecord(
             session=session,
-            observation={"meta": obs.meta, "state": obs.state, "history": obs.history},
+            observation={"meta": obs.meta, "state": obs.state},
             notify_layers=notify_layers,
             action=result.get("action_text"),
         )

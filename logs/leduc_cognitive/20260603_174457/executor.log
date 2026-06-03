@@ -1,7 +1,7 @@
-core.executor | ══════ Step 1  [game/leduc] ══════
-core.executor | ── Executor ──
-core.executor |   context: l1=3 l2=3 l3=2
-core.executor |   system:
+2026-06-03 17:45:00,327 | ══════ Step 1  [game/leduc] ══════
+2026-06-03 17:46:41,689 | ── Executor ──
+2026-06-03 17:46:41,689 |   context: l1=0 l2=3 l3=2
+2026-06-03 17:46:41,689 |   system:
     [任务说明]
     You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.
     
@@ -14,14 +14,9 @@ core.executor |   system:
     Pair (card matches public) beats no pair. Higher rank wins ties, then suit.
     Output ONLY one word: call, raise, fold, or check.
     
-    [行为准则]
-    - 面对不确定信息时优先搜索验证，不要直接假设答案
-    - 当同一种方法连续失败时，主动换策略而非坚持原路径
-    - 棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。避免因单局短期结果改变长期策略。
-    
     [相关知识]
-    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
     - [game/leduc] 持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。 (confidence:0.8)
+    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
     - [game/leduc] 翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。 (confidence:0.7)
     
     [可用技能]
@@ -57,7 +52,7 @@ core.executor |   system:
     - K → raise
     - Q → 对手raise则fold，对手call则call
     - J → call/fold，避免主动加注
-core.executor |   user:
+2026-06-03 17:46:41,689 |   user:
     === Round: pre-flop ===
     Your card: J♥
     Public card: not yet dealt
@@ -66,13 +61,13 @@ core.executor |   user:
     Total pot: 3
     Legal actions: call, raise, fold
     Choose:
-core.executor | [Executor] action: call
-core.executor | ── end Executor ──
+2026-06-03 17:46:47,846 | [Executor] action: call
+2026-06-03 17:46:47,846 | ── end Executor ──
 
-core.executor | ══════ Step 2  [game/leduc] ══════
-core.executor | ── Executor ──
-core.executor |   context: l1=3 l2=3 l3=2
-core.executor |   system:
+2026-06-03 17:46:47,848 | ══════ Step 2  [game/leduc] ══════
+2026-06-03 17:47:58,259 | ── Executor ──
+2026-06-03 17:47:58,259 |   context: l1=0 l2=3 l3=2
+2026-06-03 17:47:58,259 |   system:
     [任务说明]
     You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.
     
@@ -85,14 +80,9 @@ core.executor |   system:
     Pair (card matches public) beats no pair. Higher rank wins ties, then suit.
     Output ONLY one word: call, raise, fold, or check.
     
-    [行为准则]
-    - 面对不确定信息时优先搜索验证，不要直接假设答案
-    - 当同一种方法连续失败时，主动换策略而非坚持原路径
-    - 棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。避免因单局短期结果改变长期策略。
-    
     [相关知识]
-    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
     - [game/leduc] 持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。 (confidence:0.8)
+    - [game/leduc] 公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。 (confidence:0.8)
     - [game/leduc] 翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。 (confidence:0.7)
     
     [可用技能]
@@ -128,15 +118,18 @@ core.executor |   system:
     - K → raise
     - Q → 对手raise则fold，对手call则call
     - J → call/fold，避免主动加注
-core.executor |   user:
-    === Round: post-flop ===
+2026-06-03 17:47:58,259 |   user:
+    [对局历史]
+      Step 1 | hand=HJ public=None legal=['call', 'raise', 'fold'] → call
+    
+    === Round: pre-flop ===
     Your card: J♥
-    Public card: J♠
+    Public card: not yet dealt
     Your bet this round: 2
-    Opponent bet this round: 2
-    Total pot: 4
-    Legal actions: raise, fold, check
+    Opponent bet this round: 4
+    Total pot: 6
+    Legal actions: call, raise, fold
     Choose:
-core.executor | [Executor] action: raise
-core.executor | ── end Executor ──
+2026-06-03 17:48:08,406 | [Executor] action: fold
+2026-06-03 17:48:08,406 | ── end Executor ──
 

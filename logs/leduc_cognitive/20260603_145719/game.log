@@ -1,6 +1,0 @@
-2026-06-03 14:57:19,795  Config: episodes=1 temperature=0.1 log=C:\Users\micha\PycharmProjects\cognitive-agent\logs\leduc_cognitive\20260603_145719
-2026-06-03 14:57:20,680  Seeded: L1 rules=3 L2 cards=5
-2026-06-03 14:57:22,731  === Episode 1 ===
-2026-06-03 14:57:39,452  Step | hand=SQ public=None legal=['call', 'raise', 'fold'] → call
-2026-06-03 14:58:34,361  Step | hand=SQ public=HK legal=['raise', 'fold', 'check'] → raise
-2026-06-03 14:58:34,362    Result: reward=+0.0 chips | steps=4

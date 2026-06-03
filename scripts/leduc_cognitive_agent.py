@@ -40,6 +40,7 @@ class LeducCognitiveAgent:
         self.use_raw = False
         self._step = 0
         self._session_id = ""
+        self._history: list[str] = []
 
     def eval_step(self, state):
         return self._decide(state)
@@ -50,24 +51,25 @@ class LeducCognitiveAgent:
     def reset_session(self, session_id: str = ""):
         self._step = 0
         self._session_id = session_id
+        self._history = []
 
     def _decide(self, state):
         raw = state["raw_obs"]
         legal_names = raw["legal_actions"]
         self._step += 1
 
+        current_text = self._build_current_text(raw)
+        history_text = "\n".join(f"  {h}" for h in self._history[-6:])
+
         obs = TaskObservation(
-            meta={
-                "domain": "game/leduc",
-                "role": "Player 0",
-                "step": self._step,
-                "enable_learning": True,
+            meta=LEDUC_SYSTEM_PROMPT,
+            state={
+                "current": current_text,
+                "history": history_text,
             },
-            state=self._build_state(raw),
-            history=None,
             session={
                 "id": self._session_id,
-                "task_type": "game/leduc",
+                "domain": "game/leduc",
                 "step_index": self._step,
             } if self._session_id else None,
         )
@@ -76,23 +78,26 @@ class LeducCognitiveAgent:
         action_text = result["action_text"].strip().lower()
 
         action_name = self._parse_action(action_text, legal_names)
+        self._history.append(
+            f"Step {self._step} | hand={raw.get('hand')} public={raw.get('public_card')} "
+            f"legal={legal_names} → {action_name}"
+        )
         logger.info("Step | hand=%s public=%s legal=%s → %s",
                      raw.get("hand"), raw.get("public_card"), legal_names, action_name)
 
         action_id = list(state["legal_actions"].keys())[legal_names.index(action_name)]
         return action_id, {}
 
-    def _build_state(self, raw: dict) -> dict:
+    def _build_current_text(self, raw: dict) -> str:
         hand_str = CARD_MAP.get(raw["hand"], raw["hand"])
         public = raw["public_card"]
         public_str = "not yet dealt" if public is None else CARD_MAP.get(public, str(public))
         chips = raw.get("all_chips", [0, 0])
         my_chips = raw.get("my_chips", 0)
-
         legal = raw["legal_actions"]
         round_name = "pre-flop" if "check" not in legal and raw["public_card"] is None else "post-flop"
 
-        user_prompt = (
+        return (
             f"=== Round: {round_name} ===\n"
             f"Your card: {hand_str}\n"
             f"Public card: {public_str}\n"
@@ -102,17 +107,6 @@ class LeducCognitiveAgent:
             f"Legal actions: {', '.join(legal)}\n"
             f"Choose:"
         )
-
-        return {
-            "system_prompt": LEDUC_SYSTEM_PROMPT,
-            "prompt": user_prompt,
-            "hand": raw["hand"],
-            "public_card": str(raw["public_card"]),
-            "legal_actions": legal,
-            "round": round_name,
-            "my_chips": my_chips,
-            "pot": sum(chips),
-        }
 
     def _parse_action(self, text: str, legal_actions: list[str]) -> str:
         text_lower = text.lower()

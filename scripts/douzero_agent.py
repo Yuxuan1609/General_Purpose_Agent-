@@ -371,13 +371,9 @@ class DouZeroCognitiveAgent:
             return infoset.legal_actions[0]
 
         obs = TaskObservation(
-            meta={
-                "domain": "game/doudizhu",
-                "role": self._position_cn,
-                "enable_learning": False,
-            },
+            meta=_SYSTEM_PROMPT_TEMPLATE.format(position_cn=self._position_cn),
             state=self._build_state(infoset),
-            history=None,
+            session={"domain": "game/doudizhu", "role": self._position_cn},
         )
 
         result = self._executor.execute(obs)
@@ -407,15 +403,26 @@ class DouZeroCognitiveAgent:
             label = f"{i}. 不出（过）" if not act else f"{i}. {cards_to_str(act)}"
             legal_lines.append(label)
 
-        system_text = _SYSTEM_PROMPT_TEMPLATE.format(position_cn=self._position_cn)
-        user_text = f"你的手牌: {hand}\n剩余牌数: {left_str}\n上一手: {last_str}\n可选: {chr(10).join(legal_lines)}"
+        current_text = (
+            f"你的身份：{self._position_cn}\n"
+            f"你的手牌：{hand}\n"
+            f"剩余牌数：{left_str}\n"
+            f"上一手：{last_str}\n\n"
+            f"可选出牌：\n" + "\n".join(legal_lines)
+        )
+
+        history_lines = []
+        played = infoset.played_cards or {}
+        for pos, cards in played.items():
+            if cards:
+                history_lines.append(
+                    f"{POSITION_CN.get(pos, pos)}已出: {cards_to_str(cards)}"
+                )
+        history_text = "\n".join(history_lines) if history_lines else ""
 
         return {
-            "system_prompt": system_text,
-            "prompt": user_text,
-            "hand": hand,
-            "hand_raw": infoset.player_hand_cards if hasattr(infoset, 'player_hand_cards') else [],
-            "legal_actions": infoset.legal_actions,
+            "current": current_text,
+            "history": history_text,
         }
 
     def parse_action(self, llm_response: str, legal_actions: list[list[int]]) -> list[int]:

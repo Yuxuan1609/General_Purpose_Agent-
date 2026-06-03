@@ -1,9 +1,63 @@
 from __future__ import annotations
+import json
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 from core.layer_message import LayerMessage, MessageType
 from core.layers.comm import UpwardComm, DownwardComm
+
+
+def _indent(text: str, spaces: int) -> str:
+    prefix = " " * spaces
+    return prefix + text.replace("\n", "\n" + prefix)
+
+
+class LayerAgent(ABC):
+    """Common base for all layer LLM agents.
+
+    Provides _call_llm() with DeepSeek JSON mode + full prompt/response logging.
+    Output is always a parsed JSON dict.
+    """
+
+    def __init__(self, llm_client, log: logging.Logger):
+        self._llm = llm_client
+        self._log = log
+
+    def _call_llm(self, system: str, user: str,
+                  schema: dict | None = None) -> dict:
+        """Call LLM, return parsed JSON dict.
+
+        When schema is given, enables DeepSeek response_format={'type':'json_object'}
+        and injects the schema example into the system prompt (per official requirement:
+        include "json" word + example format).
+        """
+        if schema:
+            schema_text = json.dumps(schema, ensure_ascii=False, indent=2)
+            system = (
+                f"{system}\n\n"
+                f"请以 JSON 格式输出，严格遵循以下结构：\n"
+                f"```json\n{schema_text}\n```"
+            )
+
+        self._log.debug("  system:\n%s", _indent(system, 4))
+        self._log.debug("  user:\n%s", _indent(user, 4))
+
+        resp = self._llm.chat(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            json_mode=bool(schema),
+        )
+        text = resp.text if hasattr(resp, 'text') else str(resp)
+        self._log.debug("  response:\n%s", _indent(text, 4))
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            self._log.warning("JSON parse failed, raw text returned")
+            return {"_raw": text}
 
 
 class LayerManager(ABC):
