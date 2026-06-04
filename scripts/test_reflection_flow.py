@@ -275,8 +275,8 @@ def _run_proposer_verifier(pkt, meta, log, layer_key, proposer_class,
     # Dispatch info (from upper layer or none)
     dispatch_info = getattr(pkt, 'dispatch_info', '无') or '无'
 
-    # Proposer
-    log.debug("── Proposer ──")
+    # ── Proposer ──
+    log.debug("  ═══ Proposer ═══")
     proposal = proposer.propose(
         layer_notify=pkt.layer_notify,
         refiner_reasoning=pkt.refiner_reasoning,
@@ -295,12 +295,13 @@ def _run_proposer_verifier(pkt, meta, log, layer_key, proposer_class,
 
     if fixes:
         # Verifier
-        log.debug("── Verifier ──")
+        log.debug("  ═══ Verifier ═══")
         existing = existing_content_fn()
         verified = verifier.verify(fixes, existing)
         log.debug("  output: %s", json.dumps(verified, ensure_ascii=False)[:500])
 
         # Manager
+        log.debug("  ═══ Manager ═══")
         for fix in verified.get("verified", []):
             try:
                 chain.apply_update(fix.get("action", ""),
@@ -311,8 +312,10 @@ def _run_proposer_verifier(pkt, meta, log, layer_key, proposer_class,
                 log.debug("  Manager applied: %s", fix.get("action", ""))
             except Exception as e:
                 log.debug("  Manager error: %s", e)
+        log.debug("  ═══ end %s ═══\n", layer_key.upper())
     else:
         log.debug("  no self_fixes proposed")
+        log.debug("  ═══ end %s ═══\n", layer_key.upper())
 
 
 # ── Helper: extract existing content per layer ──
