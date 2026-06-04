@@ -38,6 +38,7 @@ class Executor:
         self._learning_dir = learning_dir
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._session_files: dict[str, Path] = {}  # session_id → filepath
 
     def execute(self, obs: TaskObservation) -> dict:
         """Execute one action cycle through the cognitive chain.
@@ -159,10 +160,21 @@ class Executor:
 
     def _write_pending(self, obs: TaskObservation, notify_layers: dict,
                        result: dict) -> None:
-        pending_dir = self._learning_dir / "pending"
-        pending_dir.mkdir(parents=True, exist_ok=True)
-
         session = obs.session or {}
+        session_id = session.get("id", "unknown")
+        domain = session.get("domain", "general")
+
+        # Task-meta folder: one per task domain
+        task_dir = self._learning_dir / "pending" / domain.replace("/", "_")
+        task_dir.mkdir(parents=True, exist_ok=True)
+
+        # Session file: one per session, datetime-stamped (E3: atomic write)
+        if session_id not in self._session_files:
+            from datetime import datetime
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._session_files[session_id] = task_dir / f"{session_id}_{stamp}.json"
+
+        filepath = self._session_files[session_id]
         rec = ExecutionRecord(
             session=session,
             observation={"meta": obs.meta, "state": obs.state},
@@ -170,11 +182,16 @@ class Executor:
             action=result.get("action_text"),
         )
 
-        session_id = session.get("id", "unknown")
-        step_index = session.get("step_index", 0)
-        filepath = pending_dir / f"{session_id}_{step_index}.json"
-        content = json.dumps(rec.__dict__, ensure_ascii=False, indent=2, default=str)
-        tmp = tempfile.mktemp(suffix=".json", dir=str(pending_dir))
+        # Accumulate steps: load existing → append → atomic write
+        existing: list = []
+        if filepath.exists():
+            existing = json.loads(filepath.read_text(encoding="utf-8"))
+            if not isinstance(existing, list):
+                existing = [existing]
+        existing.append(rec.__dict__)
+
+        tmp = tempfile.mktemp(suffix=".json", dir=str(task_dir))
+        content = json.dumps(existing, ensure_ascii=False, indent=2, default=str)
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(content)
         Path(tmp).replace(filepath)

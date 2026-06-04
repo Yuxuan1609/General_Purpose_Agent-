@@ -84,7 +84,7 @@ class TestEndToEnd:
         executor.execute(obs)
 
         pending = learning_dir / "pending"
-        assert (pending.exists() and list(pending.glob("*.json")))
+        assert (pending.exists() and list(pending.rglob("*.json")))
 
     def test_learning_enabled_writes_pending(self, full_chain, mock_llm_with_action, tmp_path):
         learning_dir = tmp_path / "learning"
@@ -98,5 +98,5 @@ class TestEndToEnd:
         executor.execute(obs)
 
         pending = learning_dir / "pending"
-        files = list(pending.glob("*.json"))
+        files = list(pending.rglob("*.json"))
         assert len(files) == 1

@@ -88,13 +88,14 @@ class TestExecutor:
 
         pending = learning_dir / "pending"
         assert pending.exists()
-        files = list(pending.glob("*.json"))
+        files = list(pending.rglob("*.json"))
         assert len(files) == 1
 
         with open(files[0], encoding="utf-8") as f:
-            rec = json.load(f)
-        assert rec["session"]["id"] == "test-session"
-        assert "notify_layers" in rec
+            recs = json.load(f)
+        assert isinstance(recs, list) and len(recs) == 1
+        assert recs[0]["session"]["id"] == "test-session"
+        assert "notify_layers" in recs[0]
 
     def test_execute_skips_pending_when_learning_disabled(self, mock_llm, layer_chain, tmp_path):
         from core.executor import Executor
