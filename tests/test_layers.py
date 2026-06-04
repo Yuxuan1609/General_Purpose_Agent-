@@ -20,10 +20,9 @@ def l3_skill_layer(tmp_path):
 
 
 class TestL3Manager:
-    def test_process_adds_skills_to_meta(self, l3_skill_layer, tmp_path):
+    def test_query_adds_skills_to_state(self, l3_skill_layer, tmp_path):
         from core.layers.l3.manager import L3Manager
 
-        # Create a skill first
         domain = Domain("game/doudizhu", "specific")
         l3_skill_layer.create_skill(
             name="test-skill",
@@ -33,19 +32,18 @@ class TestL3Manager:
 
         manager = L3Manager(l3_skill_layer)
         obs = TaskObservation(meta="game rules", session={"domain": "game/doudizhu"})
-        result = manager.process(obs)
+        manager.query(obs)
 
         assert "l3_skills" in obs.state
-        assert result["status"] == "ok"
+        assert len(obs.state["l3_skills"]) >= 1
 
-    def test_process_handles_no_match(self, l3_skill_layer):
+    def test_query_handles_no_match(self, l3_skill_layer):
         from core.layers.l3.manager import L3Manager
 
         manager = L3Manager(l3_skill_layer)
         obs = TaskObservation(meta="game rules", state={}, session={"domain": "game/doudizhu"})
-        result = manager.process(obs)
+        manager.query(obs)
 
-        assert result["status"] == "ok"
         assert obs.state["l3_skills"] == []
 
     def test_notify_returns_payload(self, l3_skill_layer):

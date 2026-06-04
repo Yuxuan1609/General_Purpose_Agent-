@@ -26,7 +26,7 @@ def _setup_logging():
     log_dir = PROJECT_ROOT / "logs" / "leduc_cognitive_reflect" / stamp
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    fmt = logging.Formatter("%(asctime)s | %(message)s")
+    fmt = logging.Formatter("%(message)s")
 
     for noisy in ("httpx", "httpcore", "openai", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -35,7 +35,7 @@ def _setup_logging():
     root.setLevel(logging.INFO)
     ch = logging.StreamHandler(sys.stdout)
     ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
+    ch.setFormatter(logging.Formatter("%(message)s"))
     root.addHandler(ch)
 
     # Reflection log files
@@ -109,7 +109,8 @@ def build_chain():
 def main():
     log_dir = _setup_logging()
     logger = logging.getLogger("reflect_test")
-    logger.info("Reflection flow test — log=%s", log_dir)
+    logger.info("[%s] Reflection flow test", datetime.now().strftime("%H:%M:%S"))
+    logger.info("  log=%s", log_dir)
 
     pending_dir = PROJECT_ROOT / "data" / "learning" / "pending"
     records = list(pending_dir.glob("*.json"))
@@ -220,10 +221,10 @@ def main():
 
         coord_log.debug("  ═══ LearningUnit %s done ═══\n", unit.description)
 
-    logger.info("")
     logger.info("=" * 50)
     logger.info("  Reflection Test Complete")
     logger.info("  Log: %s", log_dir)
+    logger.info("  [%s]", datetime.now().strftime("%H:%M:%S"))
     logger.info("=" * 50)
 
 

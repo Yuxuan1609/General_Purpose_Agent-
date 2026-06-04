@@ -21,7 +21,8 @@ def build_chain(meta_driver, philosophy, flexible_knowledge, skill_layer,
     from core.layers.l0_5_1.upward_comm import UpwardComm as L1Upward
     from core.layers.l0_5_1.downward_comm import DownwardComm as L1Downward
 
-    l3 = L3Manager(skill_layer, upward=L3Upward(), downward=L3Downward())
+    l3 = L3Manager(skill_layer, upward=L3Upward(), downward=L3Downward(),
+                   auxiliary_llm=auxiliary_llm)
     l2 = L2Manager(flexible_knowledge, downstream=l3,
                    upward=L2Upward(), downward=L2Downward(),
                    auxiliary_llm=auxiliary_llm)

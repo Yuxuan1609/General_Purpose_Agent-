@@ -15,7 +15,10 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 |----|--------|------|
 | **L(0.5+1)** | L0.5 + L1 | 不可变宪法 + 可演化行为规则；含 **L1Agent（两阶段 V-structure）** |
 | **L2** | FlexibleKnowledge | 概率性知识卡片；含 **L2Agent（三阶段 V-structure）** |
-| **L3** | SkillLayer | SKILL.md 格式的过程性记忆；确定性匹配，不含 LLM |
+| **L3** | SkillLayer | SKILL.md 技能执行；domain 确定性匹配 + **L3Agent（LLM 选择+执行）** |
+| **L4**（预留） | — | 静态知识存储，L3 dispatch 目标 |
+
+> **L1-L4 每层都在执行**：任务分派到各层后，每层基于自己持有的信息和 LLM Agent 独立执行认知任务。区别在于执行"重量"——L2/L3 涉及检索+筛选+推理，较重；L1（行为准则匹配）和 L4（静态知识查询）相对轻量。游戏环境（Leduc）中差异不显著（任务粒度小、技能含策略描述）；通用任务（编程、搜索）中差异更明显。
 
 每层 Manager 驱动 V-structure 循环：**Agent（LLM 决策）↔ Manager（编排/状态管理）↔ Comm Agent（确定性协议）**，通过 `AgentPacket` 跨层传递内部 Agent 通信。
 
