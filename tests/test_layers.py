@@ -32,21 +32,21 @@ class TestL3Manager:
         )
 
         manager = L3Manager(l3_skill_layer)
-        obs = TaskObservation(meta={"domain": "game/doudizhu"})
+        obs = TaskObservation(meta="game rules", session={"domain": "game/doudizhu"})
         result = manager.process(obs)
 
-        assert "l3_skills" in obs.meta
+        assert "l3_skills" in obs.state
         assert result["status"] == "ok"
 
     def test_process_handles_no_match(self, l3_skill_layer):
         from core.layers.l3.manager import L3Manager
 
         manager = L3Manager(l3_skill_layer)
-        obs = TaskObservation(meta={"domain": "game/doudizhu"})
+        obs = TaskObservation(meta="game rules", state={}, session={"domain": "game/doudizhu"})
         result = manager.process(obs)
 
         assert result["status"] == "ok"
-        assert obs.meta["l3_skills"] == []
+        assert obs.state["l3_skills"] == []
 
     def test_notify_returns_payload(self, l3_skill_layer):
         from core.layers.l3.manager import L3Manager
@@ -79,24 +79,18 @@ def l0_5_meta():
 
 
 class TestL0_5_1Manager:
-    def test_process_adds_rules_to_meta(self, l0_5_meta, l1_philosophy):
-        l1_philosophy.add_rule("面对不确定信息时优先搜索验证", created_by="test")
-
+    def test_process_returns_status(self, l0_5_meta, l1_philosophy):
         manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
-        obs = TaskObservation(meta={"domain": "game/doudizhu"})
+        obs = TaskObservation(meta="game rules", state={})
         result = manager.process(obs)
-
-        assert "l1_rules" in obs.meta
-        assert len(obs.meta["l1_rules"]) >= 1
         assert result["status"] == "ok"
 
-    def test_process_no_rules(self, l0_5_meta, l1_philosophy):
+    def test_process_is_noop_for_enrichment(self, l0_5_meta, l1_philosophy):
+        """Enrichment now done via query() + L1Agent (needs LLM). process() is a stub."""
         manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
-        obs = TaskObservation(meta={"domain": "game/doudizhu"})
-        result = manager.process(obs)
-
-        assert result["status"] == "ok"
-        assert obs.meta["l1_rules"] == []
+        obs = TaskObservation(meta="game rules", state={})
+        manager.process(obs)
+        assert "l1_rules" not in obs.state  # process() no longer enriches
 
     def test_notify_returns_payload(self, l0_5_meta, l1_philosophy):
         manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
@@ -120,32 +114,18 @@ def l2_knowledge(tmp_path):
 
 
 class TestL2Manager:
-    def test_process_adds_cards_to_meta(self, l2_knowledge):
-        from core.task import Domain
-        domain = Domain("game/doudizhu", "specific")
-        card = l2_knowledge.add_card(
-            content="地主上家应优先出单张",
-            domain=domain,
-            confidence=0.8,
-            source="observation",
-        )
-        card.activation = 0.9
-
+    def test_process_returns_status(self, l2_knowledge):
         manager = L2Manager(l2_knowledge)
-        obs = TaskObservation(meta={"domain": "game/doudizhu"})
+        obs = TaskObservation(meta="game rules", state={})
         result = manager.process(obs)
-
-        assert "l2_cards" in obs.meta
-        assert len(obs.meta["l2_cards"]) >= 1
         assert result["status"] == "ok"
 
-    def test_process_no_cards(self, l2_knowledge):
+    def test_process_is_noop_for_enrichment(self, l2_knowledge):
+        """Enrichment now done via query() + L2Agent (needs LLM). process() is a stub."""
         manager = L2Manager(l2_knowledge)
-        obs = TaskObservation(meta={"domain": "game/doudizhu"})
-        result = manager.process(obs)
-
-        assert result["status"] == "ok"
-        assert obs.meta["l2_cards"] == []
+        obs = TaskObservation(meta="game rules", state={})
+        manager.process(obs)
+        assert "l2_cards" not in obs.state
 
     def test_notify_returns_payload(self, l2_knowledge):
         manager = L2Manager(l2_knowledge)

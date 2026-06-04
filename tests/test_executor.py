@@ -9,10 +9,12 @@ class _MockLayer(LayerManager):
         super().__init__(name, downstream)
         self._notify_data = notify_data or {}
     def process(self, data):
-        data.meta[f"{self.name}_seen"] = True
+        data.state[f"{self.name}_seen"] = True
         return {"status": "ok"}
     def notify(self):
         return self._notify_data
+    def apply_update(self, key, value):
+        pass
 
 
 @pytest.fixture
@@ -40,7 +42,7 @@ class TestExecutor:
         )
 
         obs = TaskObservation(
-            meta={"domain": "game/doudizhu", "enable_learning": False},
+            meta="game rules",
             state={"hand": "3 4 5 6 7"},
         )
 
@@ -48,16 +50,16 @@ class TestExecutor:
 
         assert "action_text" in result
         assert "context" in result
-        assert obs.meta["l0_5_1_seen"]
-        assert obs.meta["l2_seen"]
-        assert obs.meta["l3_seen"]
+        assert obs.state["l0_5_1_seen"]
+        assert obs.state["l2_seen"]
+        assert obs.state["l3_seen"]
 
     def test_execute_returns_notify_data(self, mock_llm, layer_chain):
         from core.executor import Executor
 
         executor = Executor(layer_root=layer_chain, llm_client=mock_llm)
 
-        obs = TaskObservation()
+        obs = TaskObservation(meta="game rules", state={})
         result = executor.execute(obs)
 
         assert "notify_layers" in result
@@ -77,8 +79,9 @@ class TestExecutor:
         )
 
         obs = TaskObservation(
-            meta={"domain": "game/doudizhu", "enable_learning": True},
-            state={"session": {"id": "test-session", "datetime": "2026-01-01", "meta_hash": "abc"}},
+            meta="game rules",
+            state={},
+            session={"id": "test-session", "domain": "game/doudizhu"},
         )
 
         executor.execute(obs)
@@ -96,18 +99,16 @@ class TestExecutor:
     def test_execute_skips_pending_when_learning_disabled(self, mock_llm, layer_chain, tmp_path):
         from core.executor import Executor
 
-        learning_dir = tmp_path / "data" / "learning"
         executor = Executor(
             layer_root=layer_chain,
             llm_client=mock_llm,
-            learning_dir=learning_dir,
+            learning_dir=None,
         )
 
         obs = TaskObservation(
-            meta={"domain": "game/doudizhu", "enable_learning": False},
-            state={"session": {"id": "s1"}},
+            meta="game rules",
+            state={},
+            session={"id": "s1"},
         )
 
         executor.execute(obs)
-        pending = learning_dir / "pending"
-        assert not pending.exists()

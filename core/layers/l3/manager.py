@@ -47,3 +47,16 @@ class L3Manager(LayerManager):
 
     def notify(self) -> Any:
         return {"status": "ok", "layer": "l3"}
+
+    def apply_update(self, key: str, value: Any) -> None:
+        """Phase 2: Update/downgrade skills via SkillLayer."""
+        if isinstance(value, dict):
+            skill_name = value.get("name", "")
+        else:
+            skill_name = str(value)
+        if key == "update_skill" and isinstance(value, dict):
+            try:
+                self._skill_layer.edit_skill(skill_name, value.get("content", ""))
+                logger.info("L3 skill %s updated via reflect", skill_name)
+            except Exception as e:
+                logger.warning("L3 skill update failed: %s", e)

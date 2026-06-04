@@ -150,54 +150,30 @@ class L0_5_1Manager(LayerManager):
             return self._final_result
         return {"status": "ok", "layer": self.name}
 
-    def query(self, msg: LayerMessage | Any, trace_id: str = "") -> None:
-        if isinstance(msg, LayerMessage):
-            data = self._upward.receive(msg)
-            if not trace_id:
-                trace_id = msg.trace_id
-        else:
-            data = msg
-
-        obs: TaskObservation = data
-        meta = obs.meta
-
-        if self._agent is None:
-            logger.warning("L1Agent not initialized (no auxiliary_llm), skipping")
-            self._final_result = {"done": True, "result": "", "reasoning": "no agent"}
-            return
-
-        for loop in range(1, L1Agent.MAX_LOOPS + 1):
-            logger.debug("── L1 Stage 1 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
-            query_text = self._agent.stage1(meta, obs.state)
-            logger.debug("  response: %s", query_text)
-
-            # Pass L1's query to L2 via state
-            obs.state["l1_query"] = query_text
-            if self._downstream:
-                q_msg = self._downward.wrap_query(
-                    payload=obs, source=self.name,
-                    target=self._downstream.name, trace_id=trace_id,
-                )
-                self._downstream.query(q_msg, trace_id)
-
-            logger.debug("── L1 Stage 2 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
-            result = self._agent.stage2(meta, obs.state)
-            logger.debug("  done: %s", result["done"])
-            logger.debug("  result: %s", result["result"][:200] if result["result"] else "")
-            logger.debug("  reasoning: %s", result["reasoning"][:200] if result["reasoning"] else "")
-
-            if result["done"]:
-                self._final_result = result
-                return
-
-        logger.warning("L1 max loops (%d) reached, force done", L1Agent.MAX_LOOPS)
-        self._final_result = {
-            "done": True,
-            "result": "",
-            "reasoning": f"max loops ({L1Agent.MAX_LOOPS}) exceeded, fallback",
-        }
-
-    def notify(self) -> Any:
-        if self._final_result:
-            return self._final_result
-        return {"status": "ok", "layer": self.name}
+    def apply_update(self, key: str, value: Any) -> None:
+        """Phase 2: Apply L1 rule changes via MetaDriver validation → Philosophy."""
+        if key == "add_rule":
+            content = value.get("content", "") if isinstance(value, dict) else str(value)
+            existing = [r.content for r in self._philosophy.all_rules()]
+            is_valid, reason = self._meta.validate_l1_change(
+                {"content": content}, existing)
+            if is_valid:
+                self._philosophy.add_rule(content, created_by="reflect")
+                logger.info("L1 rule added: %s", content[:80])
+            else:
+                logger.warning("L1 rule rejected: %s", reason)
+        elif key == "modify_rule":
+            rule_id = value.get("rule_id", "")
+            new_content = value.get("content", "")
+            try:
+                self._philosophy.modify_rule(rule_id, new_content)
+                logger.info("L1 rule %s modified", rule_id)
+            except Exception as e:
+                logger.warning("L1 rule modify failed: %s", e)
+        elif key == "remove_rule":
+            rule_id = value.get("rule_id", "") if isinstance(value, dict) else str(value)
+            try:
+                self._philosophy.remove_rule(rule_id)
+                logger.info("L1 rule %s removed", rule_id)
+            except Exception as e:
+                logger.warning("L1 rule remove failed: %s", e)

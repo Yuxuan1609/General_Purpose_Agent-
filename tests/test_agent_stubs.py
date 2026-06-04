@@ -2,7 +2,6 @@ import pytest
 
 
 STUB_MODULES = [
-    "core.orchestrator.task_decomposer",
     "core.orchestrator.task_runner",
     "core.orchestrator.meta_learner",
     "core.l0_5.manager",
@@ -32,10 +31,10 @@ class TestAgentStubsExist:
 
 class TestAgentStubInterface:
     def test_orchestrator_task_decomposer_has_decompose(self):
-        from core.orchestrator.task_decomposer import AgentStub
-        stub = AgentStub()
-        assert callable(stub.decompose)
-        assert callable(stub.receive)
+        from core.orchestrator.task_decomposer import TaskDecomposer
+        dec = TaskDecomposer()
+        assert callable(dec.decompose)
+        assert callable(dec._select_strategy)
 
     def test_manager_stubs_have_receive_and_send(self):
         from core.l2.manager import AgentStub

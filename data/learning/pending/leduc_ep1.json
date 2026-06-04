@@ -1,31 +1,26 @@
 {
   "session": {
     "id": "leduc_ep1",
-    "task_type": "game/leduc",
-    "step_index": 3
+    "domain": "game/leduc",
+    "step_index": 2
   },
   "observation": {
-    "meta": {
-      "domain": "game/leduc",
-      "role": "Player 0",
-      "step": 3,
-      "enable_learning": true,
-      "l1_rules": [
-        "面对不确定信息时优先搜索验证，不要直接假设答案",
-        "当同一种方法连续失败时，主动换策略而非坚持原路径",
-        "棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。避免因单局短期结果改变长期策略。"
-      ],
+    "meta": "You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.\n\nCards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.\n2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.\n\nPre-flop: call, raise(2 chips), or fold. Max 2 raises per round.\nPost-flop: public card dealt. check/call, raise(4 chips), or fold.\n\nPair (card matches public) beats no pair. Higher rank wins ties, then suit.\nOutput ONLY one word: call, raise, fold, or check.",
+    "state": {
+      "current": "=== Round: pre-flop ===\nYour card: J♥\nPublic card: not yet dealt\nYour bet this round: 2\nOpponent bet this round: 4\nTotal pot: 6\nLegal actions: call, raise, fold\nChoose:",
+      "history": "  Step 1 | hand=HJ public=None legal=['call', 'raise', 'fold'] → call",
+      "l1_query": "给定对手在pre-flop raise后，他的手牌是K、Q、J的各自概率是多少？",
       "l2_cards": [
-        {
-          "content": "公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。",
-          "confidence": 0.85,
-          "activation": 0.85,
-          "domain": "game/leduc"
-        },
         {
           "content": "持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。",
           "confidence": 0.8,
           "activation": 0.8,
+          "domain": "game/leduc"
+        },
+        {
+          "content": "公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。如对手仍call，说明对手可能也有高牌或已成对。",
+          "confidence": 0.85,
+          "activation": 0.85,
           "domain": "game/leduc"
         },
         {
@@ -48,32 +43,30 @@
           "domain": "game/leduc",
           "content": "---\nname: leduc-preflop-raise\ndescription: 翻牌前加注策略\ndomain: game/leduc\nrelevance_domain: game/leduc\n---\n# 翻牌前加注策略\n\n持有K时强制加注，持有Q时根据对手行为判断，持有J时倾向call观察。\n加注迫使弱牌fold或支付更高代价看公共牌。\n\n## 决策树\n- K → raise\n- Q → 对手raise则fold，对手call则call\n- J → call/fold，避免主动加注"
         }
-      ]
-    },
-    "state": {
-      "system_prompt": "You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.\n\nCards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.\n2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.\n\nPre-flop: call, raise(2 chips), or fold. Max 2 raises per round.\nPost-flop: public card dealt. check/call, raise(4 chips), or fold.\n\nPair (card matches public) beats no pair. Higher rank wins ties, then suit.\nOutput ONLY one word: call, raise, fold, or check.",
-      "prompt": "=== Round: post-flop ===\nYour card: J♠\nPublic card: Q♥\nYour bet this round: 2\nOpponent bet this round: 6\nTotal pot: 8\nLegal actions: call, raise, fold\nChoose:",
-      "hand": "SJ",
-      "public_card": "HQ",
-      "legal_actions": [
-        "call",
-        "raise",
-        "fold"
       ],
-      "round": "post-flop",
-      "my_chips": 2,
-      "pot": 8
-    },
-    "history": null
+      "l2_result": {
+        "reply": "基于对手在pre-flop raise的动作，结合常见Leduc策略，对手手牌为K的概率约为66.7%，Q的概率约为33.3%，J的概率接近0%。",
+        "cards": [
+          "持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。",
+          "翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。"
+        ],
+        "reasoning": "已知自己手牌为J♥，剩余牌堆有K♠、K♥、Q♠、Q♥、J♠共5张，先验概率各1/5。对手raise动作提供了信息。根据Leduc常见策略，持有K时几乎总是raise，持有Q时可能混合策略（约50% raise），持有J时极少raise（接近0）。采用贝叶斯更新，得到后验概率：P(K|raise)≈2/3，P(Q|raise)≈1/3，P(J|raise)≈0。因此，对手最可能持有K，其次是Q。"
+      }
+    }
   },
   "notify_layers": {
     "l0_5_1": {
-      "status": "ok",
-      "layer": "l0_5_1"
+      "done": true,
+      "result": "fold",
+      "reasoning": "手牌J♥较弱，对手加注表明很可能持有K或Q，我们处于劣势。根据概率计算，对手有K的概率40%，有Q的概率40%，有J的概率20%，我们胜率低。call需要再投入2筹码，期望收益为负，因此选择fold，避免更大损失。"
     },
     "l2": {
-      "status": "ok",
-      "layer": "l2"
+      "reply": "基于对手在pre-flop raise的动作，结合常见Leduc策略，对手手牌为K的概率约为66.7%，Q的概率约为33.3%，J的概率接近0%。",
+      "cards": [
+        "持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，尽量打满加注次数。",
+        "翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。"
+      ],
+      "reasoning": "已知自己手牌为J♥，剩余牌堆有K♠、K♥、Q♠、Q♥、J♠共5张，先验概率各1/5。对手raise动作提供了信息。根据Leduc常见策略，持有K时几乎总是raise，持有Q时可能混合策略（约50% raise），持有J时极少raise（接近0）。采用贝叶斯更新，得到后验概率：P(K|raise)≈2/3，P(Q|raise)≈1/3，P(J|raise)≈0。因此，对手最可能持有K，其次是Q。"
     },
     "l3": {
       "status": "ok",

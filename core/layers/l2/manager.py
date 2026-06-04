@@ -279,6 +279,32 @@ class L2Manager(LayerManager):
             return self._result
         return {"status": "ok", "layer": self.name}
 
+    def apply_update(self, key: str, value: Any) -> None:
+        """Phase 2: Boost/penalize knowledge cards or add new ones."""
+        card_id = value.get("card_id", "") if isinstance(value, dict) else str(value)
+        if key == "boost_card":
+            for c in self._knowledge.cards:
+                if c.id == card_id:
+                    c.boost()
+                    logger.info("L2 card %s boosted (conf=%.2f)", card_id, c.confidence)
+                    return
+        elif key == "penalize_card":
+            for c in self._knowledge.cards:
+                if c.id == card_id:
+                    c.penalize()
+                    logger.info("L2 card %s penalized (conf=%.2f)", card_id, c.confidence)
+                    return
+        elif key == "add_card" and isinstance(value, dict):
+            from core.task import Domain
+            domain_path = value.get("domain", "general")
+            self._knowledge.add_card(
+                content=value.get("content", ""),
+                domain=Domain(domain_path, "specific"),
+                confidence=value.get("confidence", 0.5),
+                source="reflect",
+            )
+            logger.info("L2 card added via reflect")
+
     def _enrich_cards(self, obs: TaskObservation, selected_nodes: list[dict]) -> None:
         cards: list = []
         seen = set()

@@ -8,6 +8,49 @@ from core.layer_message import LayerMessage, MessageType
 from core.layers.comm import UpwardComm, DownwardComm
 
 
+class ReflectionAgent(ABC):
+    """Phase 2: Per-layer reflection coordinator for recursive problem attribution.
+
+    Each layer's ReflectionAgent:
+      - investigate(issues, context) → attributs problems to self vs downstream
+      - fix(my_issues) → repairs confirmed problems via Manager.apply_update()
+      - query_downstream(issues, context) → delegates investigation to lower layer
+
+    Communication uses the same chain pattern as Execute (QUERY→RESPONSE via
+    downstream ReflectionAgent reference), not LayerMessage.
+    """
+
+    def __init__(self, layer_name: str, manager,
+                 downstream: "ReflectionAgent | None" = None):
+        self._name = layer_name
+        self._manager = manager
+        self._downstream = downstream
+
+    @abstractmethod
+    def investigate(self, issues: list[dict], context: dict) -> dict:
+        """Determine which issues belong to this layer.
+
+        Returns:
+            {"my_issues": [...], "downstream_issues": [...], "actions": [...]}
+        """
+        ...
+
+    @abstractmethod
+    def fix(self, my_issues: list[dict]) -> dict:
+        """Repair confirmed issues via Manager.apply_update().
+
+        Returns:
+            {"fixes_applied": int, "details": [...]}
+        """
+        ...
+
+    def query_downstream(self, issues: list[dict], context: dict) -> dict:
+        """Delegate investigation to downstream ReflectionAgent."""
+        if self._downstream:
+            return self._downstream.investigate(issues, context)
+        return {"my_issues": [], "downstream_issues": []}
+
+
 def _indent(text: str, spaces: int) -> str:
     prefix = " " * spaces
     return prefix + text.replace("\n", "\n" + prefix)
@@ -92,6 +135,15 @@ class LayerManager(ABC):
     @abstractmethod
     def notify(self) -> Any:
         """Return the payload for this layer's NOTIFY to the Executor."""
+        ...
+
+    @abstractmethod
+    def apply_update(self, key: str, value: Any) -> None:
+        """Phase 2: Apply a fix from ReflectionAgent to this layer's data.
+
+        Called by ReflectionAgent.fix() to write back repaired data.
+        Implementation is layer-specific (rule CRUD, card boost/penalize, skill update).
+        """
         ...
 
     def query(self, msg: LayerMessage | Any, trace_id: str = "") -> None:
