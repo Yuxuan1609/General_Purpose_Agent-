@@ -20,8 +20,15 @@ class L2ReflectionAgent(ReflectionAgent):
                 my_issues.append(issue)
 
         self._log.debug("═══ L2 ReflectionAgent ═══")
-        self._log.debug("  issues: %d → my=%d downstream=%d",
-                       len(issues), len(my_issues), len(downstream_issues))
+        for i, issue in enumerate(issues):
+            self._log.debug("  [issue %d] type=%s",
+                           i, issue.get("type", "?"))
+        self._log.debug("  → my=%d downstream=%d",
+                       len(my_issues), len(downstream_issues))
+        for mi in my_issues:
+            self._log.debug("    my: %s", mi.get("type", ""))
+        for di in downstream_issues:
+            self._log.debug("    downstream: %s", di.get("type", ""))
         return {
             "my_issues": my_issues,
             "downstream_issues": downstream_issues,

@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def _setup_logging():
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = PROJECT_ROOT / "logs" / "leduc_cognitive" / stamp
+    log_dir = PROJECT_ROOT / "logs" / "leduc_cognitive_reflect" / stamp
     log_dir.mkdir(parents=True, exist_ok=True)
 
     fmt = logging.Formatter("%(asctime)s | %(message)s")
@@ -149,7 +149,8 @@ def main():
     # ── LearningRefiner ──
     llm = build_llm_client()
     from core.orchestrator.learning_refiner import LearningRefiner
-    refiner = LearningRefiner(llm)
+    lr_log = logging.getLogger("learning_refiner")
+    refiner = LearningRefiner(llm, log=lr_log)
 
     # ── Process each LearningUnit ──
     for unit in units:

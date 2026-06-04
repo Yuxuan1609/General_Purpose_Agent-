@@ -10,8 +10,6 @@ import json
 import logging
 from core.layers.base import LayerAgent
 
-logger = logging.getLogger(__name__)
-
 
 class LearningRefiner(LayerAgent):
     """LLM agent that marks ExecutionRecords as worth_learning based on meta goal.
@@ -35,8 +33,8 @@ class LearningRefiner(LayerAgent):
         "输出所有你认为值得学习的步骤索引（整数数组）。"
     )
 
-    def __init__(self, llm_client):
-        super().__init__(llm_client, logger)
+    def __init__(self, llm_client, log: logging.Logger | None = None):
+        super().__init__(llm_client, log or logging.getLogger(__name__))
 
     def refine(self, meta: str, records: list[dict]) -> dict:
         """Select which records to learn from.
