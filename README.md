@@ -501,7 +501,7 @@ baselines/
 仍作为数据对象保留，但不再作为独立层运行：
 
 - **MetaDriver** (`core/meta_driver.py`)：4 个反射触发器（stagnation/task_failed/task_completed/domain_shift）、2 个验证器（not_duplicate/no_contradiction）、危险工具过滤
-- **Philosophy** (`core/philosophy.py`)：Rule.source 区分 L0.5 宪法（不可变，仅用户手动修改）和 L1 行为规则（可变，反射可修改）。持久化到 `data/l1_rules.json`
+- **Philosophy** (`core/philosophy.py`)：Rule.source 区分 L0.5 宪法（不可变，仅用户手动修改）和 L1 行为规则（可变，反射可修改）。持久化到 `data/layers/l1_rules.json`
 - **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard + KnowledgeGraph，MD+JSON 双存。支持 add/remove/modify 卡片
 - **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，支持 create/edit/delete
 
@@ -578,9 +578,11 @@ cognitive-agent/
   config.yaml                 # 用户配置
   pyproject.toml              # 项目元数据与依赖
   config/                     # 分层配置文件
-    l1.yaml                   # L1 行为规则种子 (max: 20, ≤300字/rule)
-    l2.yaml                   # L2 激活权重、衰减率、limits (≤10 cards/query)
-    l3.yaml                   # L3 编译阈值、匹配分数、limits (≤15 skills/query)
+    layers/
+      l1.yaml                   # L1 行为规则种子 (max: 20, ≤300字/rule)
+      l2.yaml                   # L2 激活权重、衰减率、limits (≤10 cards/query)
+      l3.yaml                   # L3 编译阈值、匹配分数、limits (≤15 skills/query)
+      reflect.yaml              # Phase 2a: Proposer/Verifier 提示词 + JSON schema
   core/                       # 核心源代码
     types.py                  # TaskObservation, ExecutionRecord
     executor.py               # Executor — 独立决策者（新架构入口）
@@ -623,15 +625,16 @@ cognitive-agent/
     process_stats.py          # CSV 数据处理
     run_parallel_test.py      # 并行 Leduc 测试
   data/                       # 运行时数据
-    l1_rules.json             # L1 持久化
-    learning/pending/         # ExecutionRecord 待反思
-  knowledge/                  # L2 知识 MD + l2_index.json
-    game/leduc/               # Leduc Hold'em 策略
-    game/doudizhu/            # 斗地主策略
-  skills/                     # L3 技能 SKILL.md
-    game/leduc/               # leduc-preflop-raise, leduc-postflop-pair
-    game/doudizhu/            # doudizhu-top-card
-  logs/                       # 运行日志
+    layers/
+      l1_rules.json             # L1 持久化
+      knowledge/                # L2 知识 MD + l2_index.json
+        game/leduc/             # Leduc Hold'em 策略
+        game/doudizhu/          # 斗地主策略
+      skills/                   # L3 技能 SKILL.md
+        game/leduc/             # leduc-preflop-raise, leduc-postflop-pair
+        game/doudizhu/          # doudizhu-top-card
+    learning/pending/           # ExecutionRecord 待反思
+  logs/                         # 运行日志
   tests/                      # pytest (19 test files)
   docs/                       # 设计文档
 ```

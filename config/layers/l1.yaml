@@ -13,4 +13,4 @@ max_rules: 20
   max_rule_length: 300
 
 # 规则持久化路径（运行时数据，非配置）
-rules_path: data/l1_rules.json
+rules_path: data/layers/l1_rules.json

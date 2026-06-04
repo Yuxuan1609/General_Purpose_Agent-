@@ -47,5 +47,5 @@ spreading:
     prerequisite: 0.5
 
 # 持久化路径
-index_path: knowledge/l2_index.json
-knowledge_dir: knowledge/
+index_path: data/layers/knowledge/l2_index.json
+knowledge_dir: data/layers/knowledge/

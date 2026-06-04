@@ -11,10 +11,10 @@ class AgentConfig:
     max_iterations: int = 50
     l1_max_rules: int = 20
     l1_max_rule_length: int = 100
-    l1_rules_path: Path = Path("./data/l1_rules.json")
-    skills_dir: Path = Path("./skills")
-    knowledge_dir: Path = Path("./knowledge")
-    l2_index_path: Path = Path("./knowledge/l2_index.json")
+    l1_rules_path: Path = Path("./data/layers/l1_rules.json")
+    skills_dir: Path = Path("./data/layers/skills")
+    knowledge_dir: Path = Path("./data/layers/knowledge")
+    l2_index_path: Path = Path("./data/layers/knowledge/l2_index.json")
     seed_l1_rules: list[str] | None = None
     seed_l2_cards: list[dict] | None = None
     seed_l3_skills: list[Path] | None = None

@@ -148,74 +148,12 @@
 | 提案审批 `apply()` | `core/philosophy.py` → `Philosophy.apply(proposal)` |
 | L1→系统提示词注入 | `core/agent_loop.py` → 搜索 `l1_rules` 在 build_system_prompt 中的位置 |
 | JSON 持久化 | `core/philosophy.py` → `_save()` 方法 |
-| 种子规则数据 | `data/l1_rules.json`（全文） |
-| 容量约束 | `core/philosophy.py` → `max_rules` 和 `max_rule_length` 参数 |
-
-### L2 — Flexible Knowledge
-
-| README 中的概念 | 代码位置 |
-|---|---|
-| KnowledgeCard 数据类 | `core/flexible_knowledge.py` → `KnowledgeCard` 类定义 |
-| 激活值计算公式 | `core/flexible_knowledge.py` → `FlexibleKnowledge.compute_activation(task_domain)` |
-| 领域匹配权重 (exact=1.0 / parent=0.7 / child=0.5 / general=0.4) | `core/flexible_knowledge.py` → `_domain_match_score(...)` 方法 |
-| boost / penalize 方法 | `core/flexible_knowledge.py` → `KnowledgeCard.boost()` / `KnowledgeCard.penalize()` |
-| apply_decay（指数衰减） | `core/flexible_knowledge.py` → `KnowledgeCard.apply_decay()` |
-| KnowledgeGraph 类 | `core/flexible_knowledge.py` → `KnowledgeGraph` 类 |
-| spread_activation（2 跳扩散） | `core/flexible_knowledge.py` → `KnowledgeGraph.spread_activation(seed_ids, steps=2)` |
-| MD + JSON 双存方案 | `core/flexible_knowledge.py` → `save_md()` / `save_index()` 方法 |
-| L2 知识点索引 | `knowledge/l2_index.json` |
-
-### L3 — Skill Layer
-
-| README 中的概念 | 代码位置 |
-|---|---|
-| Skill CRUD 操作 | `core/skill_layer.py` → `create_skill()` / `edit_skill()` / `patch_skill()` / `delete_skill()` |
-| 领域匹配（精确 > 父级 > general > 根域） | `core/skill_layer.py` → `match(task_domain)` 方法 |
-| L2→L3 编译条件判断 | `core/skill_layer.py` → `should_create_skill(domain, cards)` 方法 |
-| L2→L3 编译流程 | `core/skill_layer.py` → `propose_and_create(...)` 方法 |
-| L3 共享的三个工具注册 | `core/skill_layer.py` → `__init__` 末尾，`register_skill_tools` 相关逻辑 |
-| 技能存储目录 | `skills/` 目录 |
-
----
-
-## 6. 工具系统
-
-| README 中的工具 | 注册位置 | 调度逻辑 |
-|---|---|---|
-| ToolRegistry 单例 | `core/tools/registry.py` → `ToolRegistry` 类 | `dispatch(name, args)` |
-| thread-safe 保证 | `core/tools/registry.py` → `threading.Lock()` 的使用 | — |
-| 条件过滤 `check_fn` | `core/tools/registry.py` → `register(check_fn=...)` 参数 | `get_definitions(filter=...)` |
-| `toolset` 分组 | `core/tools/registry.py` → `register(toolset=...)` 参数 | — |
-| `todo` 工具 | `core/tools/todo_tool.py` → `register_todo_tool(registry)` | — |
-| `terminal` 工具（30s 超时） | `core/tools/terminal_tool.py` → `register_terminal_tool(registry)` | `subprocess.run(timeout=30)` |
-| `terminal` 白名单 | `core/tools/terminal_tool.py` → `register_terminal_tool()` 参数 `allowed_commands` | — |
-| `web_search` 工具 | `core/tools/web_search_tool.py` → `register_web_search_tool(registry)` | DuckDuckGo API 调用 |
-
----
-
-## 7. 项目结构
-
-| README 中的文件/目录 | 实际路径 |
-|---|---|
-| `main.py` | `main.py` |
-| `config.yaml` | `config.yaml` |
-| `pyproject.toml` | `pyproject.toml` |
-| `core/agent.py` | `core/agent.py` |
-| `core/agent_loop.py` | `core/agent_loop.py` |
-| `core/config.py` | `core/config.py` |
-| `core/layer_context.py` | `core/layer_context.py` |
-| `core/task.py` | `core/task.py` |
-| `core/meta_driver.py` | `core/meta_driver.py` |
-| `core/philosophy.py` | `core/philosophy.py` |
-| `core/flexible_knowledge.py` | `core/flexible_knowledge.py` |
-| `core/skill_layer.py` | `core/skill_layer.py` |
-| `core/tools/registry.py` | `core/tools/registry.py` |
-| `core/tools/todo_tool.py` | `core/tools/todo_tool.py` |
-| `core/tools/terminal_tool.py` | `core/tools/terminal_tool.py` |
-| `core/tools/web_search_tool.py` | `core/tools/web_search_tool.py` |
-| `data/l1_rules.json` | `data/l1_rules.json` |
-| `knowledge/l2_index.json` | `knowledge/l2_index.json` |
-| `skills/` | `skills/` 目录 |
+| 种子规则数据 | `data/layers/l1_rules.json`（全文） |
+| L2 知识点索引 | `data/layers/knowledge/l2_index.json` |
+| 技能存储目录 | `data/layers/skills/` 目录 |
+| `data/layers/l1_rules.json` | `data/layers/l1_rules.json` |
+| `data/layers/knowledge/l2_index.json` | `data/layers/knowledge/l2_index.json` |
+| `data/layers/skills/` | `data/layers/skills/` 目录 |
 | `tests/` | `tests/` 目录（含 9 个测试文件 + conftest.py） |
 | `docs/` | `docs/` 目录（含 4 个设计文档） |
 

@@ -23,4 +23,4 @@ name_regex: "^[a-z0-9][a-z0-9._-]*$"
 name_max_length: 64
 
 # 技能持久化路径
-skills_dir: skills/
+skills_dir: data/layers/skills/

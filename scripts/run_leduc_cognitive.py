@@ -103,9 +103,10 @@ def build_chain(auxiliary_llm=None):
     from core.layers import build_chain as _build
 
     meta = MetaDriver(DEFAULT_TRIGGERS.copy(), DEFAULT_VALIDATORS.copy())
-    phil = Philosophy(PROJECT_ROOT / "data" / "l1_rules.json")
-    fk = FlexibleKnowledge(PROJECT_ROOT / "knowledge", PROJECT_ROOT / "knowledge" / "l2_index.json")
-    sl = SkillLayer(PROJECT_ROOT / "skills", ToolRegistry())
+    phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
+    fk = FlexibleKnowledge(PROJECT_ROOT / "data" / "layers" / "knowledge",
+                           PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json")
+    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", ToolRegistry())
 
     _seed_knowledge(fk, phil, sl)
     return _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm)

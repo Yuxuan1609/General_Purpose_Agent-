@@ -48,5 +48,5 @@ class ReflectConfig:
 
 
 def load_reflect_config() -> ReflectConfig:
-    config_path = Path(__file__).resolve().parent.parent / "config" / "reflect.yaml"
+    config_path = Path(__file__).resolve().parent.parent / "config" / "layers" / "reflect.yaml"
     return ReflectConfig.from_yaml(config_path)

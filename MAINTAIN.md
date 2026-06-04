@@ -40,9 +40,9 @@
 
 | 文件 | 内容 | 使用者 |
 |------|------|--------|
-| `config/l1.yaml` | L1 种子规则、max_rules、max_rule_length | Philosophy 初始化 |
-| `config/l2.yaml` | L2 激活权重、decay_rate、domain_match 分数 | FlexibleKnowledge 初始化 |
-| `config/l3.yaml` | L3 编译阈值、技能匹配分数 | SkillLayer 初始化 |
+| `config/layers/l1.yaml` | L1 种子规则、max_rules、max_rule_length | Philosophy 初始化 |
+| `config/layers/l2.yaml` | L2 激活权重、decay_rate、domain_match 分数 | FlexibleKnowledge 初始化 |
+| `config/layers/l3.yaml` | L3 编译阈值、技能匹配分数 | SkillLayer 初始化 |
 
 ## core/layers/comm.py (Phase 1.5)
 
@@ -251,7 +251,7 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `ReflectConfig` | `@dataclass(l1, l2, l3)` | 三层 Proposer/Verifier 配置容器 | load_reflect_config() | — |
-| `ReflectConfig.from_yaml` | `(path) → ReflectConfig` | 从 config/reflect.yaml 加载 | load_reflect_config() | yaml.safe_load() |
+| `ReflectConfig.from_yaml` | `(path) → ReflectConfig` | 从 config/layers/reflect.yaml 加载 | load_reflect_config() | yaml.safe_load() |
 | `load_reflect_config` | `() → ReflectConfig` | 单例加载 reflect.yaml | 所有 Proposer/Verifier | ReflectConfig.from_yaml() |
 | `ReflectConfig.proposer_schema` | `(layer) → dict` | 返回某层的 Proposer JSON schema | Proposer | — |
 | `ReflectConfig.verifier_schema` | `(layer) → dict` | 返回某层的 Verifier JSON schema | Verifier | — |
