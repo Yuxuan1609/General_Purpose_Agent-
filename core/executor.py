@@ -63,10 +63,16 @@ class Executor:
         # Executor formats output without substantive reasoning.
         # TODO: Future complex tasks may need an extra LLM formatting call.
         l1_notify = notify_layers.get("l0_5_1", {})
+        logger.debug("══════ Step %d  [%s] ══════", step, domain)
         if l1_notify.get("done") and l1_notify.get("result"):
             action_text = l1_notify["result"]
+            logger.debug("  L1 NOTIFY: done=%s result=%s",
+                         l1_notify.get("done"), action_text)
+            if l1_notify.get("reasoning"):
+                logger.debug("  L1 reasoning: %s", l1_notify["reasoning"])
+            logger.debug("  Executor action: %s", action_text)
         else:
-            logger.debug("L1 result unavailable, falling back to LLM")
+            logger.debug("  L1 result unavailable, falling back to LLM")
             context = self._assemble_context(obs)
             action_text = self._call_llm(context)
 
