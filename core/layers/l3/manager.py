@@ -35,14 +35,14 @@ class L3Agent(LayerAgent):
     def __init__(self, llm_client):
         super().__init__(llm_client, logger)
 
-    def execute(self, meta: str, state: dict) -> dict:
+    def execute(self, meta: str, state: dict,
+                matched_skills: list[dict] | None = None) -> dict:
         """Analyze matched skills and produce execution result.
 
-        TODO: Future card-level matching — skills selected based on L2 cards
-              relevance, not just domain match.
+        E3: matched_skills passed explicitly, not read from shared mutable state.
         """
         current = state.get("current", "")
-        skills = state.get("l3_skills", [])
+        skills = matched_skills or []
         skills_text = "\n".join(
             f"## {s.get('name', '')}: {s.get('description', '')}"
             f"\n{s.get('content', '')[:800]}"
@@ -80,6 +80,7 @@ class L3Manager(LayerManager):
         self._skill_layer = skill_layer
         self._agent = L3Agent(auxiliary_llm) if auxiliary_llm else None
         self._matched: list[str] = []
+        self._matched_skills: list[dict] = []  # E3: local storage, not obs.state
         self._result: dict | None = None
 
     def process(self, data: Any) -> dict:
@@ -93,8 +94,12 @@ class L3Manager(LayerManager):
         else:
             data = msg
 
-        obs: TaskObservation = data
-        session = obs.session or {}
+        # E3: payload is a composite dict {obs, ...} or TaskObservation directly
+        if isinstance(data, dict):
+            obs = data.get("obs")
+        else:
+            obs = data
+        session = obs.session if obs else {}
         domain_path = session.get("domain", "general")
 
         # Deterministic: domain-based skill matching
@@ -105,14 +110,14 @@ class L3Manager(LayerManager):
 
         matched = self._skill_layer.match(domain)
         self._matched = [s.name for s in matched]
-        obs.state["l3_skills"] = []
+        self._matched_skills = []
         for s in matched:
             content = ""
             if s.skill_dir:
                 skill_file = s.skill_dir / "SKILL.md"
                 if skill_file.exists():
                     content = skill_file.read_text(encoding="utf-8")
-            obs.state["l3_skills"].append({
+            self._matched_skills.append({
                 "name": s.name, "description": s.description,
                 "domain": s.domain.path, "content": content,
             })
@@ -124,17 +129,17 @@ class L3Manager(LayerManager):
         # LLM Agent: select relevant skills + execute
         if self._agent:
             logger.debug("── L3 Agent ──")
-            meta = obs.meta
-            result = self._agent.execute(meta, obs.state)
+            meta = obs.meta if obs else ""
+            result = self._agent.execute(meta, obs.state if obs else {},
+                                         matched_skills=self._matched_skills)
             logger.debug("  skills_used: %s", result.get("skills_used"))
             logger.debug("  result: %s", str(result.get("result", ""))[:200])
-            obs.state["l3_result"] = result
             self._result = result
 
         # Propagate downstream (L4, reserved)
         if self._downstream:
             q_msg = self._downward.wrap_query(
-                payload=obs, source=self.name,
+                payload={"obs": obs}, source=self.name,
                 target=self._downstream.name, trace_id=trace_id,
             )
             self._downstream.query(q_msg, trace_id)

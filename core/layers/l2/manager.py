@@ -116,10 +116,11 @@ class L2Agent(LayerAgent):
         return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
 
     def stage3(self, query: str, meta: str, state: dict,
-               selected_nodes: list[dict], stage2_result: dict) -> dict:
+               selected_nodes: list[dict], stage2_result: dict,
+               l3_skills: list[dict] | None = None) -> dict:
         """Final NOTIFY: integrate L3 response + all prior context.
 
-        Same pattern as L1's stage2 notify output.
+        E3: l3_skills passed explicitly, not read from shared mutable state.
         """
         cards = self._get_cards_for_nodes(selected_nodes)
         cards_text = "\n".join(
@@ -128,11 +129,11 @@ class L2Agent(LayerAgent):
         ) if cards else "（无相关卡片）"
 
         current = state.get("current", "")
-        l3_skills = state.get("l3_skills", [])
+        skills = l3_skills or []
         skills_text = "\n".join(
             f"[{s.get('name', '')}] {s.get('content', '')}"
-            for s in l3_skills
-        ) if l3_skills else "（L3 未返回信息）"
+            for s in skills
+        ) if skills else "（L3 未返回信息）"
 
         system = (
             "你是 L2 层的认知 Agent，负责最终知识整合与回复。\n"
@@ -183,6 +184,7 @@ class L2Manager(LayerManager):
         self._knowledge = knowledge
         self._agent = L2Agent(auxiliary_llm, knowledge) if auxiliary_llm else None
         self._result: dict | None = None
+        self._cards: list[dict] = []   # E3: local storage, not obs.state
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -195,22 +197,27 @@ class L2Manager(LayerManager):
         else:
             data = msg
 
-        obs: TaskObservation = data
-        query = obs.state.get("l1_query", obs.meta)
-        meta = obs.meta
+        # E3: payload is a composite dict {obs, query, selected_nodes} or TaskObservation directly
+        if isinstance(data, dict):
+            obs = data.get("obs")
+            query: str = data.get("query", "")
+            selected_nodes: list[dict] = data.get("selected_nodes", [])
+        else:
+            obs = data
+            query = ""
+            selected_nodes = []
+        meta = obs.meta if obs else ""
 
         if self._agent is None:
             logger.warning("L2Agent not initialized (no auxiliary_llm), skipping")
-            obs.state["l2_cards"] = []
+            self._cards = []
             self._result = {"reply": "", "cards": [], "reasoning": "no agent"}
             self._propagate(obs, trace_id)
             return
 
         # ═══ Stage 1: Node Selection ═══
-        # Phase 2a: L1 now owns this step. Read selected nodes from state.
-        selected_nodes = obs.state.get("l2_selected_nodes", [])
+        # Phase 2a: L1 supplies selected_nodes. Fallback if empty.
         if not selected_nodes:
-            # Fallback: L1 didn't provide nodes, run stage1 locally
             logger.debug("  ═══ L2 Stage 1 — Node Selection (fallback) ═══")
             selected_nodes = self._agent.stage1(query, meta, obs.state)
             logger.debug("  ── Stage 1 结果 ──")
@@ -232,15 +239,19 @@ class L2Manager(LayerManager):
                      str(stage2_result.get("l3_task", ""))[:120])
         logger.debug("")
 
-        # Enrich state for Executor
-        self._enrich_cards(obs, selected_nodes)
+        # E3: store cards locally, not in obs.state
+        self._cards = self._build_cards(selected_nodes)
 
-        # Propagate to L3 (stub — enriches l3_skills)
+        # Propagate to L3
         self._propagate(obs, trace_id)
+
+        # E3: L3 skills from downstream manager, not obs.state
+        l3_skills = getattr(self._downstream, '_matched_skills', []) if self._downstream else []
 
         # ═══ Stage 3: Notify — integrate L3 + final reply ═══
         logger.debug("  ═══ L2 Stage 3 — Notify ═══")
-        final = self._agent.stage3(query, meta, obs.state, selected_nodes, stage2_result)
+        final = self._agent.stage3(query, meta, obs.state, selected_nodes,
+                                    stage2_result, l3_skills=l3_skills)
         logger.debug("  ── Stage 3 结果 ──")
         logger.debug("    reply: %s", str(final.get("reply", ""))[:200])
         logger.debug("    cards: %d 张", len(final.get("cards", [])))
@@ -250,23 +261,22 @@ class L2Manager(LayerManager):
         # NOTIFY enrichment: what cards were used, what L3 returned
         cards = final.get("cards", [])
         final["cards_used"] = [str(c)[:100] for c in cards[:5]]
-        l3_skills = obs.state.get("l3_skills", [])
         final["l3_received"] = {
             "skills": [s.get("name", "") for s in l3_skills[:5]],
         }
 
-        obs.state["l2_result"] = final
         self._result = final
 
-    def _propagate(self, obs: TaskObservation, trace_id: str) -> None:
+    def _propagate(self, obs, trace_id: str) -> None:
         if self._downstream:
             q_msg = self._downward.wrap_query(
-                payload=obs, source=self.name,
+                payload={"obs": obs}, source=self.name,
                 target=self._downstream.name, trace_id=trace_id,
             )
             self._downstream.query(q_msg, trace_id)
 
-    def _enrich_cards(self, obs: TaskObservation, selected_nodes: list[dict]) -> None:
+    def _build_cards(self, selected_nodes: list[dict]) -> list[dict]:
+        """E3: build cards list locally, return value — no obs.state mutation."""
         cards: list = []
         seen = set()
         for node in selected_nodes:
@@ -279,7 +289,7 @@ class L2Manager(LayerManager):
             except Exception:
                 continue
             cards.extend(self._knowledge.get_domain_cards(domain))
-        obs.state["l2_cards"] = [
+        return [
             {
                 "content": c.content,
                 "confidence": c.confidence,
@@ -319,33 +329,3 @@ class L2Manager(LayerManager):
                 source="reflect",
             )
             logger.info("L2 card added via reflect")
-
-    def _enrich_cards(self, obs: TaskObservation, selected_nodes: list[dict]) -> None:
-        cards: list = []
-        seen = set()
-        for node in selected_nodes:
-            name = node.get("name", "")
-            if name in seen:
-                continue
-            seen.add(name)
-            try:
-                domain = Domain(name, "specific")
-            except Exception:
-                continue
-            cards.extend(self._knowledge.get_domain_cards(domain))
-        obs.state["l2_cards"] = [
-            {
-                "content": c.content,
-                "confidence": c.confidence,
-                "activation": c.activation,
-                "domain": c.domain.path,
-            }
-            for c in cards
-        ]
-
-    def notify(self) -> Any:
-        # TODO: NOTIFY to L1 (full reasoning+cards) vs Executor (structured list)
-        #       may differ. Currently returns same content.
-        if self._result:
-            return self._result
-        return {"status": "ok", "layer": self.name}

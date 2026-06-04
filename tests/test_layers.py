@@ -34,8 +34,7 @@ class TestL3Manager:
         obs = TaskObservation(meta="game rules", session={"domain": "game/doudizhu"})
         manager.query(obs)
 
-        assert "l3_skills" in obs.state
-        assert len(obs.state["l3_skills"]) >= 1
+        assert len(manager._matched_skills) >= 1
 
     def test_query_handles_no_match(self, l3_skill_layer):
         from core.layers.l3.manager import L3Manager
@@ -44,7 +43,7 @@ class TestL3Manager:
         obs = TaskObservation(meta="game rules", state={}, session={"domain": "game/doudizhu"})
         manager.query(obs)
 
-        assert obs.state["l3_skills"] == []
+        assert manager._matched_skills == []
 
     def test_notify_returns_payload(self, l3_skill_layer):
         from core.layers.l3.manager import L3Manager

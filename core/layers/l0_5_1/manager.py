@@ -3,7 +3,6 @@ import logging
 from typing import Any
 from core.types import TaskObservation
 from core.layers.base import LayerManager, LayerAgent, _indent
-from core.layers.comm import AgentPacket
 from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l0_5_1")
@@ -89,11 +88,17 @@ class L1Agent(LayerAgent):
         result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
         return result
 
-    def stage2(self, meta: str, state: dict) -> dict:
+    def stage2(self, meta: str, state: dict,
+               l2_cards: list[dict] | None = None,
+               l2_result: dict | None = None) -> dict:
+        """Stage2: integrate L2 knowledge and produce final decision.
+
+        Accepts L2 results as explicit params (E3: no shared mutable state).
+        """
         instruction = "整合下层返回的知识信息，基于游戏规则和行为准则做出最终决策。"
         system = self._build_system_prompt(instruction, meta)
 
-        cards = state.get("l2_cards", [])
+        cards = l2_cards or []
         cards_text = "\n".join(
             f"- [{c.get('domain', '')}] {c.get('content', '')}"
             for c in cards
@@ -106,10 +111,10 @@ class L1Agent(LayerAgent):
         result["rules_applied"] = [
             r.content[:100] for r in self._philosophy.all_rules()[:5]
         ]
-        l2_result = state.get("l2_result", {})
+        l2 = l2_result or {}
         result["l2_received"] = {
-            "reply": str(l2_result.get("reply", ""))[:300],
-            "cards": list(l2_result.get("cards", []))[:5],
+            "reply": str(l2.get("reply", ""))[:300],
+            "cards": list(l2.get("cards", []))[:5],
         }
         return result
 
@@ -157,30 +162,30 @@ class L0_5_1Manager(LayerManager):
         for loop in range(1, L1Agent.MAX_LOOPS + 1):
             logger.debug("── L1 Stage 1 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
             stage1_result = self._agent.stage1(meta, obs.state,
-                                               domain_nodes=self._domain_nodes)
+                                                domain_nodes=self._domain_nodes)
             query_text = stage1_result.get("query", "")
             selected_nodes = stage1_result.get("domain_nodes", [])
             logger.debug("  query: %s", query_text)
             for n in selected_nodes:
                 logger.debug("    node: %s (score=%s)", n.get("name"), n.get("score"))
 
-            # Package L1's query as AgentPacket, store in state for L2
-            l1_packet = AgentPacket(source_layer="l1", message_type="query",
-                                    content={"query": query_text})
-            obs.state["l1_query"] = query_text
-            obs.state["l1_packet"] = l1_packet
-            # Store domain-node selection for L2 to consume (replaces L2 stage1 LLM call)
-            obs.state["l2_selected_nodes"] = selected_nodes
-
             if self._downstream:
+                # E3: pass data via LayerMessage payload, not obs.state mutation
                 q_msg = self._downward.wrap_query(
-                    payload=obs, source=self.name,
-                    target=self._downstream.name, trace_id=trace_id,
+                    payload={"obs": obs, "query": query_text,
+                             "selected_nodes": selected_nodes},
+                    source=self.name, target=self._downstream.name,
+                    trace_id=trace_id,
                 )
                 self._downstream.query(q_msg, trace_id)
 
+            # E3: read L2 results from downstream manager, not from obs.state
+            l2_cards = getattr(self._downstream, '_cards', []) if self._downstream else []
+            l2_result = self._downstream._result if self._downstream else {}
+
             logger.debug("── L1 Stage 2 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
-            result = self._agent.stage2(meta, obs.state)
+            result = self._agent.stage2(meta, obs.state,
+                                        l2_cards=l2_cards, l2_result=l2_result)
             logger.debug("  result: done=%s result=%s",
                          result.get("done"), str(result.get("result", ""))[:200])
 
