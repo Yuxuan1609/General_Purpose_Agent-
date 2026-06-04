@@ -90,21 +90,27 @@
 | `UpwardComm` | extends `comm.UpwardComm` | L3→L2 通信 | L2 DownwardComm | L3Manager |
 | `DownwardComm` | extends `comm.DownwardComm` | L3→L4 通信（预留） | L3Manager | — |
 
-## core/layers/l3/manager.py (NEW in Phase 1)
+## core/layers/l3/manager.py (Phase 1 + Phase 2a)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3Manager` | `__init__(skill_layer, downstream, upward, downward)` | L3 层 Manager，包裹 SkillLayer，纯确定性 | build_chain() | — |
-| `L3Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 匹配技能，加载 SKILL.md 全文写入 obs.state["l3_skills"] | LayerManager.query() | SkillLayer.match() |
-| `L3Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l3"}` | collect_notify() | — |
+| `L3Manager` | `__init__(skill_layer, downstream, upward, downward, auxiliary_llm)` | L3 层 Manager，包裹 SkillLayer + L3Agent | build_chain() | — |
+| `L3Manager.query` | `(msg, trace_id) → None` | 确定性匹配技能 → L3Agent(LLM) 选择+执行 → 存储结果 | L2Manager._propagate | SkillLayer.match(), L3Agent.execute() |
+| `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
+| `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
+| `L3Manager.apply_update` | `(key, value) → None` | Phase 2a: 更新 L3 技能 | L3ReflectVerifier → Manager | SkillLayer.edit_skill() |
+| `L3Agent` | `__init__(llm_client)` | L3 LLM Agent：基于匹配技能执行认知任务 | L3Manager.query() | — |
+| `L3Agent.execute` | `(meta, state) → dict{skills_used, result, reasoning}` | 选择相关技能 + 基于技能推理 + 产出执行结果 | L3Manager.query() | _call_llm() |
 | `L3Manager.apply_update` | `(key, value) → None` | Phase 2: 更新 L3 技能 | L3ReflectionAgent.fix() | SkillLayer.edit_skill() |
 
-## core/layers/l3/reflection_agent.py (Phase 2)
+## core/layers/l3/reflection_agent.py (Phase 2 → Phase 2a)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3ReflectionAgent.investigate` | `(issues, context) → dict` | 技能问题在 L3 终结，不向下派发 | ReflectCoordinator / L2ReflectionAgent | — |
-| `L3ReflectionAgent.fix` | `(my_issues) → dict` | 通过 Manager.apply_update("update_skill") 修复 | investigate() | L3Manager.apply_update() |
+| `L3ReflectProposer` | `__init__(llm_client)` | L3 Proposer(LLM): 分析 L3 NOTIFY + 已有技能 → propose self_fixes | ReflectCoordinator | _call_llm() |
+| `L3ReflectProposer.propose` | `(layer_notify, refiner_reasoning, meta, dispatch_info) → dict` | 产出 `{self_fixes: [{action, skill_name, content, reason}]}` | test_reflection_flow | — |
+| `L3ReflectVerifier` | `__init__(llm_client)` | L3 Verifier(LLM): 验证 proposals vs 已有技能 | ReflectCoordinator | _call_llm() |
+| `L3ReflectVerifier.verify` | `(proposals, existing_skills) → dict{verified, rejected}` | 去重 + SKILL.md 格式检查 | test_reflection_flow | L3Manager.apply_update() |
 
 ## core/layers/l2/manager.py (Phase 1)
 
@@ -226,6 +232,16 @@
 | `ThresholdScorer.domain_count` | `(domain) → int` | 返回 pending 中该 domain 的记录数 | 外部查询 | _domain_records() |
 | `LearningRefiner` | `__init__(llm_client)` | Phase 2: LLM agent 判读哪些执行步骤值得学习 | ReflectCoordinator | — |
 | `LearningRefiner.refine` | `(meta:str, records:list[dict]) → dict{worth_learning, reasoning}` | LLM 根据 meta 目标判断每步贡献，选出 worth_learning 索引 | ReflectCoordinator.run_reflect() | _call_llm(), _format_steps() |
+
+## core/reflect_config.py (Phase 2a)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `ReflectConfig` | `@dataclass(l1, l2, l3)` | 三层 Proposer/Verifier 配置容器 | load_reflect_config() | — |
+| `ReflectConfig.from_yaml` | `(path) → ReflectConfig` | 从 config/reflect.yaml 加载 | load_reflect_config() | yaml.safe_load() |
+| `load_reflect_config` | `() → ReflectConfig` | 单例加载 reflect.yaml | 所有 Proposer/Verifier | ReflectConfig.from_yaml() |
+| `ReflectConfig.proposer_schema` | `(layer) → dict` | 返回某层的 Proposer JSON schema | Proposer | — |
+| `ReflectConfig.verifier_schema` | `(layer) → dict` | 返回某层的 Verifier JSON schema | Verifier | — |
 
 ## core/layer_message.py (已有)
 
