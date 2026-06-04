@@ -192,31 +192,27 @@ def main():
             if idx >= len(unit_records):
                 continue
             rec = unit_records[idx]
-
-            # ── Issue generation ──
-            issues = _generate_issues(rec)
             record_id = rec["session"].get("id", "unknown")
+            domain = unit.domain.path
+            rec_notify = rec.get("notify_layers", {})
+            refiner_reasoning = s.get("reasoning", "") if isinstance(s, dict) else ""
+
             coord_log.debug("  ═══ Record %d — %s ═══", idx, record_id)
             coord_log.debug("    step_index: %s | action: %s",
                            rec["session"].get("step_index"), rec.get("action"))
-            coord_log.debug("    issues: L1=%d L2=%d L3=%d",
-                           len(issues.get("l0_5_1", [])),
-                           len(issues.get("l2", [])),
-                           len(issues.get("l3", [])))
 
-            # ── Dispatch to each layer via ReflectPacket ──
-            domain = unit.domain.path
             for layer_key, agent, log in [
                 ("l0_5_1", l1_reflect, l1r_log),
                 ("l2", l2_reflect, l2r_log),
                 ("l3", l3_reflect, l3r_log)]:
-                layer_issues = issues.get(layer_key, [])
-                if layer_issues:
-                    pkt = ReflectPacket(
-                        record_id=record_id, domain=domain,
-                        target_layer=layer_key, issues=tuple(layer_issues),
-                    )
-                    _process_reflect_packet(pkt, agent, log)
+                layer_notify = rec_notify.get(layer_key, {})
+                pkt = ReflectPacket(
+                    record_id=record_id, domain=domain,
+                    target_layer=layer_key,
+                    refiner_reasoning=refiner_reasoning,
+                    layer_notify=layer_notify,
+                )
+                _process_reflect_packet(pkt, agent, log)
 
         coord_log.debug("  ═══ LearningUnit %s done ═══\n", unit.description)
 
@@ -228,87 +224,56 @@ def main():
 
 
 def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger):
-    """Process ReflectPacket through ReflectionAgent: investigate → fix → cascade.
+    """Process ReflectPacket: each layer receives its own NOTIFY + Refiner context.
 
-    Coordinator creates ReflectPacket → dispatches per-layer → each layer's
-    ReflectionAgent receives it, investigates ownership, fixes owned issues,
-    and cascades downstream issues.
+    Coordinator builds per-layer packet with the layer's execute NOTIFY
+    and Refiner's reasoning. ReflectionAgent then investigates, fixes,
+    and cascades.
     """
     log.debug("═══ ReflectPacket → %s ═══", pkt.target_layer)
     log.debug("  record_id: %s | domain: %s", pkt.record_id, pkt.domain)
-    for i, iss in enumerate(pkt.issue_list):
-        detail = {k: v for k, v in iss.items() if k != "type"}
-        log.debug("  [issue %d] type=%s | %s",
-                 i, iss.get("type", "?"), json.dumps(detail, ensure_ascii=False))
+    log.debug("  refiner: %s", pkt.refiner_reasoning[:200])
+    log.debug("  layer_notify: %s",
+             json.dumps(pkt.layer_notify, ensure_ascii=False)[:300])
 
-    context = {"domain": pkt.domain, "record_id": pkt.record_id}
-    result = agent.investigate(pkt.issue_list, context)
-
-    my = result.get("my_issues", [])
-    if my:
-        fix_result = agent.fix(my)
-        log.debug("  fix → %s", json.dumps(fix_result, ensure_ascii=False))
-
-    ds = result.get("downstream_issues", [])
-    if ds:
-        agent.query_downstream(ds, context)
+    # Investigation: agent inspects its own NOTIFY + Refiner reasoning
+    context = {
+        "domain": pkt.domain,
+        "record_id": pkt.record_id,
+        "refiner_reasoning": pkt.refiner_reasoning,
+    }
+    issues = pkt.issue_list or _detect_issues(pkt.layer_notify)
+    if issues:
+        for i, iss in enumerate(issues):
+            log.debug("  [issue %d] type=%s", i, iss.get("type", "?"))
+        result = agent.investigate(issues, context)
+        my = result.get("my_issues", [])
+        if my:
+            fix_result = agent.fix(my)
+            log.debug("  fix → %s", json.dumps(fix_result, ensure_ascii=False))
+        ds = result.get("downstream_issues", [])
+        if ds:
+            agent.query_downstream(ds, context)
+    else:
+        log.debug("  no issues detected")
 
     log.debug("")
 
 
-def _generate_issues(rec: dict) -> dict:
-    """Rule-based issue generation from ExecutionRecord NOTIFY layers.
-
-    Each layer's NOTIFY is inspected for structured issues; if none found,
-    generates fallback test issues to exercise the full reflection chain.
-    Future: LLM-based issue detection from NOTIFY content.
-    """
-    issues: dict[str, list[dict]] = {"l0_5_1": [], "l2": [], "l3": []}
-    notify = rec.get("notify_layers", {})
-    obs_cards = rec.get("observation", {}).get("state", {}).get("l2_cards", [])
-
-    # L1: check result quality
-    l1 = notify.get("l0_5_1", {})
-    if not l1.get("result") or not l1.get("reasoning"):
-        issues["l0_5_1"].append({
-            "type": "decision_error",
-            "detail": {"message": "L1 result or reasoning missing"},
-        })
-
-    # L2: check card confidence
-    for card in obs_cards:
-        conf = card.get("confidence", 0.5)
-        if conf < 0.5:
-            issues["l2"].append({
-                "type": "card_confidence_low",
-                "card_id": card.get("content", "")[:40],
-                "detail": {"confidence": conf},
-            })
-
-    # L3: check if L3 was useful
-    l3 = notify.get("l3", {})
-    if isinstance(l3, dict) and not l3.get("skills") and not l3.get("issues"):
-        issues["l3"].append({
-            "type": "skill_underutilized",
-            "skill_name": "",
-            "detail": {"message": "L3 returned bare status, no active skills used"},
-        })
-
-    # Fallback: always generate at least one test issue per layer
-    if not issues["l0_5_1"]:
-        issues["l0_5_1"].append({"type": "decision_error",
-                                  "detail": {"message": "test: verify L1 decision"}})
-    if not issues["l2"]:
-        issues["l2"].append({"type": "card_outdated",
-                              "card_id": "test-card",
-                              "detail": {"domain": "game/leduc"}})
-        # Cascading test: L1 gets a card_missing to send to L2
-        issues["l0_5_1"].append({"type": "card_missing",
-                                  "domain": rec["session"].get("domain", "general"),
-                                  "detail": {"suggested": "test cascading card"}})
-    if not issues["l3"]:
-        issues["l3"].append({"type": "skill_underutilized",
-                              "skill_name": "test-skill",
-                              "detail": {"message": "test: L3 skills underutilized"}})
-
-    return issues
+def _detect_issues(layer_notify: dict) -> list[dict]:
+    """Detect issues from a single layer's NOTIFY content."""
+    if not layer_notify:
+        return [{"type": "decision_error" if layer_notify is not None else "missing_notify"}]
+    # L1 check
+    if "result" in layer_notify and "reasoning" in layer_notify:
+        if not layer_notify.get("result") or len(layer_notify.get("reasoning", "")) < 10:
+            return [{"type": "decision_error"}]
+    # L2 check
+    if "cards" in layer_notify:
+        cards = layer_notify.get("cards", [])
+        if not cards:
+            return [{"type": "card_missing"}]
+    # L3 check
+    if layer_notify.get("status") == "ok" and not layer_notify.get("issues"):
+        return [{"type": "skill_underutilized", "skill_name": ""}]
+    return []

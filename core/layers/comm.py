@@ -27,13 +27,17 @@ class AgentPacket:
 class ReflectPacket:
     """Reflection-phase communication: Coordinator → ReflectionAgent.
 
-    Carries structured issues for a single execution record.
+    Per-layer customized packet: each layer receives its own NOTIFY data
+    from the execute phase plus the Refiner's reasoning about this step.
+
     Distinct from AgentPacket (execute phase) and LayerMessage (transport).
     """
     record_id: str              # which execution record
     domain: str                 # domain for context
     target_layer: str           # "l0_5_1" | "l2" | "l3"
-    issues: tuple = field(default_factory=tuple)  # frozen: list of issue dicts
+    refiner_reasoning: str      # why Refiner selected this step
+    layer_notify: dict = field(default_factory=dict)  # this layer's execute NOTIFY
+    issues: tuple = field(default_factory=tuple)       # pre-detected issues (optional)
 
     @property
     def issue_list(self) -> list[dict]:
