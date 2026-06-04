@@ -67,7 +67,7 @@ class SkillLayer:
     def create_skill(self, name: str, content: str, domain,
                      cross_domain: bool = False, created_by: str = "agent") -> SkillMeta:
         from core.task import Domain
-        if not re.match(r'^[a-z0-9][a-z0-9._-]*$', name):
+        if not re.match(r'^[\w][\w._-]*$', name):
             raise ValueError(f"Invalid skill name: {name}")
         if len(name) > 64:
             raise ValueError(f"Skill name too long: {len(name)} > 64")

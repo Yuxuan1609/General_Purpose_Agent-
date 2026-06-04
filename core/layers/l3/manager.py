@@ -9,6 +9,16 @@ from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l3")
 
+
+def _strip_frontmatter(content: str) -> str:
+    """Remove YAML frontmatter (--- ... ---) from skill content for display."""
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            return parts[2].lstrip("\n")
+        return content.lstrip("-").lstrip("\n")
+    return content
+
 # TODO: Future card-level skill matching — use L2 knowledge cards to refine
 #       skill selection beyond simple domain match. Currently domain-based only.
 #       See: L2 Domain Graph design (spec Section 9).
@@ -45,19 +55,19 @@ class L3Agent(LayerAgent):
         skills = matched_skills or []
         skills_text = "\n".join(
             f"## {s.get('name', '')}: {s.get('description', '')}"
-            f"\n{s.get('content', '')[:800]}"
+            f"\n{_strip_frontmatter(s.get('content', '')[:800])}"
             for s in skills
         ) if skills else "（无匹配技能）"
 
         system = (
             "你是 L3 层的认知 Agent，负责使用技能执行任务。\n"
-            "根据当前局面和可用的技能，选择相关的技能并基于技能内容"
-            "给出执行结果。\n\n"
+            "根据当前局面和可用的技能，选择相关的技能并基于技能内容执行任务。\n"
+            "你的任务是 L2 下发给你的具体操作要求，Meta 字段仅为辅助理解局面的上下文。\n\n"
             "TODO: 未来拆分为两个阶段——Stage1 找相关技能 + Stage2 执行。\n"
             "TODO: 未来 L4 dispatch——将静态知识查询派发到 L4 层。"
         )
         user = (
-            f"[游戏规则]\n{meta}\n\n"
+            f"[Meta]\n{meta}\n\n"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
@@ -146,9 +156,19 @@ class L3Manager(LayerManager):
 
     def notify(self) -> Any:
         if self._result:
+            used_names = self._result.get("skills_used", [])
+            skills_detail = []
+            for name in used_names:
+                for s in self._matched_skills:
+                    if s.get("name") == name:
+                        skills_detail.append({
+                            "name": name,
+                            "content": _strip_frontmatter(s.get("content", ""))[:200],
+                        })
+                        break
             return {
                 "skills_matched": len(self._matched),
-                "skills_used": self._result.get("skills_used", []),
+                "skills_used": skills_detail,
                 "result": self._result.get("result", ""),
                 "reasoning": self._result.get("reasoning", ""),
             }

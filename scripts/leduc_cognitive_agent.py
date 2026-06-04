@@ -14,8 +14,10 @@ from core.types import TaskObservation
 
 logger = logging.getLogger("leduc_cognitive")
 
-LEDUC_SYSTEM_PROMPT = """You are playing Leduc Hold'em. Your goal is to MAXIMIZE expected chips.
+LEDUC_SYSTEM_PROMPT = """[目标]
+在 Leduc Hold'em 中最大化期望收益（chips）。
 
+[游戏规则]
 Cards: K, Q, J in spades(SP) and hearts(HR). SP > HR in ties.
 2 players. Player 0 posts 1 chip, acts first. Player 1 posts 2 chips.
 
@@ -23,7 +25,7 @@ Pre-flop: call, raise(2 chips), or fold. Max 2 raises per round.
 Post-flop: public card dealt. check/call, raise(4 chips), or fold.
 
 Pair (card matches public) beats no pair. Higher rank wins ties, then suit.
-Output ONLY one word: call, raise, fold, or check."""
+Legal actions: call, raise, fold, check."""
 
 CARD_MAP = {
     "SJ": "J♠", "SQ": "Q♠", "SK": "K♠",

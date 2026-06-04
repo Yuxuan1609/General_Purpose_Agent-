@@ -114,7 +114,7 @@ def main():
     logger.info("  log=%s", log_dir)
 
     pending_dir = PROJECT_ROOT / "data" / "learning" / "pending"
-    records = list(pending_dir.glob("*.json"))
+    records = list(pending_dir.rglob("*.json"))
     if not records:
         logger.warning("No pending records found")
         return
@@ -125,10 +125,16 @@ def main():
     # ── Load records ──
     loaded: list[dict] = []
     for f in records:
-        rec = json.loads(f.read_text(encoding="utf-8"))
-        loaded.append(rec)
-        logger.info("  Loaded: %s (domain=%s, action=%s)",
-                     f.name, rec["session"].get("domain"), rec.get("action"))
+        content = json.loads(f.read_text(encoding="utf-8"))
+        # Pending files are JSON arrays (accumulated steps)
+        steps = content if isinstance(content, list) else [content]
+        loaded.extend(steps)
+        logger.info("  Loaded: %s → %d steps (domain=%s)",
+                     f.name, len(steps), steps[0]["session"].get("domain") if steps else "?")
+
+    if not loaded:
+        logger.warning("No records in pending files")
+        return
 
     # ── Decompose ──
     from core.orchestrator.task_decomposer import TaskDecomposer

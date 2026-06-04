@@ -9,6 +9,15 @@ from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l2")
 
+
+def _strip_skill_frontmatter(content: str) -> str:
+    """Remove YAML frontmatter (--- ... ---) from skill content text."""
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            return parts[2].lstrip("\n")
+    return content
+
 # Domain nodes — manually seeded. Each node represents a semantic domain
 # with name (matching L2 card domain path) and a ~100-char description.
 # TODO: Unified node design (schema, persistence, auto-generation) to be
@@ -65,7 +74,7 @@ class L2Agent(LayerAgent):
         "reasoning": "string (推理过程)",
     }
     STAGE3_SCHEMA = {
-        "reply": "string (对L1查询的最终回复)",
+        "reply": "string (对【上层查询】的最终回复)",
         "cards": ["string (精选知识卡片内容)"],
         "reasoning": "string (综合推理过程)",
     }
@@ -84,7 +93,7 @@ class L2Agent(LayerAgent):
         system = (
             "你是 L2 层的认知 Agent，负责知识检索。\n"
             "根据上层查询，从领域节点中选出最相关的 1-5 个节点，给出名称、相关度分数和选择理由。\n\n"
-            f"[游戏规则]\n{meta}"
+            f"[Meta]\n{meta}"
         )
         user = (
             f"[上层查询]\n{query}\n\n"
@@ -97,22 +106,22 @@ class L2Agent(LayerAgent):
     def stage2(self, query: str, meta: str, state: dict,
                selected_nodes: list[dict]) -> dict:
         cards = self._get_cards_for_nodes(selected_nodes)
-        cards_text = "\n".join(
-            f"[{c.domain.path}] {c.content}"
-            for c in cards
-        ) if cards else "（无相关卡片）"
+        node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
+        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
 
         current = state.get("current", "")
         system = (
             "你是 L2 层的认知 Agent，负责知识筛选和下层调度。\n"
-            "根据知识卡片和上层查询，筛选最相关的卡片（最多15张），判断是否需要 L3 层技能支持。\n\n"
-            f"[游戏规则]\n{meta}"
+            "你需要理解上层查询的任务意图，根据知识卡片筛选最相关的卡片（最多15张），"
+            "并提出需要 L3 层协助的任务。L3 提供的是具体的操作流程和执行建议。\n\n"
+            f"[Meta]\n{meta}"
         )
         user = (
             f"[上层查询]\n{query}\n\n"
             f"[当前局面]\n{current}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         )
+        return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
         return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
 
     def stage3(self, query: str, meta: str, state: dict,
@@ -123,10 +132,8 @@ class L2Agent(LayerAgent):
         E3: l3_skills passed explicitly, not read from shared mutable state.
         """
         cards = self._get_cards_for_nodes(selected_nodes)
-        cards_text = "\n".join(
-            f"[{c.domain.path}] {c.content}"
-            for c in cards
-        ) if cards else "（无相关卡片）"
+        node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
+        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
 
         current = state.get("current", "")
         skills = l3_skills or []
@@ -137,8 +144,9 @@ class L2Agent(LayerAgent):
 
         system = (
             "你是 L2 层的认知 Agent，负责最终知识整合与回复。\n"
-            "整合上层查询、知识卡片和 L3 层技能，给出最终回复。\n\n"
-            f"[游戏规则]\n{meta}"
+            "整合上层查询、知识卡片和 L3 层技能，执行上层查询中下发给你的任务。\n"
+            "以下 Meta 仅为辅助理解当前局面的上下文，不是你的执行任务。\n\n"
+            f"[Meta]\n{meta}"
         )
         user = (
             f"[上层查询]\n{query}\n\n"
@@ -165,6 +173,15 @@ class L2Agent(LayerAgent):
                 domain = Domain("general", "general")
             all_cards.extend(self._knowledge.get_domain_cards(domain))
         return all_cards
+
+    @staticmethod
+    def _format_cards_with_relevance(cards: list, node_scores: dict) -> str:
+        """Build card display text with relevance from L1's domain-node scores."""
+        lines = []
+        for c in cards:
+            score = node_scores.get(c.domain.path, 0.0)
+            lines.append(f"[{c.domain.path}] (相关度:{score:.2f}) {c.content}")
+        return "\n".join(lines) if lines else "（无相关卡片）"
 
 
 class L2Manager(LayerManager):
@@ -258,11 +275,15 @@ class L2Manager(LayerManager):
         logger.debug("    reasoning: %s", str(final.get("reasoning", ""))[:200])
         logger.debug("")
 
-        # NOTIFY enrichment: what cards were used, what L3 returned
-        cards = final.get("cards", [])
+        # NOTIFY enrichment: cards_used as summary, L3 skills with content excerpts
+        cards = final.pop("cards", [])  # remove full cards from notify
         final["cards_used"] = [str(c)[:100] for c in cards[:5]]
         final["l3_received"] = {
-            "skills": [s.get("name", "") for s in l3_skills[:5]],
+            "skills": [
+                {"name": s.get("name", ""),
+                 "content": _strip_skill_frontmatter(s.get("content", ""))[:200]}
+                for s in l3_skills[:5]
+            ],
         }
 
         self._result = final

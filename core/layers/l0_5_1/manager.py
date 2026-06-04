@@ -16,43 +16,48 @@ logger = logging.getLogger("l0_5_1")
 class L1Agent(LayerAgent):
     """L1 LLM Agent — two-stage V-structure processing.
 
-    System prompt carries the task goal + behavior rules (immutable context).
-    User prompt carries the game rules + current situation (dynamic context).
+    System prompt carries the task goal + game rules + behavior rules.
+    User prompt carries the current situation + history (dynamic per-step).
     Output uses DeepSeek JSON mode with predefined schemas.
 
-    Phase 2a: L2's domain node selection is merged into L1 stage1, eliminating
-    L2's own stage1 LLM call. L1 receives L2's domain nodes as context and
-    outputs both the semantic query and the domain targets in one call.
+    Phase 2a: L2's domain node selection is merged into L1 stage1.
+    Task goal is provided by the communication script via the meta field
+    (not hardcoded here).
     """
 
     MAX_LOOPS = 1
-    TASK_GOAL = "对任务目标做出最优决策。"
 
     STAGE1_SCHEMA = {
-        "query": "string (需要下层提供的信息描述)",
+        "query": "string (需要下层根据领域知识完成的任务，可附上基于【行为准则】的完成建议)",
         "domain_nodes": [
-            {"name": "string (domain path)", "score": "float (0-1)",
-             "reason": "string (选择理由，一短句)"}
+            {"name": "string (从领域节点列表中选出的节点路径，如 game/leduc)",
+             "score": "float (该节点与当前决策的相关度分数，0.0-1.0)",
+             "reason": "string (选择该节点的理由，一短句)"}
         ],
     }
     STAGE2_SCHEMA = {
         "done": "boolean (true/false)",
         "result": "string (最终决策)",
         "reasoning": "string (推理过程)",
+        "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
     }
 
     def __init__(self, llm_client, philosophy):
         super().__init__(llm_client, logger)
         self._philosophy = philosophy
 
-    def _build_system_prompt(self, instruction: str, meta: str) -> str:
-        """Build system prompt: game rules + task goal + behavior rules + instruction."""
+    def _build_system_prompt(self, instruction: str, meta: str,
+                             static_context: str = "") -> str:
+        """Build system prompt: task meta + behavior rules + optional static context + instruction."""
         rules = self._philosophy.all_rules()
         rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
+        extra = f"\n{static_context}\n" if static_context else ""
         return (
-            f"你是 L1 层的认知 Agent。{self.TASK_GOAL}\n\n"
-            f"[游戏规则]\n{meta}\n\n"
+            f"你是 L1 层的认知 Agent。\n\n"
+            f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
+            f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"
+            f"{extra}"
             f"{instruction}"
         )
 
@@ -68,8 +73,8 @@ class L1Agent(LayerAgent):
     def stage1(self, meta: str, state: dict, domain_nodes: list[dict] | None = None) -> dict:
         """Stage1: produce query + domain targeting.
 
-        Merges L2's domain-node selection into L1. Output includes both the
-        semantic query and the selected domain nodes (name/score/reason).
+        Merges L2's domain-node selection into L1. Domain nodes injected into
+        system prompt (static context), not user prompt.
         """
         nodes = domain_nodes or []
         nodes_text = "\n".join(
@@ -79,12 +84,13 @@ class L1Agent(LayerAgent):
         instruction = (
             "判断需要从下层获取什么领域知识来做出最优决策。"
             "从领域节点中选出最相关的 1-5 个节点，并给出语义查询。"
+            "如果不需要领域知识，返回空的 domain_nodes（[]）。"
         )
-        system = self._build_system_prompt(instruction, meta)
-        user = (
-            f"{self._build_user_context(state)}\n\n"
-            f"[领域节点]\n{nodes_text}"
+        system = self._build_system_prompt(
+            instruction, meta,
+            static_context=f"[领域节点]\n{nodes_text}" if nodes_text else "",
         )
+        user = self._build_user_context(state)
         result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
         return result
 
@@ -95,7 +101,10 @@ class L1Agent(LayerAgent):
 
         Accepts L2 results as explicit params (E3: no shared mutable state).
         """
-        instruction = "整合下层返回的知识信息，基于游戏规则和行为准则做出最终决策。"
+        instruction = (
+            "整合下层返回的知识信息，基于游戏规则和行为准则做出最终决策。"
+            "在 rules_used 中列出本次推理中实际引用到的行为准则的 id。"
+        )
         system = self._build_system_prompt(instruction, meta)
 
         cards = l2_cards or []
@@ -107,14 +116,22 @@ class L1Agent(LayerAgent):
         user = f"{self._build_user_context(state)}\n\n[下层知识]\n{cards_text}"
         result = self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
 
-        # NOTIFY enrichment: what rules were considered, what L2 returned
-        result["rules_applied"] = [
-            r.content[:100] for r in self._philosophy.all_rules()[:5]
-        ]
+        # NOTIFY enrichment: rules actually used (from LLM), what L2 returned
+        used_ids = result.get("rules_used", [])
+        all_rules = {r.id: r for r in self._philosophy.all_rules()}
+        if used_ids:
+            result["rules_applied"] = [
+                {"id": rid, "summary": all_rules[rid].content[:60]}
+                for rid in used_ids if rid in all_rules
+            ]
+        else:
+            result["rules_applied"] = [
+                {"id": r.id, "summary": r.content[:60]}
+                for r in self._philosophy.all_rules()[:5]
+            ]
         l2 = l2_result or {}
         result["l2_received"] = {
             "reply": str(l2.get("reply", ""))[:300],
-            "cards": list(l2.get("cards", []))[:5],
         }
         return result
 
