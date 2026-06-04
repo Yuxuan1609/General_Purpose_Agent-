@@ -64,12 +64,15 @@ class Executor:
         # TODO: Future complex tasks may need an extra LLM formatting call.
         l1_notify = notify_layers.get("l0_5_1", {})
         logger.debug("══════ Step %d  [%s] ══════", step, domain)
+        logger.debug("── Assembled NOTIFY ──")
+        for layer_name in ("l0_5_1", "l2", "l3"):
+            layer_notify = notify_layers.get(layer_name, {})
+            if not layer_notify:
+                continue
+            label = layer_name.replace("l0_5_1", "L1").replace("l2", "L2").replace("l3", "L3")
+            logger.debug("  %s: %s", label, json.dumps(layer_notify, ensure_ascii=False, default=str))
         if l1_notify.get("done") and l1_notify.get("result"):
             action_text = l1_notify["result"]
-            logger.debug("  L1 NOTIFY: done=%s result=%s",
-                         l1_notify.get("done"), action_text)
-            if l1_notify.get("reasoning"):
-                logger.debug("  L1 reasoning: %s", l1_notify["reasoning"])
             logger.debug("  Executor action: %s", action_text)
         else:
             logger.debug("  L1 result unavailable, falling back to LLM")
