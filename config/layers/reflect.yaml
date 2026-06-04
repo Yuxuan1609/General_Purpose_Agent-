@@ -18,17 +18,18 @@ l1:
       3) rules_applied 是否充分覆盖当前决策需求
       4) l2_received 的回复是否准确且信息充分
     system_template: |
-      你是 L1 层的反思 Proposer。分析本层 Execute 段的输出质量。
+      你是 L1 层的反思 Proposer。
+      
+      本层管理的是【行为准则】（短句形式的决策原则），格式参考 NOTIFY 中的 rules_applied。
       
       {criteria}
       
       你的任务：
-      1. 分析本层 NOTIFY，提出对本层行为准则的修复方案
-      2. 判断是否需要 L2 层反思（仅当 l2_received 信息不充分时）
+      1. 分析本层 NOTIFY 中的 {done, result, reasoning, rules_applied, l2_received}
+      2. 仅提出行为准则层面的修改——新增、修改或删除准则短句
+      3. 判断是否需要 L2 层反思（仅当 l2_received 信息不充分时）
       
       可用的 action: add_rule（新增准则）, modify_rule（修改准则,需要rule_id）, remove_rule（删除准则,需要rule_id）
-      
-      注意：L0.5 宪法规则不可修改。只可修改 L1 行为规则。
     user_template: |
       [Refiner 评估]
       {refiner_reasoning}
@@ -87,9 +88,15 @@ l2:
       3) 卡片置信度是否反映实际效用
       4) l3_received 的技能是否被合理调用
     system_template: |
-      你是 L2 层的反思 Proposer。分析本层 Execute 段的知识检索输出质量。
+      你是 L2 层的反思 Proposer。
+      
+      本层管理的是【知识卡片】（领域相关的策略要点），格式参考 NOTIFY 中的 cards_used。
       
       {criteria}
+      
+      你的任务：
+      1. 分析本层 NOTIFY 中的 {reply, cards_used, reasoning, l3_received}
+      2. 仅提出知识卡片层面的修改——新增、修改或删除卡片
       
       可用的 action:
       - add_card: 新增知识卡片（需 content + domain + confidence）
@@ -152,9 +159,15 @@ l3:
       2) 是否有可用的技能未被调用
       3) 技能内容是否需要更新以更贴切当前任务
     system_template: |
-      你是 L3 层的反思 Proposer。分析本层 Execute 段的技能匹配输出质量。
+      你是 L3 层的反思 Proposer。
+      
+      本层管理的是【操作技能】（SKILL.md 格式的完整操作流程），格式参考 NOTIFY 中的 skills_matched/skills_used。
       
       {criteria}
+      
+      你的任务：
+      1. 分析本层 NOTIFY 中的 {skills_matched, skills_used, result, reasoning}
+      2. 仅提出技能层面的修改——新增、更新或删除技能
       
       可用的 action:
       - add_skill: 创建新技能（需 name + content + domain）

@@ -136,17 +136,25 @@ def main():
         logger.warning("No records in pending files")
         return
 
-    # ── Decompose ──
+    # ── Decompose (once per unique session) ──
     from core.orchestrator.task_decomposer import TaskDecomposer
     dec = TaskDecomposer()
     units = []
+    # Group records by session_id
+    session_records: dict[str, list[dict]] = {}
     for rec in loaded:
-        session = rec["session"]
-        raw_log = pending_dir / f"{session['id']}.log"
+        sid = rec["session"]["id"]
+        session_records.setdefault(sid, []).append(rec)
+    for sid, recs in session_records.items():
+        session = recs[0]["session"]
+        raw_log = pending_dir / f"{sid}.log"
         result = dec.decompose(session, raw_log)
+        # Attach session records to each LearningUnit for downstream use
+        for u in result:
+            u._records = recs
         units.extend(result)
-        logger.info("Decomposer: session=%s → %d LearningUnit(s)",
-                     session["id"], len(result))
+        logger.info("Decomposer: session=%s (%d records) → %d LearningUnit(s)",
+                     sid, len(recs), len(result))
 
     # ── Build chain for apply_update ──
     chain = build_chain()
@@ -168,8 +176,7 @@ def main():
 
     # ── Process each LearningUnit ──
     for unit in units:
-        unit_records = [r for r in loaded
-                        if r["session"]["id"] == unit.description]
+        unit_records = getattr(unit, '_records', [])
         meta = unit_records[0]["observation"]["meta"] if unit_records else ""
 
         coord_log = logging.getLogger("reflect_coordinator")
@@ -245,10 +252,7 @@ def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger,
     log.debug("  record_id: %s | domain: %s", pkt.record_id, pkt.domain)
     log.debug("  refiner: %s", pkt.refiner_reasoning)
     log.debug("  layer_notify:\n%s",
-             _indent(json.dumps(pkt.layer_notify, ensure_ascii=False, indent=2), 4))
-
-    # ── Prompt Preview (not calling LLM, just logging) ──
-    _log_reflection_prompt(pkt, meta, log)
+              _indent(json.dumps(pkt.layer_notify, ensure_ascii=False, indent=2), 4))
 
     # ── Route to LLM-based Proposer/Verifier ──
     layer = pkt.target_layer
@@ -359,46 +363,6 @@ def _get_l2_existing():
 
 def _get_l3_existing():
     return []
-
-
-def _log_reflection_prompt(pkt: ReflectPacket, meta: str, log: logging.Logger):
-    """Log the LLM prompt that would be sent to this layer's ReflectionAgent.
-
-    Architecture:
-      System prompt = 执行反思 + 反思标准 + 任务Meta
-      User prompt  = 这一步是什么 + Refiner reasoning + 本层 execute NOTIFY
-    """
-    layer = pkt.target_layer
-    notify_str = json.dumps(pkt.layer_notify, ensure_ascii=False, indent=2)
-
-    criteria = {
-        "l0_5_1": "L1 反思标准：1) result 是否匹配 reasoning 的推理方向 2) reasoning 是否基于概率期望而非直觉 3) 是否缺少关键行为准则导致决策偏差",
-        "l2":      "L2 反思标准：1) 检索的知识卡片是否覆盖上层查询的所有信息需求 2) 卡片置信度是否与实际效用匹配 3) 回复是否准确回答了 query",
-        "l3":      "L3 反思标准：1) 是否有可用的技能未被调用 2) 已匹配的技能是否与当前局面相关 3) 技能内容是否需要更新",
-    }
-
-    system = (
-        f"执行反思：根据 Execute 阶段本层的输出进行自我审查。\n\n"
-        f"{criteria.get(layer, '')}\n\n"
-        f"[任务 Meta]\n{meta}"
-    )
-
-    step_desc = {
-        "l0_5_1": "L1 层在 Execute 阶段作为最终决策者，基于游戏规则和行为准则给出了 result 和 reasoning。",
-        "l2":      "L2 层在 Execute 阶段负责知识检索，从领域节点中选取知识卡片并回复 L1 的查询。",
-        "l3":      "L3 层在 Execute 阶段负责技能匹配，根据当前领域提供可用的技能。",
-    }
-
-    user = (
-        f"[当前步骤]\n{step_desc.get(layer, '')}\n\n"
-        f"[Refiner 评估]\n{pkt.refiner_reasoning}\n\n"
-        f"[本层 NOTIFY]\n{notify_str}"
-    )
-
-    log.debug("  ── Prompt Preview ──")
-    log.debug("  system:\n%s", _indent(system, 4))
-    log.debug("  user:\n%s", _indent(user, 4))
-    log.debug("")
 
 
 def _detect_issues(layer_notify: dict) -> list[dict]:
