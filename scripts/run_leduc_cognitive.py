@@ -121,7 +121,7 @@ def _seed_knowledge(fk, phil, sl=None):
                  "避免因单局短期结果改变长期策略。")
     existing = [r.content for r in phil.all_rules()]
     if rule_text not in existing:
-        phil.add_rule(rule_text, created_by="seed")
+        phil.add_rule(rule_text, created_by="seed", source="l1")
 
     # L2 knowledge cards — Leduc
     leduc_domain = Domain("game/leduc", "specific")

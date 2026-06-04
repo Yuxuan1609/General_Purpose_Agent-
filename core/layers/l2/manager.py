@@ -305,9 +305,21 @@ class L2Manager(LayerManager):
         return {"status": "ok", "layer": self.name}
 
     def apply_update(self, key: str, value: Any) -> None:
-        """Phase 2: Boost/penalize knowledge cards or add new ones."""
+        """Phase 2: Manage knowledge cards.
+
+        Supported actions: add_card, modify_card, remove_card,
+                           boost_card (TODO), penalize_card (TODO).
+
+        TODO: boost_card/penalize_card implementation not finalized.
+        Currently boosts/penalizes in-place on the KnowledgeCard instance.
+        Future design may replace with a score-based system that considers
+        historical success/failure stats. For now, do not use in reflection.
+        """
         card_id = value.get("card_id", "") if isinstance(value, dict) else str(value)
         if key == "boost_card":
+            # TODO: boost/penalize mechanism under design review.
+            # Current simple +/-0.05 approach may be replaced with
+            # statistical scoring based on historical outcomes.
             for c in self._knowledge.cards:
                 if c.id == card_id:
                     c.boost()
@@ -329,3 +341,15 @@ class L2Manager(LayerManager):
                 source="reflect",
             )
             logger.info("L2 card added via reflect")
+        elif key == "modify_card" and isinstance(value, dict):
+            found = self._knowledge.modify_card(card_id, value.get("content", ""))
+            if found:
+                logger.info("L2 card %s modified", card_id)
+            else:
+                logger.warning("L2 card %s not found for modify", card_id)
+        elif key == "remove_card":
+            found = self._knowledge.remove_card(card_id)
+            if found:
+                logger.info("L2 card %s removed", card_id)
+            else:
+                logger.warning("L2 card %s not found for remove", card_id)

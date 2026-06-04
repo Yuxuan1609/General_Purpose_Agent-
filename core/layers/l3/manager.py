@@ -160,14 +160,41 @@ class L3Manager(LayerManager):
         }
 
     def apply_update(self, key: str, value: Any) -> None:
-        """Phase 2: Update/downgrade skills via SkillLayer."""
+        """Phase 2: Manage L3 skills.
+
+        Supported actions: add_skill, update_skill, remove_skill.
+
+        TODO: Future L3 skills may bind to L2 knowledge cards (card-level
+        skill association). When a skill is created from specific knowledge
+        cards, the skill stores source_card_ids for traceability. Not yet
+        implemented — skills currently operate independently.
+        """
         if isinstance(value, dict):
             skill_name = value.get("name", "")
         else:
             skill_name = str(value)
-        if key == "update_skill" and isinstance(value, dict):
+        if key == "add_skill" and isinstance(value, dict):
+            try:
+                domain_path = value.get("domain", "general")
+                from core.task import Domain
+                self._skill_layer.create_skill(
+                    name=skill_name,
+                    content=value.get("content", ""),
+                    domain=Domain(domain_path, "specific"),
+                    created_by="reflect",
+                )
+                logger.info("L3 skill %s added via reflect", skill_name)
+            except Exception as e:
+                logger.warning("L3 skill add failed: %s", e)
+        elif key == "update_skill" and isinstance(value, dict):
             try:
                 self._skill_layer.edit_skill(skill_name, value.get("content", ""))
                 logger.info("L3 skill %s updated via reflect", skill_name)
             except Exception as e:
                 logger.warning("L3 skill update failed: %s", e)
+        elif key == "remove_skill":
+            try:
+                self._skill_layer.delete_skill(skill_name)
+                logger.info("L3 skill %s removed via reflect", skill_name)
+            except Exception as e:
+                logger.warning("L3 skill remove failed: %s", e)

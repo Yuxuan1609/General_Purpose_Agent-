@@ -7,6 +7,7 @@ l1:
     schema:
       self_fixes:
         - action: "add_rule | modify_rule | remove_rule"
+          rule_id: "string | null (modify/remove 时必须)"
           content: "string"
           reason: "string"
       dispatch_lower: "null | {layer: string, task: string}"
@@ -25,7 +26,9 @@ l1:
       1. 分析本层 NOTIFY，提出对本层行为准则的修复方案
       2. 判断是否需要 L2 层反思（仅当 l2_received 信息不充分时）
       
-      可用的 action: add_rule（新增准则）, modify_rule（修改准则）, remove_rule（删除准则）
+      可用的 action: add_rule（新增准则）, modify_rule（修改准则,需要rule_id）, remove_rule（删除准则,需要rule_id）
+      
+      注意：L0.5 宪法规则不可修改。只可修改 L1 行为规则。
     user_template: |
       [Refiner 评估]
       {refiner_reasoning}
@@ -42,8 +45,9 @@ l1:
     schema:
       verified:
         - action: "string"
+          rule_id: "string | null"
           content: "string"
-          integrated_with: "string"
+          integrated_with: "string (与那条已有规则整合)"
       rejected:
         - action: "string"
           content: "string"
@@ -69,9 +73,10 @@ l2:
   proposer:
     schema:
       self_fixes:
-        - action: "boost_card | penalize_card | add_card"
-          card_id: "string"
-          new_confidence: "float | null"
+        - action: "add_card | modify_card | remove_card"
+          card_id: "string | null (add 时可为空)"
+          domain: "string | null (add 时必须)"
+          confidence: "float | null (add 时初始置信度)"
           content: "string | null"
           reason: "string"
       dispatch_lower: "null | {layer: string, task: string}"
@@ -87,9 +92,11 @@ l2:
       {criteria}
       
       可用的 action:
-      - boost_card: 提高卡片置信度（需 card_id + new_confidence）
-      - penalize_card: 降低卡片置信度（需 card_id）
-      - add_card: 新增知识卡片（需 content + domain）
+      - add_card: 新增知识卡片（需 content + domain + confidence）
+      - modify_card: 修改卡片内容（需 card_id + content）
+      - remove_card: 删除错误卡片（需 card_id）
+      
+      注意：boost_card / penalize_card 暂未开放，不要使用。
     user_template: |
       [Refiner 评估]
       {refiner_reasoning}
@@ -106,8 +113,9 @@ l2:
     schema:
       verified:
         - action: "string"
-          card_id: "string"
-          new_confidence: "float | null"
+          card_id: "string | null"
+          domain: "string | null"
+          confidence: "float | null"
           content: "string | null"
       rejected:
         - action: "string"
@@ -116,9 +124,9 @@ l2:
       你是 L2 层的反思 Verifier。根据已有知识卡片整合 Proposer 的提案。
       
       规则：
-      1. boost/penalize 后置信度必须在 0.1-1.0 范围内
-      2. add_card 的内容不得与已有卡片高度重复
-      3. card_id 必须对应真实存在的卡片
+      1. add_card 的内容不得与已有卡片高度重复
+      2. modify/remove 的 card_id 必须对应真实存在的卡片
+      3. confidence 必须在 0.1-1.0 范围内
     user_template: |
       [Proposer 提案]
       {proposals}
@@ -132,9 +140,10 @@ l3:
   proposer:
     schema:
       self_fixes:
-        - action: "update_skill"
-          skill_name: "string"
-          content: "string"
+        - action: "add_skill | update_skill | remove_skill"
+          name: "string (技能名称)"
+          domain: "string | null (add 时必须)"
+          content: "string | null"
           reason: "string"
       dispatch_lower: "null"
     criteria: |
@@ -147,7 +156,12 @@ l3:
       
       {criteria}
       
-      可用的 action: update_skill（更新技能内容，需 skill_name + content）
+      可用的 action:
+      - add_skill: 创建新技能（需 name + content + domain）
+      - update_skill: 更新技能内容（需 name + content）
+      - remove_skill: 删除无用技能（需 name）
+      
+      注意：L3 技能暂时独立于 L2 知识卡片，后续会支持卡-技能绑定。
     user_template: |
       [Refiner 评估]
       {refiner_reasoning}
@@ -164,8 +178,9 @@ l3:
     schema:
       verified:
         - action: "string"
-          skill_name: "string"
-          content: "string"
+          name: "string"
+          domain: "string | null"
+          content: "string | null"
       rejected:
         - action: "string"
           reason: "string"
@@ -173,8 +188,8 @@ l3:
       你是 L3 层的反思 Verifier。根据已有技能整合 Proposer 的提案。
       
       规则：
-      1. skill_name 必须匹配已有或合理的技能名
-      2. update_skill 的内容需符合 SKILL.md 格式
+      1. name 必须匹配已有技能名（update/remove）或为新技能名（add）
+      2. add_skill/update_skill 的内容需符合 SKILL.md 格式
       3. 避免覆盖现有的有效技能（除非提案明确说明更新理由）
     user_template: |
       [Proposer 提案]

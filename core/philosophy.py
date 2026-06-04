@@ -19,6 +19,7 @@ class Rule:
     id: str
     content: str
     created_by: str
+    source: str = "l1"                # "l0_5" = immutable constitution, "l1" = mutable behavior
     added_at: str = field(default_factory=_now)
     version: int = 1
     last_modified: str = field(default_factory=_now)
@@ -43,18 +44,33 @@ class Philosophy:
         self._load()
 
     def all_rules(self) -> list[Rule]:
+        """Return all rules (L0.5 constitution + L1 mutable)."""
         return list(self._rules)
+
+    def l1_rules(self) -> list[Rule]:
+        """Return only L1 mutable rules (exclude L0.5 constitution).
+        
+        Used by verifier: reflection can only modify L1 rules.
+        L0.5 rules are immutable constitution, only changeable manually by user.
+        """
+        return [r for r in self._rules if r.source != "l0_5"]
+
+    def l0_5_rules(self) -> list[Rule]:
+        """Return only L0.5 immutable constitution rules."""
+        return [r for r in self._rules if r.source == "l0_5"]
 
     def get_active_rules(self, task) -> list[str]:
         return [r.content for r in self._rules]
 
-    def add_rule(self, content: str, created_by: str = "reflection") -> Rule:
+    def add_rule(self, content: str, created_by: str = "reflection",
+                 source: str = "l1") -> Rule:
         if len(content) > self.max_rule_length:
             raise ValueError(f"Rule too long: {len(content)} > {self.max_rule_length}")
         rule = Rule(
             id=f"l1_{uuid.uuid4().hex[:6]}",
             content=content,
             created_by=created_by,
+            source=source,
         )
         self._rules.append(rule)
         self._save()
@@ -63,10 +79,16 @@ class Philosophy:
     def modify_rule(self, rule_id: str, new_content: str) -> Rule:
         for i, r in enumerate(self._rules):
             if r.id == rule_id:
+                if r.source == "l0_5":
+                    raise ValueError(
+                        f"Rule {rule_id} is L0.5 constitution (immutable). "
+                        "Only manually modifiable by user."
+                    )
                 if len(new_content) > self.max_rule_length:
                     raise ValueError(f"Rule too long: {len(new_content)} > {self.max_rule_length}")
                 updated = Rule(
                     id=r.id, content=new_content, created_by=r.created_by,
+                    source=r.source,
                     added_at=r.added_at, version=r.version + 1, last_modified=_now(),
                 )
                 self._rules[i] = updated
@@ -75,6 +97,14 @@ class Philosophy:
         raise ValueError(f"Rule not found: {rule_id}")
 
     def remove_rule(self, rule_id: str) -> None:
+        for r in self._rules:
+            if r.id == rule_id:
+                if r.source == "l0_5":
+                    raise ValueError(
+                        f"Rule {rule_id} is L0.5 constitution (immutable). "
+                        "Only manually removable by user."
+                    )
+                break
         self._rules = [r for r in self._rules if r.id != rule_id]
         self._save()
 
@@ -95,6 +125,7 @@ class Philosophy:
             Rule(
                 id=r["id"], content=r["content"],
                 created_by=r.get("created_by", "unknown"),
+                source=r.get("source", "l1"),
                 added_at=r.get("added_at", _now()),
                 version=r.get("version", 1),
                 last_modified=r.get("last_modified", _now()),
@@ -109,6 +140,7 @@ class Philosophy:
             "rules": [
                 {
                     "id": r.id, "content": r.content, "created_by": r.created_by,
+                    "source": r.source,
                     "added_at": r.added_at, "version": r.version, "last_modified": r.last_modified,
                 }
                 for r in self._rules

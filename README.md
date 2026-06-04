@@ -501,29 +501,30 @@ baselines/
 仍作为数据对象保留，但不再作为独立层运行：
 
 - **MetaDriver** (`core/meta_driver.py`)：4 个反射触发器（stagnation/task_failed/task_completed/domain_shift）、2 个验证器（not_duplicate/no_contradiction）、危险工具过滤
-- **Philosophy** (`core/philosophy.py`)：L1 规则 CRUD，持久化到 `data/l1_rules.json`，种子规则在 `config/l1.yaml`
-- **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard + KnowledgeGraph，MD+JSON 双存
-- **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，L2→L3 编译
+- **Philosophy** (`core/philosophy.py`)：Rule.source 区分 L0.5 宪法（不可变，仅用户手动修改）和 L1 行为规则（可变，反射可修改）。持久化到 `data/l1_rules.json`
+- **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard + KnowledgeGraph，MD+JSON 双存。支持 add/remove/modify 卡片
+- **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，支持 create/edit/delete
 
 ### L(0.5+1) — 合并宪法 + 行为准则层
 
 `core/layers/l0_5_1/manager.py` 将 L0.5 和 L1 合并为一个 Manager，由 **L1Agent（两阶段 V-structure）** 驱动：
 
-```
-L1Agent.stage1(meta, state)
-  → 判断"需要从下层获取什么知识" → query text
-  → 写入 obs.state["l1_query"] → 通过 AgentPacket 传到 L2
+**L0.5（不可变宪法）vs L1（可变行为规则）：**
+- L0.5 rules (`source="l0_5"`)：通用认知原则，仅在配置中手工修改，反射不可动
+- L1 rules (`source="l1"`)：领域相关行为准则，反射可添加/修改/删除
 
-L1Agent.stage2(meta, state)
+```
+L1Agent.stage1(meta, state, domain_nodes)
+  → 判断"需要从下层获取什么知识" + 选领域节点 → {query, domain_nodes}
+
+L1Agent.stage2(meta, state, l2_cards, l2_result)
   → 整合 L2 返回的知识卡片 + 行为准则 → 最终决策
   → 输出 {done, result, reasoning}（DeepSeek JSON mode）
 ```
 
-- **L1Agent** 系统 prompt 注入：游戏规则 + 行为准则（L1 rules）+ 任务目标
-- **L0_5_1Manager** 编排 V-structure 循环（当前 MAX_LOOPS=1）
-- 通过 `DownwardComm` 将 `AgentPacket(query)` 传递给 L2
-
 ### L2 — Flexible Knowledge（柔性知识层）
+
+支持 add/remove/modify 卡片。**boost/penalize 机制待定**，当前勿在反射中使用——未来可能替换为基于历史成功/失败统计的打分系统。
 
 `core/layers/l2/manager.py` 包裹 FlexibleKnowledge，由 **L2Agent（三阶段 V-structure）** 驱动：
 
@@ -547,12 +548,14 @@ L2Agent.stage3(query, meta, state, selected_nodes, stage2_result)
 
 ### L3 — Skill Layer（技能层）
 
-`core/layers/l3/manager.py` 包裹 SkillLayer，**纯确定性（无 LLM）**：
+`core/layers/l3/manager.py` 包裹 SkillLayer + L3Agent（LLM 选择+执行）：
 
 - **匹配**：精确域 > 父域 > general 跨域 > 根域
-- **Skill CRUD**：`create_skill` / `edit_skill` / `patch_skill` / `delete_skill`
+- **Skill CRUD**：`create_skill` / `edit_skill` / `delete_skill`
 - **L2→L3 编译**：同域 ≥3 卡片且平均激活值 > 0.7 → LLM 编译为 SKILL.md
 - 注册工具：`skills_list` / `skill_view` / `skill_manage`
+
+> **TODO**: 未来 L3 技能可能绑定 L2 知识卡（card-level skill association）。创建技能时存储 source_card_ids 用于溯源。当前技能独立运作。
 
 ## 工具系统
 

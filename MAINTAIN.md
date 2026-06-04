@@ -197,10 +197,13 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `Philosophy` | `__init__(rules_path, max_rules, max_rule_length)` | L1 可演化行为规则管理 | L0_5_1Manager | — |
-| `Philosophy.all_rules` | `() → list[Rule]` | 返回所有规则副本 | L0_5_1Manager.process() | — |
-| `Philosophy.modify_rule` | `(rule_id:str, new_content:str) → Rule` | 修改规则（版本递增） | L0_5_1Manager.apply_update() | — |
-| `Philosophy.add_rule` | `(content:str, created_by:str) → Rule` | 添加新规则 | L0_5_1Manager.apply_update() | — |
+| `Philosophy` | `__init__(rules_path, max_rules, max_rule_length)` | L1 可演化行为规则管理（source="l0_5"不可变，"l1"可变） | L0_5_1Manager | — |
+| `Philosophy.all_rules` | `() → list[Rule]` | 返回所有规则（L0.5 + L1） | L1Agent._build_system_prompt | — |
+| `Philosophy.l1_rules` | `() → list[Rule]` | 仅返回 L1 可变规则 | Verifier, test | — |
+| `Philosophy.l0_5_rules` | `() → list[Rule]` | 仅返回 L0.5 不可变宪法 | — | — |
+| `Philosophy.add_rule` | `(content, created_by, source="l1") → Rule` | 添加新规则 | seed, L0_5_1Manager | _save() |
+| `Philosophy.modify_rule` | `(rule_id, new_content) → Rule` | 修改规则（拒绝L0.5） | L0_5_1Manager | _save() |
+| `Philosophy.remove_rule` | `(rule_id) → None` | 删除规则（拒绝L0.5） | L0_5_1Manager | _save() |
 
 ## core/flexible_knowledge.py (已有，层内部使用)
 
@@ -208,16 +211,22 @@
 |----------|------|------|-----------|---------|
 | `FlexibleKnowledge` | `__init__(knowledge_dir, index_path)` | L2 知识卡片管理 | L2Manager | — |
 | `FlexibleKnowledge.get_active_cards` | `(domain, context, top_k) → list[KnowledgeCard]` | 按激活值排序返回 top-k 活跃卡片 | L2Manager.process() | KnowledgeCard.compute_activation() |
-| `FlexibleKnowledge.get_domain_cards` | `(domain) → list[KnowledgeCard]` | 返回指定 domain 下所有卡片 | Phase 2: L3 编译检查 | — |
-| `KnowledgeCard.boost` | `() → None` | 置信度+0.05, 激活值+0.1, success_count+1 | L2Manager.apply_update() | — |
-| `KnowledgeCard.penalize` | `() → None` | 置信度-0.1(min 0.1), failure_count+1 | L2Manager.apply_update() | — |
+| `FlexibleKnowledge.get_domain_cards` | `(domain) → list[KnowledgeCard]` | 返回指定 domain 下所有卡片 | L2Agent | — |
+| `FlexibleKnowledge.add_card` | `(content, domain, confidence, source) → KnowledgeCard` | 新增卡片（仅内存） | seed, L2Manager | — |
+| `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片 | L2Manager | — |
+| `FlexibleKnowledge.modify_card` | `(card_id, new_content) → KnowledgeCard\|None` | 修改卡片内容 | L2Manager | — |
+| `KnowledgeCard.boost` | `() → None` | **TODO: 机制待定，勿在反射中使用** | — | — |
+| `KnowledgeCard.penalize` | `() → None` | **TODO: 机制待定，勿在反射中使用** | — | — |
 
 ## core/skill_layer.py (已有，层内部使用)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `SkillLayer` | `__init__(skills_dir, tool_registry)` | L3 技能管理 | L3Manager | — |
-| `SkillLayer.match` | `(domain) → list[SkillMeta]` | 按 domain 匹配技能，精确>父级>跨域 | L3Manager.process() | — |
+| `SkillLayer.match` | `(domain) → list[SkillMeta]` | 按 domain 匹配技能 | L3Manager.query() | — |
+| `SkillLayer.create_skill` | `(name, content, domain, ...) → SkillMeta` | 创建新技能 | L3Manager | 写 SKILL.md |
+| `SkillLayer.edit_skill` | `(name, new_content) → SkillMeta` | 更新技能内容 | L3Manager | 写 SKILL.md |
+| `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive） | L3Manager | — |
 | `SkillLayer.should_create_skill` | `(domain, cards) → bool` | 检查 L2→L3 编译条件 | Phase 2: Reflect | — |
 | `SkillLayer.propose_and_create` | `(domain, cards, llm) → SkillMeta\|None` | LLM 编译知识卡片为 SKILL.md | Phase 2: Reflect | — |
 

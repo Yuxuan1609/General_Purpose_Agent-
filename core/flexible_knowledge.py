@@ -159,6 +159,23 @@ class FlexibleKnowledge:
         self.cards.append(card)
         return card
 
+    def remove_card(self, card_id: str) -> bool:
+        """Remove a knowledge card by id. Returns True if found and removed."""
+        for i, c in enumerate(self.cards):
+            if c.id == card_id:
+                self.cards.pop(i)
+                return True
+        return False
+
+    def modify_card(self, card_id: str, new_content: str) -> KnowledgeCard | None:
+        """Modify a card's content by id. Returns the updated card or None."""
+        for c in self.cards:
+            if c.id == card_id:
+                c.content = new_content
+                c.updated_at = _now()
+                return c
+        return None
+
     def update_from_tool_results(self, task, results: list):
         for name, result_str in results:
             success = "error" not in str(result_str).lower()

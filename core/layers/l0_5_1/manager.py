@@ -202,17 +202,20 @@ class L0_5_1Manager(LayerManager):
         return {"status": "ok", "layer": self.name}
 
     def apply_update(self, key: str, value: Any) -> None:
-        """Phase 2: Apply L1 rule changes via MetaDriver validation → Philosophy."""
+        """Phase 2: Apply L1 rule changes via MetaDriver validation → Philosophy.
+
+        L0.5 rules (source='l0_5') are immutable constitution — only manually
+        modifiable by user. L1 rules (source='l1') are mutable via reflection.
+        """
         if key == "add_rule":
             content = value.get("content", "") if isinstance(value, dict) else str(value)
             if not content:
                 return
             existing = [r.content for r in self._philosophy.all_rules()]
-            # MetaDriver.validate_l1_change expects proposal with .content attr
             is_valid, reason = self._meta.validate_l1_change(
                 type("_Proposal", (), {"content": content})(), existing)
             if is_valid:
-                self._philosophy.add_rule(content, created_by="reflect")
+                self._philosophy.add_rule(content, created_by="reflect", source="l1")
                 logger.info("L1 rule added: %s", content[:80])
             else:
                 logger.warning("L1 rule rejected: %s", reason)
@@ -222,12 +225,12 @@ class L0_5_1Manager(LayerManager):
             try:
                 self._philosophy.modify_rule(rule_id, new_content)
                 logger.info("L1 rule %s modified", rule_id)
-            except Exception as e:
+            except ValueError as e:
                 logger.warning("L1 rule modify failed: %s", e)
         elif key == "remove_rule":
             rule_id = value.get("rule_id", "") if isinstance(value, dict) else str(value)
             try:
                 self._philosophy.remove_rule(rule_id)
                 logger.info("L1 rule %s removed", rule_id)
-            except Exception as e:
+            except ValueError as e:
                 logger.warning("L1 rule remove failed: %s", e)

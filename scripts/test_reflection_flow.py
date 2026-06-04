@@ -301,16 +301,35 @@ def _run_proposer_verifier(pkt, meta, log, layer_key, proposer_class,
         verified = verifier.verify(fixes, existing)
         log.debug("  output: %s", json.dumps(verified, ensure_ascii=False)[:500])
 
-        # Manager
+        # Manager: route to correct layer
         log.debug("  ═══ Manager ═══")
+        if layer_key == "l1":
+            mgr = chain
+        elif layer_key == "l2":
+            mgr = chain._downstream
+        elif layer_key == "l3":
+            mgr = chain._downstream._downstream if chain._downstream else None
+        else:
+            mgr = chain
+        if mgr is None:
+            log.debug("  target manager not available, skipping")
+            return
+
         for fix in verified.get("verified", []):
+            action = fix.get("action", "")
+            params: dict = {"content": fix.get("content", "")}
+            if layer_key == "l1":
+                params["rule_id"] = fix.get("rule_id", "")
+            elif layer_key == "l2":
+                params["card_id"] = fix.get("card_id", "")
+                params["domain"] = fix.get("domain", "general")
+                params["confidence"] = fix.get("confidence", 0.5)
+            elif layer_key == "l3":
+                params["name"] = fix.get("name", "")
+                params["domain"] = fix.get("domain", "general")
             try:
-                chain.apply_update(fix.get("action", ""),
-                                   {"content": fix.get("content", ""),
-                                    "card_id": fix.get("card_id", ""),
-                                    "skill_name": fix.get("skill_name", ""),
-                                    "domain": fix.get("domain", "general")})
-                log.debug("  Manager applied: %s", fix.get("action", ""))
+                mgr.apply_update(action, params)
+                log.debug("  Manager applied: %s", action)
             except Exception as e:
                 log.debug("  Manager error: %s", e)
         log.debug("  ═══ end %s ═══\n", layer_key.upper())
@@ -323,7 +342,8 @@ def _run_proposer_verifier(pkt, meta, log, layer_key, proposer_class,
 
 
 def _get_l1_existing(mgr):
-    return [r.content for r in mgr._philosophy.all_rules()]
+    # Only L1 mutable rules — L0.5 constitution is immutable
+    return [r.content for r in mgr._philosophy.l1_rules()]
 
 
 def _get_l2_existing():
