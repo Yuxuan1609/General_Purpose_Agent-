@@ -154,9 +154,12 @@ class L0_5_1Manager(LayerManager):
         """Phase 2: Apply L1 rule changes via MetaDriver validation → Philosophy."""
         if key == "add_rule":
             content = value.get("content", "") if isinstance(value, dict) else str(value)
+            if not content:
+                return
             existing = [r.content for r in self._philosophy.all_rules()]
+            # MetaDriver.validate_l1_change expects proposal with .content attr
             is_valid, reason = self._meta.validate_l1_change(
-                {"content": content}, existing)
+                type("_Proposal", (), {"content": content})(), existing)
             if is_valid:
                 self._philosophy.add_rule(content, created_by="reflect")
                 logger.info("L1 rule added: %s", content[:80])

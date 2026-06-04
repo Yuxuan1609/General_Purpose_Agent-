@@ -25,6 +25,7 @@ class ReflectionAgent(ABC):
         self._name = layer_name
         self._manager = manager
         self._downstream = downstream
+        self._log = logging.getLogger(f"{layer_name}_reflect")
 
     @abstractmethod
     def investigate(self, issues: list[dict], context: dict) -> dict:
@@ -47,7 +48,13 @@ class ReflectionAgent(ABC):
     def query_downstream(self, issues: list[dict], context: dict) -> dict:
         """Delegate investigation to downstream ReflectionAgent."""
         if self._downstream:
-            return self._downstream.investigate(issues, context)
+            self._log.debug("  ═══ cascading %d issues → %s ═══",
+                           len(issues), self._downstream._name)
+            result = self._downstream.investigate(issues, context)
+            self._log.debug("  cascade result: my=%d downstream=%d",
+                           len(result.get("my_issues", [])),
+                           len(result.get("downstream_issues", [])))
+            return result
         return {"my_issues": [], "downstream_issues": []}
 
 

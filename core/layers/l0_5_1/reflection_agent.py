@@ -20,8 +20,11 @@ class L0_5_1ReflectionAgent(ReflectionAgent):
             elif error_type in ("skill_mismatch", "skill_missing"):
                 downstream_issues.append(issue)
             else:
-                my_issues.append(issue)  # default: L1 owns top-level errors
+                my_issues.append(issue)
 
+        self._log.debug("═══ L1 ReflectionAgent ═══")
+        self._log.debug("  issues: %d → my=%d downstream=%d",
+                       len(issues), len(my_issues), len(downstream_issues))
         return {
             "my_issues": my_issues,
             "downstream_issues": downstream_issues,
@@ -36,7 +39,7 @@ class L0_5_1ReflectionAgent(ReflectionAgent):
             error_type = issue.get("type", "")
             content = issue.get("suggested_content", "")
 
-            if error_type in ("rule_missing", "rule_wrong"):
+            if error_type in ("rule_missing", "rule_wrong", "decision_error"):
                 self._manager.apply_update("add_rule", {"content": content})
                 fixes += 1
                 details.append(f"Added rule: {content[:80]}")

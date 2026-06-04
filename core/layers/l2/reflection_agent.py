@@ -17,8 +17,11 @@ class L2ReflectionAgent(ReflectionAgent):
             elif error_type in ("skill_mismatch", "skill_missing"):
                 downstream_issues.append(issue)
             else:
-                my_issues.append(issue)  # default: L2 owns unknown issues
+                my_issues.append(issue)
 
+        self._log.debug("═══ L2 ReflectionAgent ═══")
+        self._log.debug("  issues: %d → my=%d downstream=%d",
+                       len(issues), len(my_issues), len(downstream_issues))
         return {
             "my_issues": my_issues,
             "downstream_issues": downstream_issues,
