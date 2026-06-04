@@ -171,7 +171,8 @@ class Executor:
         )
 
         session_id = session.get("id", "unknown")
-        filepath = pending_dir / f"{session_id}.json"
+        step_index = session.get("step_index", 0)
+        filepath = pending_dir / f"{session_id}_{step_index}.json"
         content = json.dumps(rec.__dict__, ensure_ascii=False, indent=2, default=str)
         tmp = tempfile.mktemp(suffix=".json", dir=str(pending_dir))
         with open(tmp, "w", encoding="utf-8") as f:

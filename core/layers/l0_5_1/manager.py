@@ -20,12 +20,22 @@ class L1Agent(LayerAgent):
     System prompt carries the task goal + behavior rules (immutable context).
     User prompt carries the game rules + current situation (dynamic context).
     Output uses DeepSeek JSON mode with predefined schemas.
+
+    Phase 2a: L2's domain node selection is merged into L1 stage1, eliminating
+    L2's own stage1 LLM call. L1 receives L2's domain nodes as context and
+    outputs both the semantic query and the domain targets in one call.
     """
 
     MAX_LOOPS = 1
     TASK_GOAL = "对任务目标做出最优决策。"
 
-    STAGE1_SCHEMA = {"query": "string (需要下层提供的信息描述)"}
+    STAGE1_SCHEMA = {
+        "query": "string (需要下层提供的信息描述)",
+        "domain_nodes": [
+            {"name": "string (domain path)", "score": "float (0-1)",
+             "reason": "string (选择理由，一短句)"}
+        ],
+    }
     STAGE2_SCHEMA = {
         "done": "boolean (true/false)",
         "result": "string (最终决策)",
@@ -56,12 +66,28 @@ class L1Agent(LayerAgent):
             f"[对局历史]\n{history or '（无）'}"
         )
 
-    def stage1(self, meta: str, state: dict) -> str:
-        instruction = "判断需要从下层获取什么领域知识来做出最优决策。"
+    def stage1(self, meta: str, state: dict, domain_nodes: list[dict] | None = None) -> dict:
+        """Stage1: produce query + domain targeting.
+
+        Merges L2's domain-node selection into L1. Output includes both the
+        semantic query and the selected domain nodes (name/score/reason).
+        """
+        nodes = domain_nodes or []
+        nodes_text = "\n".join(
+            f"{i + 1}. {n['name']}\n   {n['description']}"
+            for i, n in enumerate(nodes)
+        )
+        instruction = (
+            "判断需要从下层获取什么领域知识来做出最优决策。"
+            "从领域节点中选出最相关的 1-5 个节点，并给出语义查询。"
+        )
         system = self._build_system_prompt(instruction, meta)
-        user = self._build_user_context(state)
+        user = (
+            f"{self._build_user_context(state)}\n\n"
+            f"[领域节点]\n{nodes_text}"
+        )
         result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
-        return result.get("query", "")
+        return result
 
     def stage2(self, meta: str, state: dict) -> dict:
         instruction = "整合下层返回的知识信息，基于游戏规则和行为准则做出最终决策。"
@@ -100,11 +126,13 @@ class L0_5_1Manager(LayerManager):
 
     def __init__(self, meta_driver, philosophy, auxiliary_llm=None,
                  downstream: LayerManager | None = None,
-                 upward=None, downward=None):
+                 upward=None, downward=None,
+                 domain_nodes: list[dict] | None = None):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._meta = meta_driver
         self._philosophy = philosophy
         self._agent = L1Agent(auxiliary_llm, philosophy) if auxiliary_llm else None
+        self._domain_nodes = domain_nodes or []
         self._final_result: dict | None = None
 
     def process(self, data: Any) -> dict:
@@ -128,14 +156,21 @@ class L0_5_1Manager(LayerManager):
 
         for loop in range(1, L1Agent.MAX_LOOPS + 1):
             logger.debug("── L1 Stage 1 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
-            query_text = self._agent.stage1(meta, obs.state)
-            logger.debug("  response: %s", query_text)
+            stage1_result = self._agent.stage1(meta, obs.state,
+                                               domain_nodes=self._domain_nodes)
+            query_text = stage1_result.get("query", "")
+            selected_nodes = stage1_result.get("domain_nodes", [])
+            logger.debug("  query: %s", query_text)
+            for n in selected_nodes:
+                logger.debug("    node: %s (score=%s)", n.get("name"), n.get("score"))
 
             # Package L1's query as AgentPacket, store in state for L2
             l1_packet = AgentPacket(source_layer="l1", message_type="query",
                                     content={"query": query_text})
             obs.state["l1_query"] = query_text
             obs.state["l1_packet"] = l1_packet
+            # Store domain-node selection for L2 to consume (replaces L2 stage1 LLM call)
+            obs.state["l2_selected_nodes"] = selected_nodes
 
             if self._downstream:
                 q_msg = self._downward.wrap_query(

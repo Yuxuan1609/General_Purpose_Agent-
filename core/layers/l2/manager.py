@@ -207,13 +207,20 @@ class L2Manager(LayerManager):
             return
 
         # ═══ Stage 1: Node Selection ═══
-        logger.debug("  ═══ L2 Stage 1 — Node Selection ═══")
-        selected_nodes = self._agent.stage1(query, meta, obs.state)
-        logger.debug("  ── Stage 1 结果 ──")
-        for n in selected_nodes:
-            logger.debug("    %s (score=%s)", n.get("name"), n.get("score"))
+        # Phase 2a: L1 now owns this step. Read selected nodes from state.
+        selected_nodes = obs.state.get("l2_selected_nodes", [])
+        if not selected_nodes:
+            # Fallback: L1 didn't provide nodes, run stage1 locally
+            logger.debug("  ═══ L2 Stage 1 — Node Selection (fallback) ═══")
+            selected_nodes = self._agent.stage1(query, meta, obs.state)
+            logger.debug("  ── Stage 1 结果 ──")
+            for n in selected_nodes:
+                logger.debug("    %s (score=%s)", n.get("name"), n.get("score"))
+        else:
+            logger.debug("  L2 Stage 1: using L1-selected nodes (%d)", len(selected_nodes))
+            for n in selected_nodes:
+                logger.debug("    %s (score=%s)", n.get("name"), n.get("score"))
         logger.debug("")
-        # TODO: Graph expansion — via KnowledgeGraph.spread_activation()
 
         # ═══ Stage 2: Card Filter + L3 Decision ═══
         logger.debug("  ═══ L2 Stage 2 — Card Filter ═══")
