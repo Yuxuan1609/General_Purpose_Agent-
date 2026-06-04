@@ -1,3 +1,4 @@
+# REFACTOR: LearningEnv — tests old per-layer ReflectionAgent. Will be replaced by LearningEnv action tests.
 """Tests for per-layer ReflectionAgent implementations."""
 import pytest
 from core.layers.l3.reflection_agent import L3ReflectionAgent

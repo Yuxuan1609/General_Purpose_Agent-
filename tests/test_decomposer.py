@@ -1,3 +1,4 @@
+# REFACTOR: LearningEnv — TaskDecomposer is partially recyclable as LearningUnit splitter in LearningEnv.
 import pytest
 from pathlib import Path
 from core.task import LearningUnit, Domain

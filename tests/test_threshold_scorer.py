@@ -1,3 +1,4 @@
+# REFACTOR: LearningEnv — tests old ThresholdScorer. Recyclable: threshold logic → LearningEnv reward signal.
 import json
 from pathlib import Path
 from core.orchestrator.threshold_scorer import ThresholdScorer

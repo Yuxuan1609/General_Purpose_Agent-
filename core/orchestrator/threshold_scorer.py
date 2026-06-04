@@ -1,3 +1,5 @@
+# --- REFACTOR: LearningEnv ---
+# Old threshold-based trigger. Recyclable: threshold logic → LearningEnv reward signal.
 """Threshold scorer — domain-grouped evaluation of pending learning records."""
 import json
 import logging

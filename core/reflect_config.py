@@ -1,9 +1,7 @@
-"""Reflection config loader — reads config/reflect.yaml into structured dicts.
-
-Schema-driven: Proposer/Verifier JSON output contracts are defined in the YAML
-config. Changing schemas there updates both prompt injection and parse validation
-without code changes.
-"""
+# --- REFACTOR: LearningEnv ---
+# Old reflection config loader. Recyclable: schema definitions → LearningEnv domain
+# config (learning/reflect/compile domain configs under data/layers/knowledge/learning/).
+"""Reflection config loader — reads config/reflect.yaml into structured dicts."""
 import yaml
 from pathlib import Path
 from dataclasses import dataclass, field

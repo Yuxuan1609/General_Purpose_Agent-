@@ -8,16 +8,16 @@ from core.layer_message import LayerMessage, MessageType
 from core.layers.comm import UpwardComm, DownwardComm
 
 
+# --- REFACTOR: LearningEnv ---
+# ReflectionAgent(ABC) is the base for the old hardcoded reflection system.
+# Will be replaced by LearningEnv — reflection modeled as a normal domain
+# flowing through the same Executor + Layers pipeline.
+# Recyclable: `investigate()`/`fix()` semantics → LearningEnv action space;
+# `LayerManager.apply_update()` → LearningEnv's write-back to knowledge.
 class ReflectionAgent(ABC):
-    """Phase 2: Per-layer reflection coordinator for recursive problem attribution.
+    """Phase 2 (DEPRECATED): Per-layer reflection coordinator.
 
-    Each layer's ReflectionAgent:
-      - investigate(issues, context) → attributs problems to self vs downstream
-      - fix(my_issues) → repairs confirmed problems via Manager.apply_update()
-      - query_downstream(issues, context) → delegates investigation to lower layer
-
-    Communication uses the same chain pattern as Execute (QUERY→RESPONSE via
-    downstream ReflectionAgent reference), not LayerMessage.
+    Superseded by LearningEnv design — see README architecture section.
     """
 
     def __init__(self, layer_name: str, manager,

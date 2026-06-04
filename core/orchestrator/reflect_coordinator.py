@@ -1,3 +1,6 @@
+# --- REFACTOR: LearningEnv ---
+# Old reflection orchestrator. Recyclable: record scanning → LearningEnv.get_state();
+# archive logic → LearningEnv reward tracking.
 """Reflect Coordinator — orchestrates the reflection cycle across layers."""
 import json
 import logging

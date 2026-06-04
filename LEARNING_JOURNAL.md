@@ -82,10 +82,12 @@
 - Manager 决定：是否向下一层 QUERY、传什么、等 RESPONSE 后怎么聚合
 - 与信息隔离原则（A3）天然契合：每层只管理自己边界内的事
 
-## ReflectionAgent 递归判责模式
-- 每层设独立 ReflectionAgent，反思编排时：判责（自己 vs 下层）→ 是自己则 fix() → 是下层则 QUERY 下层 ReflectionAgent
-- 与 Execute 段相同的链式 QUERY→RESPONSE 模式
-- 两条链路分离：全局 Reflect（Coordinator 审核分发）和每层 Reflect（ReflectionAgent 递归链）
+## Reflection 降级为普通 Environment（❌ 替代旧"递归判责"模式）
+- 旧方案：每层写死 ReflectionAgent，链式判责 → 不可演化
+- 新方案：学习本身建模为 LearningEnv，实现 Environment 接口，与 GameEnv 共享 Executor + Layers + ToolUse
+- 核心变化：反射从"特殊第二阶段"变为"一个普通 domain"，系统可以学到"如何学习"（自举）
+- 优点：零额外架构，自然支持多轮、工具调用、假设验证；学习策略可演化
+- 回收旧代码：pending records → LearningEnv 输入源，threshold scorer → 状态特征，learning refiner → reward 计算器
 
 ## TaskObservation 三层语义的通信层填充
 - meta（干什么）、state（什么情况）、history（之前发生了什么）三层语义，全部由通信层（脚本）填充

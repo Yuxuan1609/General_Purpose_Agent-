@@ -1,5 +1,6 @@
+# --- REFACTOR: LearningEnv ---
+# Old LLM-based step selector. Recyclable: "worth learning" prompt → LearningEnv L1 rule.
 """Learning Refiner — LLM agent that selects which steps to learn from.
-
 After a Session ends and TaskDecomposer creates LearningUnits, this agent
 reviews each LearningUnit's ExecutionRecords and identifies which steps
 are worth learning based on the meta-level goal.

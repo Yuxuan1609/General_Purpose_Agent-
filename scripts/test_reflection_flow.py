@@ -1,3 +1,6 @@
+# --- REFACTOR: LearningEnv ---
+# This script tests the old reflection pipeline. Will be replaced by
+# LearningEnv integration test: env.reset() → Executor.execute() → env.step() loop.
 """
 Reflection flow test — runs full reflect pipeline on existing pending records.
 Does NOT archive/move files (test mode).

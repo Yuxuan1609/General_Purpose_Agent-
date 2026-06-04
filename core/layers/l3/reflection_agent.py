@@ -1,3 +1,5 @@
+# --- REFACTOR: LearningEnv ---
+# Skill-layer reflection. Recyclable: compilation logic → LearningEnv compile action.
 """L3 ReflectionAgent — skill-level issue attribution and repair."""
 import json
 import logging

@@ -23,6 +23,9 @@ class AgentPacket:
     content: dict = field(default_factory=dict)
 
 
+# --- REFACTOR: LearningEnv ---
+# ReflectPacket is part of the old reflection system. LearningEnv uses standard
+# LayerMessage (AgentPacket) for communication — no special reflection envelope needed.
 @dataclass(frozen=True)
 class ReflectPacket:
     """Reflection-phase communication: Coordinator → ReflectionAgent.

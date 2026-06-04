@@ -1,3 +1,4 @@
+# REFACTOR: LearningEnv — tests old reflect config. Will be replaced by LearningEnv domain config tests.
 import pytest
 from core.reflect_config import ReflectConfig, load_reflect_config
 

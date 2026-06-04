@@ -1,3 +1,4 @@
+# REFACTOR: LearningEnv — tests old ReflectCoordinator. Will be replaced by LearningEnv env.step() tests.
 """Tests for ReflectCoordinator."""
 import json
 from pathlib import Path

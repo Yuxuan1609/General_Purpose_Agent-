@@ -5,6 +5,14 @@
 
 ---
 
+## Changelog
+
+| 日期 | 变更 |
+|------|------|
+| 2026-06-04 | **清理**：删除 `core/l0_5/ l1/ l2/ l3/ l4/`（旧层 stub，20 文件）、`core/orchestrator/task_runner.py meta_learner.py`（Orch stub，2 文件）、`tests/test_agent_stubs.py`。**归档**：`main.py` `core/agent.py` `core/agent_loop.py` `core/layer_context.py` + 对应测试 + 旧脚本 → `_archive/`。**标记**：所有 Reflection 模块标注 ⚠ REFACTOR，将被 LearningEnv 替代。详见 `docs/superpowers/specs/2026-06-04-learning-env-design.md`。 |
+
+---
+
 ## core/types.py (NEW in Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
@@ -52,7 +60,7 @@
 | `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
 | `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
 
-## core/layers/base.py (Phase 1 + Phase 2)
+## core/layers/base.py (Phase 1 + ⚠ Phase 2 — deprecated)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
@@ -63,11 +71,11 @@
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
 | `LayerManager.query` | `(msg:LayerMessage\|Any, trace_id) → None` | QUERY 入口：通过 UpwardComm 解包 → process → DownwardComm 包装 → 下游 | Executor / 上层 | process(), downstream.query() |
 | `LayerManager.collect_notify` | `() → dict{layer_name: payload}` | 收集本层+所有下游的 NOTIFY | Executor.execute() | notify(), 下游.collect_notify() |
-| `LayerManager.apply_update` | `(key:str, value) → None` (abstract) | Phase 2: ReflectionAgent 修复时写回本层数据 | ReflectionAgent.fix() | 子类实现 |
-| `ReflectionAgent` | `__init__(layer_name, manager, downstream)` | Phase 2: 反思编排 ABC。判责→修复→下层调查 | ReflectCoordinator | investigate(), fix(), query_downstream() |
-| `ReflectionAgent.investigate` | `(issues:list[dict], context:dict) → dict{my_issues, downstream_issues, actions}` | 按类型判责：自己 vs 下层 | ReflectCoordinator / 上层 | — |
-| `ReflectionAgent.fix` | `(my_issues:list[dict]) → dict{fixes_applied, details}` | 修复确认问题，调用 Manager.apply_update() | investigate() | Manager.apply_update() |
-| `ReflectionAgent.query_downstream` | `(issues, context) → dict` | 递交给下层 ReflectionAgent.investigate() | investigate() | 下层.investigate() |
+| `LayerManager.apply_update` | `(key:str, value) → None` (abstract) | ⚠ REFACTOR: 旧 Phase 2 写回接口，将被 LearningEnv.step() 取代 | — | — |
+| `ReflectionAgent` | `__init__(layer_name, manager, downstream)` | ⚠ REFACTOR: 旧反思 ABC，将被 LearningEnv 替代 | — | — |
+| `ReflectionAgent.investigate` | `(issues, context) → dict` | ⚠ REFACTOR | — | — |
+| `ReflectionAgent.fix` | `(my_issues) → dict` | ⚠ REFACTOR | — | — |
+| `ReflectionAgent.query_downstream` | `(issues, context) → dict` | ⚠ REFACTOR | — | — |
 
 ## core/layers/l0_5_1/upward_comm.py, downward_comm.py (Phase 1.5)
 
@@ -103,14 +111,14 @@
 | `L3Agent.execute` | `(meta, state) → dict{skills_used, result, reasoning}` | 选择相关技能 + 基于技能推理 + 产出执行结果 | L3Manager.query() | _call_llm() |
 | `L3Manager.apply_update` | `(key, value) → None` | Phase 2: 更新 L3 技能 | L3ReflectionAgent.fix() | SkillLayer.edit_skill() |
 
-## core/layers/l3/reflection_agent.py (Phase 2 → Phase 2a)
+## core/layers/l3/reflection_agent.py (⚠ REFACTOR: LearningEnv)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3ReflectProposer` | `__init__(llm_client)` | L3 Proposer(LLM): 分析 L3 NOTIFY + 已有技能 → propose self_fixes | ReflectCoordinator | _call_llm() |
-| `L3ReflectProposer.propose` | `(layer_notify, refiner_reasoning, meta, dispatch_info) → dict` | 产出 `{self_fixes: [{action, skill_name, content, reason}]}` | test_reflection_flow | — |
-| `L3ReflectVerifier` | `__init__(llm_client)` | L3 Verifier(LLM): 验证 proposals vs 已有技能 | ReflectCoordinator | _call_llm() |
-| `L3ReflectVerifier.verify` | `(proposals, existing_skills) → dict{verified, rejected}` | 去重 + SKILL.md 格式检查 | test_reflection_flow | L3Manager.apply_update() |
+| `L3ReflectProposer` | `__init__(llm_client)` | ⚠ 将被 LearningEnv L3 learning skill 取代 | — | — |
+| `L3ReflectProposer.propose` | `(...) → dict` | ⚠ REFACTOR | — | — |
+| `L3ReflectVerifier` | `__init__(llm_client)` | ⚠ 将被 LearningEnv L0.5 验证器取代 | — | — |
+| `L3ReflectVerifier.verify` | `(...) → dict` | ⚠ REFACTOR | — | — |
 
 ## core/layers/l2/manager.py (Phase 1)
 
@@ -127,16 +135,16 @@
 | `L2Agent.stage3` | `(query, meta, state, selected_nodes, stage2_result) → dict` | 整合 L3 响应 + 上下文 → 最终 NOTIFY | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
 | `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | stage2/stage3 | FlexibleKnowledge.get_domain_cards() |
 | `L2_DOMAIN_NODES` | `list[dict{name, description}]` | 硬编码 seed 领域节点 (game/leduc, game/doudizhu) | L2Agent.stage1 | — |
-| `L2Manager.apply_update` | `(key, value) → None` | Phase 2: boost/penalize/add 知识卡片 | L2ReflectionAgent.fix() | KnowledgeCard.boost/penalize, FlexibleKnowledge.add_card() |
+| `L2Manager.apply_update` | `(key, value) → None` | ⚠ REFACTOR: 将被 LearningEnv.step() 取代 | — | — |
 
-## core/layers/l2/reflection_agent.py (Phase 2 → Phase 2a)
+## core/layers/l2/reflection_agent.py (⚠ REFACTOR: LearningEnv)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L2ReflectProposer` | `__init__(llm_client)` | L2 Proposer(LLM): 分析 L2 NOTIFY → propose self_fixes + dispatch_l3? | ReflectCoordinator | _call_llm() |
-| `L2ReflectProposer.propose` | `(layer_notify, refiner_reasoning, meta, dispatch_info) → dict` | 产出 `{self_fixes: [{action, card_id, content, reason}], dispatch_lower}` | test_reflection_flow | — |
-| `L2ReflectVerifier` | `__init__(llm_client)` | L2 Verifier(LLM): 验证 proposals vs 已有卡片 | ReflectCoordinator | _call_llm() |
-| `L2ReflectVerifier.verify` | `(proposals, existing_cards) → dict{verified, rejected}` | 去重 + 置信度边界检查 | test_reflection_flow | L2Manager.apply_update() |
+| `L2ReflectProposer` | `__init__(llm_client)` | ⚠ 将被 LearningEnv L2 learning skill 取代 | — | — |
+| `L2ReflectProposer.propose` | `(...) → dict` | ⚠ REFACTOR | — | — |
+| `L2ReflectVerifier` | `__init__(llm_client)` | ⚠ 将被 LearningEnv 验证器取代 | — | — |
+| `L2ReflectVerifier.verify` | `(...) → dict` | ⚠ REFACTOR | — | — |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
 
@@ -151,16 +159,16 @@
 | `L1Agent.stage2` | `(meta, state) → dict{done, result, reasoning}` | 整合 L2 知识卡片 + 行为准则 → 最终决策 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
 | `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
 | `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
-| `L0_5_1Manager.apply_update` | `(key, value) → None` | Phase 2: add/modify/remove 规则（经 MetaDriver 验证） | L0_5_1ReflectionAgent.fix() | MetaDriver.validate_l1_change(), Philosophy |
+| `L0_5_1Manager.apply_update` | `(key, value) → None` | ⚠ REFACTOR: 将被 LearningEnv.step() 取代 | — | — |
 
-## core/layers/l0_5_1/reflection_agent.py (Phase 2 → Phase 2a)
+## core/layers/l0_5_1/reflection_agent.py (⚠ REFACTOR: LearningEnv)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L1ReflectProposer` | `__init__(llm_client)` | L1 Proposer(LLM): 分析 L1 NOTIFY → propose self_fixes + dispatch_l2? | ReflectCoordinator | _call_llm() |
-| `L1ReflectProposer.propose` | `(layer_notify, refiner_reasoning, meta, dispatch_info) → dict` | 产出 `{self_fixes: [{action, content, reason}], dispatch_lower}` | test_reflection_flow | — |
-| `L1ReflectVerifier` | `__init__(llm_client)` | L1 Verifier(LLM): 验证 proposals vs 已有规则 | ReflectCoordinator | _call_llm() |
-| `L1ReflectVerifier.verify` | `(proposals, existing_rules) → dict{verified, rejected}` | 去重 + 矛盾检测 | test_reflection_flow | L0_5_1Manager.apply_update() |
+| `L1ReflectProposer` | `__init__(llm_client)` | ⚠ 将被 LearningEnv L1 learning rule 取代 | — | — |
+| `L1ReflectProposer.propose` | `(...) → dict` | ⚠ REFACTOR | — | — |
+| `L1ReflectVerifier` | `__init__(llm_client)` | ⚠ 将被 LearningEnv L0.5 验证器取代 | — | — |
+| `L1ReflectVerifier.verify` | `(...) → dict` | ⚠ REFACTOR | — | — |
 
 ## scripts/leduc_cognitive_agent.py (Phase 1)
 
@@ -230,21 +238,17 @@
 | `SkillLayer.should_create_skill` | `(domain, cards) → bool` | 检查 L2→L3 编译条件 | Phase 2: Reflect | — |
 | `SkillLayer.propose_and_create` | `(domain, cards, llm) → SkillMeta\|None` | LLM 编译知识卡片为 SKILL.md | Phase 2: Reflect | — |
 
-## core/orchestrator/ (Phase 2)
+## core/orchestrator/ (⚠ REFACTOR: LearningEnv — 全部待重构)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `TaskDecomposer.decompose` | `(session:dict, raw_log:Path) → list[LearningUnit]` | Session → LearningUnit 拆解 | AgentRuntime / ReflectCoordinator | _decompose_game_unit(), _decompose_coding() |
-| `ThresholdScorer.score` | `(domain:str) → float` | 计算 domain 的学习积攒评分 | ReflectCoordinator | _domain_records() |
-| `ThresholdScorer.should_trigger` | `(domain:str) → bool` | 评分 ≥ threshold 时返回 True | Executor（Reflect 模式） | score() |
-| `ReflectCoordinator.audit` | `(domain:str) → dict{layer: issues}` | 扫描 pending/ 中 NOTIFY 提取问题 + 无动作标记 | Executor（Reflect 模式） | — |
-| `ReflectCoordinator.run_reflect` | `(domain, root_manager, root_reflection) → dict` | 完整反射周期：audit → 分发(自上而下) → 修复 → _archive | Executor | ReflectionAgent.investigate/fix, _archive() |
-| `ReflectCoordinator._archive` | `(domain) → None` | 将已处理 pending/*.json 移入 learned/{domain}/ | run_reflect() | shutil.move() |
-| `ThresholdScorer.score` | `(domain:str) → float` | 计算 domain 的学习积攒评分 | ReflectCoordinator.run_reflect() | _domain_records() |
-| `ThresholdScorer.should_trigger` | `(domain:str) → bool` | 评分 ≥ threshold 时返回 True | Executor（Reflect 模式） | score() |
-| `ThresholdScorer.domain_count` | `(domain) → int` | 返回 pending 中该 domain 的记录数 | 外部查询 | _domain_records() |
-| `LearningRefiner` | `__init__(llm_client)` | Phase 2: LLM agent 判读哪些执行步骤值得学习 | ReflectCoordinator | — |
-| `LearningRefiner.refine` | `(meta:str, records:list[dict]) → dict{worth_learning, reasoning}` | LLM 根据 meta 目标判断每步贡献，选出 worth_learning 索引 | ReflectCoordinator.run_reflect() | _call_llm(), _format_steps() |
+| `TaskDecomposer.decompose` | `(session, raw_log) → list[LearningUnit]` | 可回收 → LearningEnv batch splitter | — | — |
+| `ThresholdScorer.score` | `(domain) → float` | 可回收 → LearningEnv reward signal | — | — |
+| `ThresholdScorer.should_trigger` | `(domain) → bool` | 可回收 → LearningEnv 触发条件 | — | — |
+| `ReflectCoordinator.audit` | `(domain) → dict` | ⚠ 将被 LearningEnv.reset() 取代 | — | — |
+| `ReflectCoordinator.run_reflect` | `(domain, ...) → dict` | ⚠ 将被 LearningEnv 的 env.step() loop 取代 | — | — |
+| `LearningRefiner` | `__init__(llm_client)` | 可回收 → LearningEnv L1 domain rule | — | — |
+| `LearningRefiner.refine` | `(meta, records) → dict` | 可回收 prompt → LearningEnv 知识卡片 | — | — |
 
 ## core/reflect_config.py (Phase 2a)
 

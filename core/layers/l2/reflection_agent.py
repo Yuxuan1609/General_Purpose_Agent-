@@ -1,3 +1,5 @@
+# --- REFACTOR: LearningEnv ---
+# Card-layer reflection. Recyclable: card scoring logic → LearningEnv threshold feature.
 """L2 ReflectionAgent — knowledge card issue attribution and repair."""
 import json
 import logging

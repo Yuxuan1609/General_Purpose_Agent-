@@ -1,3 +1,5 @@
+# --- REFACTOR: LearningEnv ---
+# Rule-layer reflection. Recyclable: proposer/verifier prompts → LearningEnv L1 domain rules.
 """L(0.5+1) ReflectionAgent — rule-level issue attribution and repair."""
 import json
 import logging
