@@ -20,6 +20,8 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 
 > **L1-L4 每层都在执行**：任务分派到各层后，每层基于自己持有的信息和 LLM Agent 独立执行认知任务。区别在于执行"重量"——L2/L3 涉及检索+筛选+推理，较重；L1（行为准则匹配）和 L4（静态知识查询）相对轻量。游戏环境（Leduc）中差异不显著（任务粒度小、技能含策略描述）；通用任务（编程、搜索）中差异更明显。
 
+> **抽象知识逐层下渗**：Execute 和 Reflect 阶段都遵守同一原则——上层产出相对抽象的指令/问题，传递到下层时逐步细化为更具体的操作。Execute 段 L1 提出查询方向→L2 筛选知识卡片→L3 匹配并执行技能；Reflect 段同理，L1 指出问题领域→L2 定位具体卡片→L3 更新技能内容。当前架构已具备此能力（V-structure + LayerMessage + Comm Agent），具体效果取决于每层 LLM 的提示词和输出格式要求。
+
 每层 Manager 驱动 V-structure 循环：**Agent（LLM 决策）↔ Manager（编排/状态管理）↔ Comm Agent（确定性协议）**，通过 `AgentPacket` 跨层传递内部 Agent 通信。
 
 ### 通信协议 (Phase 1.5 — 已实现 ✅)

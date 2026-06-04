@@ -129,12 +129,14 @@
 | `L2_DOMAIN_NODES` | `list[dict{name, description}]` | 硬编码 seed 领域节点 (game/leduc, game/doudizhu) | L2Agent.stage1 | — |
 | `L2Manager.apply_update` | `(key, value) → None` | Phase 2: boost/penalize/add 知识卡片 | L2ReflectionAgent.fix() | KnowledgeCard.boost/penalize, FlexibleKnowledge.add_card() |
 
-## core/layers/l2/reflection_agent.py (Phase 2)
+## core/layers/l2/reflection_agent.py (Phase 2 → Phase 2a)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L2ReflectionAgent.investigate` | `(issues, context) → dict` | 卡片问题归自己，技能问题派发 L3 | ReflectCoordinator / L0_5_1ReflectionAgent | query_downstream() |
-| `L2ReflectionAgent.fix` | `(my_issues) → dict` | boost_card/penalize_card/add_card | investigate() | L2Manager.apply_update() |
+| `L2ReflectProposer` | `__init__(llm_client)` | L2 Proposer(LLM): 分析 L2 NOTIFY → propose self_fixes + dispatch_l3? | ReflectCoordinator | _call_llm() |
+| `L2ReflectProposer.propose` | `(layer_notify, refiner_reasoning, meta, dispatch_info) → dict` | 产出 `{self_fixes: [{action, card_id, content, reason}], dispatch_lower}` | test_reflection_flow | — |
+| `L2ReflectVerifier` | `__init__(llm_client)` | L2 Verifier(LLM): 验证 proposals vs 已有卡片 | ReflectCoordinator | _call_llm() |
+| `L2ReflectVerifier.verify` | `(proposals, existing_cards) → dict{verified, rejected}` | 去重 + 置信度边界检查 | test_reflection_flow | L2Manager.apply_update() |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
 
@@ -151,12 +153,14 @@
 | `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
 | `L0_5_1Manager.apply_update` | `(key, value) → None` | Phase 2: add/modify/remove 规则（经 MetaDriver 验证） | L0_5_1ReflectionAgent.fix() | MetaDriver.validate_l1_change(), Philosophy |
 
-## core/layers/l0_5_1/reflection_agent.py (Phase 2)
+## core/layers/l0_5_1/reflection_agent.py (Phase 2 → Phase 2a)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L0_5_1ReflectionAgent.investigate` | `(issues, context) → dict` | 规则/决策问题归自己，卡片/技能问题派发 L2 | ReflectCoordinator | query_downstream() → L2ReflectionAgent |
-| `L0_5_1ReflectionAgent.fix` | `(my_issues) → dict` | add_rule/modify_rule/remove_rule | investigate() | L0_5_1Manager.apply_update() |
+| `L1ReflectProposer` | `__init__(llm_client)` | L1 Proposer(LLM): 分析 L1 NOTIFY → propose self_fixes + dispatch_l2? | ReflectCoordinator | _call_llm() |
+| `L1ReflectProposer.propose` | `(layer_notify, refiner_reasoning, meta, dispatch_info) → dict` | 产出 `{self_fixes: [{action, content, reason}], dispatch_lower}` | test_reflection_flow | — |
+| `L1ReflectVerifier` | `__init__(llm_client)` | L1 Verifier(LLM): 验证 proposals vs 已有规则 | ReflectCoordinator | _call_llm() |
+| `L1ReflectVerifier.verify` | `(proposals, existing_rules) → dict{verified, rejected}` | 去重 + 矛盾检测 | test_reflection_flow | L0_5_1Manager.apply_update() |
 
 ## scripts/leduc_cognitive_agent.py (Phase 1)
 
