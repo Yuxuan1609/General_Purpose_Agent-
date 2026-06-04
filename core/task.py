@@ -35,14 +35,19 @@ class Domain:
 
 
 @dataclass
-class Task:
-    """A user request with a defined domain and evaluation criteria."""
+class LearningUnit:
+    """Minimum unit for learning. One session may decompose into multiple LearningUnits.
+
+    Distinct from TaskObservation (a single step's observation). A LearningUnit
+    can span multiple TaskObservations; the learning pipeline groups them by domain.
+    """
     description: str
     domain: Domain = field(default_factory=lambda: Domain("general", "general"))
     context: str = ""
     needs_decomposition: bool = False
-    subtasks: list[Task] = field(default_factory=list)
+    subtasks: list[LearningUnit] = field(default_factory=list)
     enable_learning: bool = False
+    token_count: int = 0
 
 
 @dataclass
@@ -63,7 +68,7 @@ class TaskResult:
 @dataclass
 class TaskContext:
     """Mutable context tracked during a single task execution."""
-    task: Task
+    task: LearningUnit
     consecutive_no_progress: int = 0
     eval_result: str = ""
     rounds: int = 0

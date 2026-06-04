@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from core.config import AgentConfig
-from core.task import Task, Domain
+from core.task import LearningUnit, Domain
 from core.tools.registry import ToolRegistry
 from core.skill_layer import SkillLayer
 from core.flexible_knowledge import FlexibleKnowledge
@@ -40,7 +40,7 @@ class CognitiveAgent:
         self._bootstrap(config)
 
     def run(self, user_input: str, domain: Domain | None = None) -> any:
-        task = Task(description=user_input, domain=domain or Domain("general", "general"))
+        task = LearningUnit(description=user_input, domain=domain or Domain("general", "general"))
         messages, raw_result = self.loop.run(task)
         return self.loop.reflect(task, messages, raw_result)
 

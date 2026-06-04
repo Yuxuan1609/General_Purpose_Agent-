@@ -1,4 +1,4 @@
-from core.task import Domain, Task, TaskResult, TaskContext
+from core.task import Domain, LearningUnit, TaskResult, TaskContext
 
 
 class TestDomain:
@@ -47,12 +47,12 @@ class TestDomain:
 
 class TestTask:
     def test_task_creation(self):
-        t = Task(description="find the treasure", domain=Domain("textworld/map_A", "specific"))
+        t = LearningUnit(description="find the treasure", domain=Domain("textworld/map_A", "specific"))
         assert t.description == "find the treasure"
         assert t.domain.path == "textworld/map_A"
 
     def test_task_default_domain(self):
-        t = Task(description="do something")
+        t = LearningUnit(description="do something")
         assert t.domain.path == "general"
         assert t.domain.is_general is True
 

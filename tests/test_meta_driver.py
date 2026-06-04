@@ -4,7 +4,7 @@ from core.meta_driver import (
     MetaDriver, ReflectionTrigger, TriggerType, ValidationRule,
     DEFAULT_TRIGGERS, DEFAULT_VALIDATORS,
 )
-from core.task import Task, TaskContext, Domain
+from core.task import LearningUnit, TaskContext, Domain
 from core.philosophy import L1Proposal
 
 
@@ -27,7 +27,7 @@ class TestReflectionTrigger:
             rule_check=lambda ctx: ctx.consecutive_no_progress >= 3,
             llm_prompt=None, cooldown_rounds=1,
         )
-        ctx = TaskContext(task=Task("test"))
+        ctx = TaskContext(task=LearningUnit("test"))
         ctx.consecutive_no_progress = 3
         assert trigger.evaluate(ctx) is True
 
@@ -37,7 +37,7 @@ class TestReflectionTrigger:
             rule_check=lambda ctx: ctx.consecutive_no_progress >= 3,
             llm_prompt=None, cooldown_rounds=1,
         )
-        ctx = TaskContext(task=Task("test"))
+        ctx = TaskContext(task=LearningUnit("test"))
         ctx.consecutive_no_progress = 1
         assert trigger.evaluate(ctx) is False
 
@@ -46,7 +46,7 @@ class TestReflectionTrigger:
             id="test", trigger_type=TriggerType.RULE, condition_desc="test",
             rule_check=lambda ctx: True, llm_prompt=None, cooldown_rounds=5,
         )
-        ctx = TaskContext(task=Task("test"))
+        ctx = TaskContext(task=LearningUnit("test"))
         ctx.rounds = 0
         assert trigger.evaluate(ctx) is True
         assert trigger.evaluate(ctx) is False
@@ -54,13 +54,13 @@ class TestReflectionTrigger:
 
 class TestMetaDriver:
     def test_evaluate_triggers_rule_type(self, meta):
-        ctx = TaskContext(task=Task("test"))
+        ctx = TaskContext(task=LearningUnit("test"))
         ctx.consecutive_no_progress = 5
         triggered = meta.evaluate_triggers(ctx)
         assert any(t.id == "stagnation" for t in triggered)
 
     def test_evaluate_triggers_task_failed(self, meta):
-        ctx = TaskContext(task=Task("test"))
+        ctx = TaskContext(task=LearningUnit("test"))
         ctx.eval_result = "failure"
         triggered = meta.evaluate_triggers(ctx)
         assert any(t.id == "task_failed" for t in triggered)
@@ -91,11 +91,11 @@ class TestMetaDriver:
         assert filtered[0].function.name == "safe_tool"
 
     def test_check_completion_done(self, meta):
-        task = Task("test")
+        task = LearningUnit("test")
         messages = [{"role": "assistant", "content": "done"}]
         assert meta.check_completion(task, messages) == "done"
 
     def test_check_completion_continue_with_tool_calls(self, meta):
-        task = Task("test")
+        task = LearningUnit("test")
         messages = [{"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]}]
         assert meta.check_completion(task, messages) == "continue"

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from core.layer_context import LayerContext
-from core.task import Task, Domain, TaskResult
+from core.task import LearningUnit, Domain, TaskResult
 
 
 @pytest.fixture
@@ -36,18 +36,18 @@ def mock_layers():
 
 class TestLayerContext:
     def test_build_context_includes_l1_rules(self, mock_layers):
-        task = Task("test", Domain("textworld/map_A", "specific"))
+        task = LearningUnit("test", Domain("textworld/map_A", "specific"))
         context = mock_layers.build_context(task)
         assert "rule1" in context
         assert "rule2" in context
 
     def test_build_context_includes_l2_cards(self, mock_layers):
-        task = Task("test", Domain("textworld/map_A", "specific"))
+        task = LearningUnit("test", Domain("textworld/map_A", "specific"))
         context = mock_layers.build_context(task)
         assert "test knowledge" in context
 
     def test_build_context_includes_l3_skills(self, mock_layers):
-        task = Task("test", Domain("textworld/map_A", "specific"))
+        task = LearningUnit("test", Domain("textworld/map_A", "specific"))
         context = mock_layers.build_context(task)
         assert "test-skill" in context
 
@@ -55,7 +55,7 @@ class TestLayerContext:
         mock_layers.l1.get_active_rules.return_value = []
         mock_layers.l2.get_active_cards.return_value = []
         mock_layers.l3.match.return_value = []
-        task = Task("test", Domain("general", "general"))
+        task = LearningUnit("test", Domain("general", "general"))
         context = mock_layers.build_context(task)
         assert context == ""
 
@@ -66,7 +66,7 @@ class TestLayerContext:
         assert len(result) == 1
 
     def test_post_task_no_triggers(self, mock_layers):
-        task = Task("test", Domain("general", "general"))
+        task = LearningUnit("test", Domain("general", "general"))
         result = mock_layers.post_task(task, [])
         assert isinstance(result, TaskResult)
         assert result.new_knowledge_cards == 0

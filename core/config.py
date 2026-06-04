@@ -18,3 +18,12 @@ class AgentConfig:
     seed_l1_rules: list[str] | None = None
     seed_l2_cards: list[dict] | None = None
     seed_l3_skills: list[Path] | None = None
+    # Phase 2: Learning pipeline
+    learning_enabled: bool = True
+    learning_task_count_weight: float = 1.0
+    learning_complexity_weight: float = 1.0
+    learning_baseline_tokens: int = 2000
+    learning_threshold: float = 5.0
+    learning_pending_dir: Path = Path("./data/learning/pending")
+    learning_learned_dir: Path = Path("./data/learning/learned")
+    learning_raw_dir: Path = Path("./data/learning/raw")

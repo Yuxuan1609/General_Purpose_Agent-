@@ -1,30 +1,27 @@
 from core.types import TaskObservation, ExecutionRecord
-from core.task import Task, Domain
+from core.task import LearningUnit, Domain
 
 
 class TestTaskObservation:
     def test_defaults(self):
         obs = TaskObservation()
-        assert obs.meta == {}
+        assert obs.meta == ""
         assert obs.state == {}
-        assert obs.history is None
         assert obs.session is None
 
-    def test_with_history(self):
-        obs = TaskObservation(history=[{"role": "agent", "action": "33"}])
-        assert len(obs.history) == 1
+    def test_with_meta_str(self):
+        obs = TaskObservation(meta="You are playing Leduc Hold'em")
+        assert "Leduc" in obs.meta
+        assert obs.state == {}
 
-    def test_meta_field_setter(self):
-        obs = TaskObservation()
-        obs.meta["domain"] = "game/doudizhu"
-        obs.meta["enable_learning"] = True
-        assert obs.meta["domain"] == "game/doudizhu"
-        assert obs.meta["enable_learning"] is True
+    def test_with_state(self):
+        obs = TaskObservation(state={"current": "Round: pre-flop", "history": ""})
+        assert obs.state["current"] == "Round: pre-flop"
 
     def test_session_field(self):
-        obs = TaskObservation(session={"id": "s1", "task_type": "game/doudizhu"})
+        obs = TaskObservation(session={"id": "s1", "domain": "game/doudizhu"})
         assert obs.session["id"] == "s1"
-        assert obs.session["task_type"] == "game/doudizhu"
+        assert obs.session["domain"] == "game/doudizhu"
 
 
 class TestExecutionRecord:
@@ -37,7 +34,7 @@ class TestExecutionRecord:
     def test_full_record(self):
         rec = ExecutionRecord(
             session={"id": "s1", "datetime": "2026-01-01T00:00:00", "meta_hash": "abc"},
-            observation={"meta": {"domain": "game/doudizhu"}},
+            observation={"meta": "Game rules", "state": {"current": "pre-flop"}},
             notify_layers={"l0_5_1": "ok", "l2": "ok", "l3": "ok"},
             action=[3, 3],
             result={"winner": "landlord"},
@@ -48,9 +45,9 @@ class TestExecutionRecord:
 
 class TestTaskEnableLearning:
     def test_enable_learning_defaults_to_false(self):
-        task = Task(description="test")
+        task = LearningUnit(description="test")
         assert task.enable_learning is False
 
     def test_enable_learning_true(self):
-        task = Task(description="test", enable_learning=True)
+        task = LearningUnit(description="test", enable_learning=True)
         assert task.enable_learning is True

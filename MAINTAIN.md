@@ -9,18 +9,18 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `TaskObservation` | `@dataclass(meta:str, state:dict, session:dict\|None)` | 环境观测的统一格式。meta 为自然语言任务描述 | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.query() |
+| `TaskObservation` | `@dataclass(meta:str, state:dict, session:dict\|None)` | 环境观测的统一格式（单步）。meta 为自然语言游戏规则 | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.query() |
 | `ExecutionRecord` | `@dataclass(session, observation, notify_layers, action, result)` | Execute 后的存档记录，写入 data/learning/pending/ | Executor._write_pending() | ReflectCoordinator.audit() |
-| `Task.enable_learning` | `bool = False` | 学习开关，True 时 Executor 写 pending/ | Task 定义 | Executor.execute() |
+| `LearningUnit.enable_learning` | `bool = False` | 学习开关，True 时写入知识卡片/规则等 | LearningUnit 定义 | 学习管道 |
 
 ## core/task.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `Domain` | `@dataclass(frozen=True, path:str, level:str)` | 层级领域标识，frozen 可用作 dict key | Task 定义 | L2 激活计算, L3 技能匹配 |
+| `Domain` | `@dataclass(frozen=True, path:str, level:str)` | 层级领域标识，frozen 可用作 dict key | LearningUnit 定义 | L2 激活计算, L3 技能匹配 |
 | `Domain.parent` | `property → Domain\|None` | 返回上一级领域 | L2._domain_match_score() | — |
 | `Domain.is_ancestor_of` | `(other:Domain) → bool` | 判断是否祖先领域 | L2._domain_match_score() | — |
-| `Task` | `@dataclass(description, domain, context, needs_decomposition, subtasks, enable_learning)` | 最小学习单元 | AgentRuntime, TaskDecomposer | Executor.execute() |
+| `LearningUnit` | `@dataclass(description, domain, context, needs_decomposition, subtasks, enable_learning, token_count)` | 最小学习单元，1个 Session 可拆为多个。区别于 TaskObservation（单步观测） | AgentRuntime, TaskDecomposer | Executor.execute() |
 | `TaskResult` | `@dataclass(success, final_response, new_knowledge_cards, l1_changes, l1_rejections, new_skills, iterations_used, summary, eval_result, eval_score)` | 任务完成结果 | AgentLoop.reflect() | 调用者统计 |
 | `TaskContext` | `@dataclass(task, consecutive_no_progress, eval_result, rounds)` | Execute 阶段的可变上下文 | AgentLoop.run() | MetaDriver.evaluate_triggers() |
 
@@ -189,7 +189,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `TaskDecomposer.decompose` | `(session:dict, raw_log:Path) → list[Task]` | Session → Task 拆解 | AgentRuntime / ReflectCoordinator | _decompose_game_unit(), _decompose_coding() |
+| `TaskDecomposer.decompose` | `(session:dict, raw_log:Path) → list[LearningUnit]` | Session → LearningUnit 拆解 | AgentRuntime / ReflectCoordinator | _decompose_game_unit(), _decompose_coding() |
 | `ThresholdScorer.score` | `(domain:str) → float` | 计算 domain 的学习积攒评分 | ReflectCoordinator | _domain_records() |
 | `ThresholdScorer.should_trigger` | `(domain:str) → bool` | 评分 ≥ threshold 时返回 True | Executor（Reflect 模式） | score() |
 | `ReflectCoordinator.audit` | `(domain:str) → dict{layer: issues}` | 审核 pending/ 中所有 NOTIFY，标记潜在问题 | Executor（Reflect 模式） | — |

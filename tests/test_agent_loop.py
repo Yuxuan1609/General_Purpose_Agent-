@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from core.agent_loop import AgentLoop
-from core.task import Task, Domain, TaskResult
+from core.task import LearningUnit, Domain, TaskResult
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ class TestAgentLoop:
     def test_run_returns_messages_and_result(self, mock_llm, mock_tools, mock_layers):
         mock_layers.check_completion.return_value = "done"
         loop = AgentLoop(mock_llm, mock_tools, mock_layers, max_iterations=10)
-        task = Task("test task", Domain("general", "general"))
+        task = LearningUnit("test task", Domain("general", "general"))
         messages, result = loop.run(task)
         assert isinstance(messages, list)
         assert messages[0]["role"] == "system"
@@ -56,7 +56,7 @@ class TestAgentLoop:
 
     def test_reflect_calls_post_task(self, mock_llm, mock_tools, mock_layers):
         loop = AgentLoop(mock_llm, mock_tools, mock_layers, max_iterations=10)
-        task = Task("test task", Domain("general", "general"))
+        task = LearningUnit("test task", Domain("general", "general"))
         raw_result = TaskResult(success=True, eval_result="success", eval_score=0.9)
         result = loop.reflect(task, [], raw_result)
         mock_layers.post_task.assert_called_once()
@@ -66,7 +66,7 @@ class TestAgentLoop:
     def test_execute_and_reflect_convenience(self, mock_llm, mock_tools, mock_layers):
         mock_layers.check_completion.return_value = "done"
         loop = AgentLoop(mock_llm, mock_tools, mock_layers, max_iterations=10)
-        task = Task("test task", Domain("general", "general"))
+        task = LearningUnit("test task", Domain("general", "general"))
         result = loop.execute_and_reflect(task)
         assert result is not None
         assert mock_llm.chat.called
@@ -81,14 +81,14 @@ class TestAgentLoop:
         mock_layers.check_completion.return_value = "continue"
 
         loop = AgentLoop(mock_llm, mock_tools, mock_layers, max_iterations=3)
-        task = Task("test", Domain("general", "general"))
+        task = LearningUnit("test", Domain("general", "general"))
         messages, raw_result = loop.run(task)
         assert mock_llm.chat.call_count == 3
 
     def test_system_prompt_includes_l1_rules(self, mock_llm, mock_tools, mock_layers):
         mock_layers.check_completion.return_value = "done"
         loop = AgentLoop(mock_llm, mock_tools, mock_layers, max_iterations=3)
-        task = Task("test", Domain("general", "general"))
+        task = LearningUnit("test", Domain("general", "general"))
         loop.run(task)
         system_msg = mock_llm.chat.call_args_list[0][1]["messages"][0]
         assert system_msg["role"] == "system"

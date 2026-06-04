@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from core.task import Task, TaskResult, TaskContext
+from core.task import LearningUnit, TaskResult, TaskContext
 
 logger = logging.getLogger(__name__)
 

@@ -21,3 +21,14 @@ rlcard:
   eval_episodes: 100
   opponent: leduc-holdem-cfr    # leduc-holdem-cfr | doudizhu-rule-v1
   seed: 42
+
+# Phase 2: Learning pipeline
+learning:
+  enabled: true
+  task_count_weight: 1.0
+  complexity_weight: 1.0
+  baseline_tokens: 2000
+  threshold: 5.0
+  pending_dir: data/learning/pending
+  learned_dir: data/learning/learned
+  raw_dir: data/learning/raw

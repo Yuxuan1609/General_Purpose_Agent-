@@ -2,7 +2,7 @@ import pytest
 import json
 from pathlib import Path
 from core.philosophy import Philosophy, Rule, L1Proposal
-from core.task import Task, Domain
+from core.task import LearningUnit, Domain
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ class TestPhilosophy:
     def test_get_active_rules_returns_all(self, philosophy):
         philosophy.add_rule("rule A", created_by="test")
         philosophy.add_rule("rule B", created_by="test")
-        task = Task(description="test", domain=Domain("general", "general"))
+        task = LearningUnit(description="test", domain=Domain("general", "general"))
         active = philosophy.get_active_rules(task)
         assert len(active) == 2
 
