@@ -297,14 +297,14 @@ def _log_reflection_prompt(pkt: ReflectPacket, meta: str, log: logging.Logger):
         f"[本层 NOTIFY]\n{notify_str}"
     )
 
-    log.debug("  ── LLM Prompt Preview ──")
-    for line in system.splitlines()[:6]:
-        log.debug("    system | %s", line)
-    log.debug("    ...")
-    for line in user.splitlines()[:10]:
-        log.debug("    user   | %s", line[:120])
-    log.debug("    ...")
-    log.debug("")
+    log.debug("  ── Prompt Preview ──")
+    log.debug("  system:\n%s", _indent(system, 4))
+    log.debug("  user:\n%s", _indent(user, 4))
+
+
+def _indent(text: str, spaces: int) -> str:
+    prefix = " " * spaces
+    return prefix + text.replace("\n", "\n" + prefix)
 
 
 def _detect_issues(layer_notify: dict) -> list[dict]:
