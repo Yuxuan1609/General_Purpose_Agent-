@@ -15,6 +15,7 @@ class L3Manager(LayerManager):
                  upward=None, downward=None):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
+        self._matched: list[str] = []
 
     def process(self, data: Any) -> dict:
         obs: TaskObservation = data
@@ -27,6 +28,7 @@ class L3Manager(LayerManager):
             domain = Domain("general", "general")
 
         matched = self._skill_layer.match(domain)
+        self._matched = [s.name for s in matched]
         obs.state["l3_skills"] = []
         for s in matched:
             content = ""
@@ -46,7 +48,13 @@ class L3Manager(LayerManager):
         return {"status": "ok", "skills_matched": len(matched)}
 
     def notify(self) -> Any:
-        return {"status": "ok", "layer": "l3"}
+        matched_count = len(self._matched)
+        return {
+            "status": "ok",
+            "layer": "l3",
+            "skills_matched": matched_count,
+            "skills_used": self._matched[:5],
+        }
 
     def apply_update(self, key: str, value: Any) -> None:
         """Phase 2: Update/downgrade skills via SkillLayer."""

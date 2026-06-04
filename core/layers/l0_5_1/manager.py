@@ -74,7 +74,18 @@ class L1Agent(LayerAgent):
         ) if cards else "（下层未返回信息）"
 
         user = f"{self._build_user_context(state)}\n\n[下层知识]\n{cards_text}"
-        return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
+        result = self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
+
+        # NOTIFY enrichment: what rules were considered, what L2 returned
+        result["rules_applied"] = [
+            r.content[:100] for r in self._philosophy.all_rules()[:5]
+        ]
+        l2_result = state.get("l2_result", {})
+        result["l2_received"] = {
+            "reply": str(l2_result.get("reply", ""))[:300],
+            "cards": list(l2_result.get("cards", []))[:5],
+        }
+        return result
 
 
 class L0_5_1Manager(LayerManager):

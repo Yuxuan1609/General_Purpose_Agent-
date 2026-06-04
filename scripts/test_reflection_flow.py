@@ -16,6 +16,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from core.layers.comm import ReflectPacket
 from core.layers.base import _indent
+from core.layers.l0_5_1.reflection_agent import L1ReflectProposer, L1ReflectVerifier
+from core.layers.l2.reflection_agent import L2ReflectProposer, L2ReflectVerifier
+from core.layers.l3.reflection_agent import L3ReflectProposer, L3ReflectVerifier
 
 
 def _setup_logging():
@@ -213,7 +216,7 @@ def main():
                     refiner_reasoning=refiner_reasoning,
                     layer_notify=layer_notify,
                 )
-                _process_reflect_packet(pkt, agent, log, meta)
+                _process_reflect_packet(pkt, agent, log, meta, llm, chain)
 
         coord_log.debug("  ═══ LearningUnit %s done ═══\n", unit.description)
 
@@ -224,12 +227,11 @@ def main():
     logger.info("=" * 50)
 
 
-def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger, meta: str):
-    """Process ReflectPacket: each layer receives its own NOTIFY + Refiner context.
+def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger,
+                            meta: str, llm_client, chain):
+    """Process ReflectPacket: Proposer → Verifier → Manager (Phase 2a LLM-based).
 
-    Coordinator builds per-layer packet with the layer's execute NOTIFY
-    and Refiner's reasoning. ReflectionAgent then investigates, fixes,
-    and cascades.
+    Replaces older rule-based investigate/fix with config-driven LLM pipeline.
     """
     log.debug("═══ ReflectPacket → %s ═══", pkt.target_layer)
     log.debug("  record_id: %s | domain: %s", pkt.record_id, pkt.domain)
@@ -237,30 +239,95 @@ def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger, meta
     log.debug("  layer_notify:\n%s",
              _indent(json.dumps(pkt.layer_notify, ensure_ascii=False, indent=2), 4))
 
-    # ── LLM prompt preview (not calling LLM, just logging what it would send) ──
+    # ── Prompt Preview (not calling LLM, just logging) ──
     _log_reflection_prompt(pkt, meta, log)
 
-    # Investigation: agent inspects its own NOTIFY + Refiner reasoning
-    context = {
-        "domain": pkt.domain,
-        "record_id": pkt.record_id,
-        "refiner_reasoning": pkt.refiner_reasoning,
-    }
-    issues = pkt.issue_list or _detect_issues(pkt.layer_notify)
-    if issues:
-        log.debug("  issues: %s", [i.get("type") for i in issues])
-        result = agent.investigate(issues, context)
-        my = result.get("my_issues", [])
-        if my:
-            fix_result = agent.fix(my)
-            log.debug("  fix → %s", json.dumps(fix_result, ensure_ascii=False))
-        ds = result.get("downstream_issues", [])
-        if ds:
-            agent.query_downstream(ds, context)
-    else:
-        log.debug("  no issues detected")
+    # ── Route to LLM-based Proposer/Verifier ──
+    layer = pkt.target_layer
+    if layer == "l0_5_1":
+        _run_proposer_verifier(pkt, meta, log, layer_key="l1",
+                               proposer_class=L1ReflectProposer,
+                               verifier_class=L1ReflectVerifier,
+                               existing_content_fn=lambda: _get_l1_existing(chain),
+                               llm_client=llm_client, chain=chain)
+    elif layer == "l2":
+        _run_proposer_verifier(pkt, meta, log, layer_key="l2",
+                               proposer_class=L2ReflectProposer,
+                               verifier_class=L2ReflectVerifier,
+                               existing_content_fn=lambda: _get_l2_existing(),
+                               llm_client=llm_client, chain=chain)
+    elif layer == "l3":
+        _run_proposer_verifier(pkt, meta, log, layer_key="l3",
+                               proposer_class=L3ReflectProposer,
+                               verifier_class=L3ReflectVerifier,
+                               existing_content_fn=lambda: _get_l3_existing(),
+                               llm_client=llm_client, chain=chain)
 
     log.debug("")
+
+
+def _run_proposer_verifier(pkt, meta, log, layer_key, proposer_class,
+                           verifier_class, existing_content_fn, llm_client, chain):
+    """Run Proposer → Verifier → Manager pipeline for one layer."""
+    proposer = proposer_class(llm_client)
+    verifier = verifier_class(llm_client)
+
+    # Dispatch info (from upper layer or none)
+    dispatch_info = getattr(pkt, 'dispatch_info', '无') or '无'
+
+    # Proposer
+    log.debug("── Proposer ──")
+    proposal = proposer.propose(
+        layer_notify=pkt.layer_notify,
+        refiner_reasoning=pkt.refiner_reasoning,
+        meta=meta,
+        dispatch_info=str(dispatch_info),
+    )
+    log.debug("  output: %s", json.dumps(proposal, ensure_ascii=False)[:500])
+
+    fixes = proposal.get("self_fixes", [])
+    dispatch_lower = proposal.get("dispatch_lower")
+
+    if dispatch_lower and isinstance(dispatch_lower, dict) and dispatch_lower.get("layer"):
+        log.debug("  → dispatch %s (reserved, not sent): %s",
+                 dispatch_lower.get("layer"),
+                 dispatch_lower.get("task", "")[:120])
+
+    if fixes:
+        # Verifier
+        log.debug("── Verifier ──")
+        existing = existing_content_fn()
+        verified = verifier.verify(fixes, existing)
+        log.debug("  output: %s", json.dumps(verified, ensure_ascii=False)[:500])
+
+        # Manager
+        for fix in verified.get("verified", []):
+            try:
+                chain.apply_update(fix.get("action", ""),
+                                   {"content": fix.get("content", ""),
+                                    "card_id": fix.get("card_id", ""),
+                                    "skill_name": fix.get("skill_name", ""),
+                                    "domain": fix.get("domain", "general")})
+                log.debug("  Manager applied: %s", fix.get("action", ""))
+            except Exception as e:
+                log.debug("  Manager error: %s", e)
+    else:
+        log.debug("  no self_fixes proposed")
+
+
+# ── Helper: extract existing content per layer ──
+
+
+def _get_l1_existing(mgr):
+    return [r.content for r in mgr._philosophy.all_rules()]
+
+
+def _get_l2_existing():
+    return []
+
+
+def _get_l3_existing():
+    return []
 
 
 def _log_reflection_prompt(pkt: ReflectPacket, meta: str, log: logging.Logger):

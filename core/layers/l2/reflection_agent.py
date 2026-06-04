@@ -1,5 +1,10 @@
 """L2 ReflectionAgent — knowledge card issue attribution and repair."""
-from core.layers.base import ReflectionAgent
+import json
+import logging
+from core.layers.base import ReflectionAgent, LayerAgent
+from core.reflect_config import load_reflect_config
+
+_reflect_cfg = load_reflect_config()
 
 
 class L2ReflectionAgent(ReflectionAgent):
@@ -59,3 +64,42 @@ class L2ReflectionAgent(ReflectionAgent):
                 details.append(f"Added card for domain: {issue.get('domain', '')}")
 
         return {"fixes_applied": fixes, "details": details}
+
+
+# ── Phase 2a: LLM-based Proposer + Verifier (config-driven) ──
+
+
+class L2ReflectProposer(LayerAgent):
+    """L2 Proposer — LLM analyzes L2 NOTIFY, proposes self-fixes."""
+
+    def __init__(self, llm_client):
+        super().__init__(llm_client, logging.getLogger("l2_reflect"))
+        self._cfg = _reflect_cfg.l2["proposer"]
+
+    def propose(self, layer_notify: dict, refiner_reasoning: str,
+                meta: str, dispatch_info: str = "无") -> dict:
+        system = self._cfg["system_template"].format(
+            criteria=self._cfg["criteria"],
+        )
+        user = self._cfg["user_template"].format(
+            refiner_reasoning=refiner_reasoning,
+            dispatch_info=dispatch_info,
+            layer_notify=json.dumps(layer_notify, ensure_ascii=False, indent=2),
+        )
+        return self._call_llm(system, user, schema=self._cfg["schema"])
+
+
+class L2ReflectVerifier(LayerAgent):
+    """L2 Verifier — LLM validates proposals against existing cards."""
+
+    def __init__(self, llm_client):
+        super().__init__(llm_client, logging.getLogger("l2_reflect"))
+        self._cfg = _reflect_cfg.l2["verifier"]
+
+    def verify(self, proposals: list[dict], existing_cards: list[str]) -> dict:
+        system = self._cfg["system_template"]
+        user = self._cfg["user_template"].format(
+            proposals=json.dumps(proposals, ensure_ascii=False, indent=2),
+            existing_cards=json.dumps(existing_cards, ensure_ascii=False),
+        )
+        return self._call_llm(system, user, schema=self._cfg["schema"])

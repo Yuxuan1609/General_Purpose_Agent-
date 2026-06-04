@@ -240,6 +240,14 @@ class L2Manager(LayerManager):
         logger.debug("    reasoning: %s", str(final.get("reasoning", ""))[:200])
         logger.debug("")
 
+        # NOTIFY enrichment: what cards were used, what L3 returned
+        cards = final.get("cards", [])
+        final["cards_used"] = [str(c)[:100] for c in cards[:5]]
+        l3_skills = obs.state.get("l3_skills", [])
+        final["l3_received"] = {
+            "skills": [s.get("name", "") for s in l3_skills[:5]],
+        }
+
         obs.state["l2_result"] = final
         self._result = final
 
