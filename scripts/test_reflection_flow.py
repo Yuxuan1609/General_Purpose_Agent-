@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+from core.layers.comm import ReflectPacket
+
 
 def _setup_logging():
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -33,7 +35,7 @@ def _setup_logging():
     root.addHandler(ch)
 
     # Reflection log files
-    for logger_name in ("reflect_coordinator", "learning_refiner",
+    for logger_name in ("learning_refiner",
                         "l0_5_1_reflect", "l2_reflect", "l3_reflect"):
         lg = logging.getLogger(logger_name)
         lg.setLevel(logging.DEBUG)
@@ -167,98 +169,54 @@ def main():
         coord_log.debug("══════ LearningUnit: %s ══════", unit.description)
         coord_log.debug("  domain: %s | records: %d", unit.domain.path,
                         len(unit_records))
-        coord_log.debug("  meta: %s", meta[:200])
 
         # ── Learning Refiner ──
         lr_log.debug("═══ LearningRefiner ═══")
         lr_log.debug("  records: %d", len(unit_records))
         refine_result = refiner.refine(meta, unit_records)
-        lr_log.debug("  worth_learning: %s", refine_result.get("worth_learning"))
-        lr_log.debug("  reasoning: %s",
-                     str(refine_result.get("reasoning", ""))[:300])
+        steps = refine_result.get("steps", [])
+        lr_log.debug("  selected: %d steps", len(steps))
+        for s in steps:
+            lr_log.debug("    step %d: %s",
+                        s.get("index", "?"),
+                        str(s.get("reasoning", ""))[:120])
         lr_log.debug("")
 
-        # ── Reflection chain for each worth_learning record ──
-        worth = refine_result.get("worth_learning", [])
-        if not worth:
-            coord_log.debug("  No records worth learning, skipping")
+        # ── Reflection chain for each worth_learning step ──
+        if not steps:
+            coord_log.debug("  No steps worth learning, skipping\n")
             continue
 
-        for idx in worth:
+        for s in steps:
+            idx = s.get("index", 0) if isinstance(s, dict) else s
             if idx >= len(unit_records):
                 continue
             rec = unit_records[idx]
-            coord_log.debug("  ═══ Record %d — Reflection ═══", idx)
-            coord_log.debug("    action: %s", rec.get("action"))
-            coord_log.debug("    L1 result: %s",
-                           rec.get("notify_layers", {}).get("l0_5_1", {}).get("result", ""))
 
-            # Heuristic issue generation (future: LLM-based)
+            # ── Issue generation ──
             issues = _generate_issues(rec)
-            coord_log.debug("    generated issues: L1=%d L2=%d L3=%d",
+            record_id = rec["session"].get("id", "unknown")
+            coord_log.debug("  ═══ Record %d — %s ═══", idx, record_id)
+            coord_log.debug("    step_index: %s | action: %s",
+                           rec["session"].get("step_index"), rec.get("action"))
+            coord_log.debug("    issues: L1=%d L2=%d L3=%d",
                            len(issues.get("l0_5_1", [])),
                            len(issues.get("l2", [])),
                            len(issues.get("l3", [])))
 
-            # ── L1 Reflection ──
-            l1_issues = issues.get("l0_5_1", [])
-            if l1_issues:
-                l1r_log.debug("═══ L1 ReflectionAgent ═══")
-                l1r_log.debug("  issues: %s", json.dumps(l1_issues, ensure_ascii=False))
-                result = l1_reflect.investigate(l1_issues,
-                                                {"domain": unit.domain.path})
-                l1r_log.debug("  investigate → my_issues=%d downstream=%d",
-                             len(result.get("my_issues", [])),
-                             len(result.get("downstream_issues", [])))
-
-                # Fix L1's own issues
-                my = result.get("my_issues", [])
-                if my:
-                    fix_result = l1_reflect.fix(my)
-                    l1r_log.debug("  fix → %s",
-                                 json.dumps(fix_result, ensure_ascii=False))
-
-                # Cascade to L2
-                ds = result.get("downstream_issues", [])
-                if ds:
-                    l1_reflect.query_downstream(ds,
-                                                {"domain": unit.domain.path})
-
-            # ── L2 Reflection ──
-            l2_issues = issues.get("l2", [])
-            if l2_issues:
-                l2r_log.debug("═══ L2 ReflectionAgent ═══")
-                l2r_log.debug("  issues: %s", json.dumps(l2_issues, ensure_ascii=False))
-                result = l2_reflect.investigate(l2_issues,
-                                                {"domain": unit.domain.path})
-                l2r_log.debug("  investigate → my_issues=%d downstream=%d",
-                             len(result.get("my_issues", [])),
-                             len(result.get("downstream_issues", [])))
-                my = result.get("my_issues", [])
-                if my:
-                    fix_result = l2_reflect.fix(my)
-                    l2r_log.debug("  fix → %s",
-                                 json.dumps(fix_result, ensure_ascii=False))
-                ds = result.get("downstream_issues", [])
-                if ds:
-                    l2_reflect.query_downstream(ds,
-                                                {"domain": unit.domain.path})
-
-            # ── L3 Reflection ──
-            l3_issues = issues.get("l3", [])
-            if l3_issues:
-                l3r_log.debug("═══ L3 ReflectionAgent ═══")
-                l3r_log.debug("  issues: %s", json.dumps(l3_issues, ensure_ascii=False))
-                result = l3_reflect.investigate(l3_issues,
-                                                {"domain": unit.domain.path})
-                l3r_log.debug("  investigate → my_issues=%d downstream=%d",
-                             len(result.get("my_issues", [])),
-                             len(result.get("downstream_issues", [])))
-                my = result.get("my_issues", [])
-                if my:
-                    fix_result = l3_reflect.fix(my)
-                    l3r_log.debug("  fix → %s",
-                                 json.dumps(fix_result, ensure_ascii=False))
+            # ── Dispatch to each layer via ReflectPacket ──
+            domain = unit.domain.path
+            for layer_key, agent, log in [
+                ("l0_5_1", l1_reflect, l1r_log),
+                ("l2", l2_reflect, l2r_log),
+                ("l3", l3_reflect, l3r_log)]:
+                layer_issues = issues.get(layer_key, [])
+                if layer_issues:
+                    pkt = ReflectPacket(
+                        record_id=record_id, domain=domain,
+                        target_layer=layer_key, issues=tuple(layer_issues),
+                    )
+                    _process_reflect_packet(pkt, agent, log)
 
         coord_log.debug("  ═══ LearningUnit %s done ═══\n", unit.description)
 
@@ -269,64 +227,88 @@ def main():
     logger.info("=" * 50)
 
 
+def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger):
+    """Process ReflectPacket through ReflectionAgent: investigate → fix → cascade.
+
+    Coordinator creates ReflectPacket → dispatches per-layer → each layer's
+    ReflectionAgent receives it, investigates ownership, fixes owned issues,
+    and cascades downstream issues.
+    """
+    log.debug("═══ ReflectPacket → %s ═══", pkt.target_layer)
+    log.debug("  record_id: %s | domain: %s", pkt.record_id, pkt.domain)
+    for i, iss in enumerate(pkt.issue_list):
+        detail = {k: v for k, v in iss.items() if k != "type"}
+        log.debug("  [issue %d] type=%s | %s",
+                 i, iss.get("type", "?"), json.dumps(detail, ensure_ascii=False))
+
+    context = {"domain": pkt.domain, "record_id": pkt.record_id}
+    result = agent.investigate(pkt.issue_list, context)
+
+    my = result.get("my_issues", [])
+    if my:
+        fix_result = agent.fix(my)
+        log.debug("  fix → %s", json.dumps(fix_result, ensure_ascii=False))
+
+    ds = result.get("downstream_issues", [])
+    if ds:
+        agent.query_downstream(ds, context)
+
+    log.debug("")
+
+
 def _generate_issues(rec: dict) -> dict:
-    """Heuristic issue generation from ExecutionRecord (future: LLM-based)."""
+    """Rule-based issue generation from ExecutionRecord NOTIFY layers.
+
+    Each layer's NOTIFY is inspected for structured issues; if none found,
+    generates fallback test issues to exercise the full reflection chain.
+    Future: LLM-based issue detection from NOTIFY content.
+    """
     issues: dict[str, list[dict]] = {"l0_5_1": [], "l2": [], "l3": []}
     notify = rec.get("notify_layers", {})
+    obs_cards = rec.get("observation", {}).get("state", {}).get("l2_cards", [])
 
-    # L1: check if reasoning looks weak or missing
+    # L1: check result quality
     l1 = notify.get("l0_5_1", {})
     if not l1.get("result") or not l1.get("reasoning"):
         issues["l0_5_1"].append({
             "type": "decision_error",
-            "message": "L1 result or reasoning missing",
+            "detail": {"message": "L1 result or reasoning missing"},
         })
 
     # L2: check card confidence
-    l2 = notify.get("l2", {})
-    cards = l2.get("cards", []) if isinstance(l2, dict) else []
-    for c in cards[:3]:
-        # cards in NOTIFY are strings, not dicts with confidence.
-        # Check obs.state for structured card data.
-        pass
-
-    obs_cards = rec.get("observation", {}).get("state", {}).get("l2_cards", [])
     for card in obs_cards:
         conf = card.get("confidence", 0.5)
         if conf < 0.5:
             issues["l2"].append({
                 "type": "card_confidence_low",
                 "card_id": card.get("content", "")[:40],
-                "domain": card.get("domain", ""),
-            })
-        elif conf > 0.95:
-            issues["l2"].append({
-                "type": "card_confidence_high",
-                "card_id": card.get("content", "")[:40],
+                "detail": {"confidence": conf},
             })
 
-    # Always generate at least one test issue per layer to exercise full chain
-    if not issues["l0_5_1"]:
-        issues["l0_5_1"].append({
-            "type": "decision_error",
-            "message": "test: L1 decision verification",
-        })
-        # Trigger cascading: L1 sends card issue down to L2
-        issues["l0_5_1"].append({
-            "type": "card_missing",
-            "domain": "game/leduc",
-            "suggested_content": "test cascading card",
-        })
-    if not issues["l2"]:
-        issues["l2"].append({
-            "type": "card_outdated",
-            "card_id": "test-card-outdated",
-            "domain": rec["session"].get("domain", "general"),
-        })
-    if not issues["l3"]:
+    # L3: check if L3 was useful
+    l3 = notify.get("l3", {})
+    if isinstance(l3, dict) and not l3.get("skills") and not l3.get("issues"):
         issues["l3"].append({
             "type": "skill_underutilized",
-            "message": "L3 returned status OK but no structured skill was used",
+            "skill_name": "",
+            "detail": {"message": "L3 returned bare status, no active skills used"},
         })
+
+    # Fallback: always generate at least one test issue per layer
+    if not issues["l0_5_1"]:
+        issues["l0_5_1"].append({"type": "decision_error",
+                                  "detail": {"message": "test: verify L1 decision"}})
+    if not issues["l2"]:
+        issues["l2"].append({"type": "card_outdated",
+                              "card_id": "test-card",
+                              "detail": {"domain": "game/leduc"}})
+        # Cascading test: L1 gets a card_missing to send to L2
+        issues["l0_5_1"].append({"type": "card_missing",
+                                  "domain": rec["session"].get("domain", "general"),
+                                  "detail": {"suggested": "test cascading card"}})
+    if not issues["l3"]:
+        issues["l3"].append({"type": "skill_underutilized",
+                              "skill_name": "test-skill",
+                              "detail": {"message": "test: L3 skills underutilized"}})
 
     return issues

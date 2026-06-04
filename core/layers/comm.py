@@ -23,6 +23,23 @@ class AgentPacket:
     content: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ReflectPacket:
+    """Reflection-phase communication: Coordinator → ReflectionAgent.
+
+    Carries structured issues for a single execution record.
+    Distinct from AgentPacket (execute phase) and LayerMessage (transport).
+    """
+    record_id: str              # which execution record
+    domain: str                 # domain for context
+    target_layer: str           # "l0_5_1" | "l2" | "l3"
+    issues: tuple = field(default_factory=tuple)  # frozen: list of issue dicts
+
+    @property
+    def issue_list(self) -> list[dict]:
+        return list(self.issues)
+
+
 class UpwardComm:
     """Handles QUERY reception from above and RESPONSE/NOTIFY send to above."""
 

@@ -15,12 +15,13 @@ class LearningRefiner(LayerAgent):
     """LLM agent that marks ExecutionRecords as worth_learning based on meta goal.
 
     Input: meta (game rules/goal) + list of step summaries
-    Output: {"worth_learning": [record_index, ...], "reasoning": "..."}
+    Output: {"steps": [{"index": int, "reasoning": "..."}]}
     """
 
     SCHEMA = {
-        "worth_learning": ["int (execution record indices worth learning from)"],
-        "reasoning": "string (why these steps are selected)",
+        "steps": [
+            {"index": "int (step index)", "reasoning": "string (why worth learning)"}
+        ]
     }
 
     SYSTEM = (
@@ -37,23 +38,11 @@ class LearningRefiner(LayerAgent):
         super().__init__(llm_client, log or logging.getLogger(__name__))
 
     def refine(self, meta: str, records: list[dict]) -> dict:
-        """Select which records to learn from.
-
-        Args:
-            meta: Task goal / game rules
-            records: list of ExecutionRecord dicts with keys:
-                     {action, notify_layers}
-
-        Returns:
-            {"worth_learning": [int, ...], "reasoning": "..."}
-        """
+        """Select which records to learn from."""
         steps_text = self._format_steps(records)
-        user = (
-            f"[任务目标]\n{meta}\n\n"
-            f"[执行步骤]\n{steps_text}\n\n"
-            f"请输出值得从中学习的步骤索引。"
-        )
-        return self._call_llm(self.SYSTEM, user, schema=self.SCHEMA)
+        user = f"[执行步骤]\n{steps_text}\n\n请输出值得从中学习的步骤索引。"
+        system = f"{self.SYSTEM}\n\n[任务目标]\n{meta}"
+        return self._call_llm(system, user, schema=self.SCHEMA)
 
     def _format_steps(self, records: list[dict]) -> str:
         parts = []
