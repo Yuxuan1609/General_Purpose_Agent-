@@ -1,0 +1,186 @@
+# Reflection Proposer/Verifier config per layer.
+# Schemas define JSON output contract; prompts define LLM behavior.
+# Changing schemas updates both prompt injection and parse validation.
+
+l1:
+  proposer:
+    schema:
+      self_fixes:
+        - action: "add_rule | modify_rule | remove_rule"
+          content: "string"
+          reason: "string"
+      dispatch_lower: "null | {layer: string, task: string}"
+    criteria: |
+      L1 反思标准：
+      1) result 与 reasoning 的推理方向是否一致
+      2) reasoning 是否基于概率期望而非直觉
+      3) rules_applied 是否充分覆盖当前决策需求
+      4) l2_received 的回复是否准确且信息充分
+    system_template: |
+      你是 L1 层的反思 Proposer。分析本层 Execute 段的输出质量。
+      
+      {criteria}
+      
+      你的任务：
+      1. 分析本层 NOTIFY，提出对本层行为准则的修复方案
+      2. 判断是否需要 L2 层反思（仅当 l2_received 信息不充分时）
+      
+      可用的 action: add_rule（新增准则）, modify_rule（修改准则）, remove_rule（删除准则）
+    user_template: |
+      [Refiner 评估]
+      {refiner_reasoning}
+      
+      [上层 Dispatch]
+      {dispatch_info}
+      
+      [本层 NOTIFY]
+      {layer_notify}
+      
+      请输出 JSON。
+
+  verifier:
+    schema:
+      verified:
+        - action: "string"
+          content: "string"
+          integrated_with: "string"
+      rejected:
+        - action: "string"
+          content: "string"
+          reason: "string"
+    system_template: |
+      你是 L1 层的反思 Verifier。根据已有行为准则整合 Proposer 的提案。
+      
+      规则：
+      1. 与已有准则语义重复 → reject
+      2. 可整合但需调整 → modified + verified
+      3. 全新独立准则 → verified
+      4. 准则数已达上限 → 说明并reject
+    user_template: |
+      [Proposer 提案]
+      {proposals}
+      
+      [已有行为准则]
+      {existing_rules}
+      
+      请输出 JSON。
+
+l2:
+  proposer:
+    schema:
+      self_fixes:
+        - action: "boost_card | penalize_card | add_card"
+          card_id: "string"
+          new_confidence: "float | null"
+          content: "string | null"
+          reason: "string"
+      dispatch_lower: "null | {layer: string, task: string}"
+    criteria: |
+      L2 反思标准：
+      1) cards_used 是否准确覆盖了 L1 query 的信息需求
+      2) reply 是否完整且基于卡片内容
+      3) 卡片置信度是否反映实际效用
+      4) l3_received 的技能是否被合理调用
+    system_template: |
+      你是 L2 层的反思 Proposer。分析本层 Execute 段的知识检索输出质量。
+      
+      {criteria}
+      
+      可用的 action:
+      - boost_card: 提高卡片置信度（需 card_id + new_confidence）
+      - penalize_card: 降低卡片置信度（需 card_id）
+      - add_card: 新增知识卡片（需 content + domain）
+    user_template: |
+      [Refiner 评估]
+      {refiner_reasoning}
+      
+      [上层 Dispatch]
+      {dispatch_info}
+      
+      [本层 NOTIFY]
+      {layer_notify}
+      
+      请输出 JSON。
+
+  verifier:
+    schema:
+      verified:
+        - action: "string"
+          card_id: "string"
+          new_confidence: "float | null"
+          content: "string | null"
+      rejected:
+        - action: "string"
+          reason: "string"
+    system_template: |
+      你是 L2 层的反思 Verifier。根据已有知识卡片整合 Proposer 的提案。
+      
+      规则：
+      1. boost/penalize 后置信度必须在 0.1-1.0 范围内
+      2. add_card 的内容不得与已有卡片高度重复
+      3. card_id 必须对应真实存在的卡片
+    user_template: |
+      [Proposer 提案]
+      {proposals}
+      
+      [已有知识卡片]
+      {existing_cards}
+      
+      请输出 JSON。
+
+l3:
+  proposer:
+    schema:
+      self_fixes:
+        - action: "update_skill"
+          skill_name: "string"
+          content: "string"
+          reason: "string"
+      dispatch_lower: "null"
+    criteria: |
+      L3 反思标准：
+      1) skills_used 是否匹配当前局面的需求
+      2) 是否有可用的技能未被调用
+      3) 技能内容是否需要更新以更贴切当前任务
+    system_template: |
+      你是 L3 层的反思 Proposer。分析本层 Execute 段的技能匹配输出质量。
+      
+      {criteria}
+      
+      可用的 action: update_skill（更新技能内容，需 skill_name + content）
+    user_template: |
+      [Refiner 评估]
+      {refiner_reasoning}
+      
+      [上层 Dispatch]
+      {dispatch_info}
+      
+      [本层 NOTIFY]
+      {layer_notify}
+      
+      请输出 JSON。
+
+  verifier:
+    schema:
+      verified:
+        - action: "string"
+          skill_name: "string"
+          content: "string"
+      rejected:
+        - action: "string"
+          reason: "string"
+    system_template: |
+      你是 L3 层的反思 Verifier。根据已有技能整合 Proposer 的提案。
+      
+      规则：
+      1. skill_name 必须匹配已有或合理的技能名
+      2. update_skill 的内容需符合 SKILL.md 格式
+      3. 避免覆盖现有的有效技能（除非提案明确说明更新理由）
+    user_template: |
+      [Proposer 提案]
+      {proposals}
+      
+      [已有技能]
+      {existing_skills}
+      
+      请输出 JSON。
