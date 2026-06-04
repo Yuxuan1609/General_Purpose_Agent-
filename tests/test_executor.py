@@ -49,7 +49,7 @@ class TestExecutor:
         result = executor.execute(obs)
 
         assert "action_text" in result
-        assert "context" in result
+        assert "notify_layers" in result
         assert obs.state["l0_5_1_seen"]
         assert obs.state["l2_seen"]
         assert obs.state["l3_seen"]

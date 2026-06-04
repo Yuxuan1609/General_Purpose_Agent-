@@ -52,20 +52,22 @@
 | `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
 | `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
 
-## core/layers/base.py (NEW in Phase 1)
+## core/layers/base.py (Phase 1 + Phase 2)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
+| `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。DeepSeek JSON mode 统一调用 + 日志 | L1Agent, L2Agent | LLMClient.chat(json_mode=True) |
+| `LayerAgent._call_llm` | `(system, user, schema) → dict` | 注入 JSON schema 到 system prompt → LLM → json.loads 解析 | L1/L2 stage 方法 | LLMClient.chat() |
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
 | `LayerManager.query` | `(msg:LayerMessage\|Any, trace_id) → None` | QUERY 入口：通过 UpwardComm 解包 → process → DownwardComm 包装 → 下游 | Executor / 上层 | process(), downstream.query() |
 | `LayerManager.collect_notify` | `() → dict{layer_name: payload}` | 收集本层+所有下游的 NOTIFY | Executor.execute() | notify(), 下游.collect_notify() |
-| `LayerManager.apply_update` | `(key:str, value) → None` | Phase 2: ReflectionAgent 修复时写回数据 | ReflectionAgent.fix() | 子类实现 |
-| `ReflectionAgent` | `__init__(layer_name, manager, downstream)` | Phase 2: 反思编排 Agent ABC | ReflectCoordinator.run_reflect() | investigate(), fix(), query_downstream() |
-| `ReflectionAgent.investigate` | `(issues:list[dict], context:dict) → dict` | 判断问题归属（自己 vs 下层） | ReflectCoordinator / 上层 ReflectionAgent | — |
-| `ReflectionAgent.fix` | `(my_issues:list[dict]) → dict` | 修复确认的问题，通过 Manager.apply_update() | investigate() | Manager.apply_update() |
-| `ReflectionAgent.query_downstream` | `(issues, context) → dict` | 将问题递交给下层 ReflectionAgent | investigate() | 下层.investigate() |
+| `LayerManager.apply_update` | `(key:str, value) → None` (abstract) | Phase 2: ReflectionAgent 修复时写回本层数据 | ReflectionAgent.fix() | 子类实现 |
+| `ReflectionAgent` | `__init__(layer_name, manager, downstream)` | Phase 2: 反思编排 ABC。判责→修复→下层调查 | ReflectCoordinator | investigate(), fix(), query_downstream() |
+| `ReflectionAgent.investigate` | `(issues:list[dict], context:dict) → dict{my_issues, downstream_issues, actions}` | 按类型判责：自己 vs 下层 | ReflectCoordinator / 上层 | — |
+| `ReflectionAgent.fix` | `(my_issues:list[dict]) → dict{fixes_applied, details}` | 修复确认问题，调用 Manager.apply_update() | investigate() | Manager.apply_update() |
+| `ReflectionAgent.query_downstream` | `(issues, context) → dict` | 递交给下层 ReflectionAgent.investigate() | investigate() | 下层.investigate() |
 
 ## core/layers/l0_5_1/upward_comm.py, downward_comm.py (Phase 1.5)
 
@@ -95,6 +97,14 @@
 | `L3Manager` | `__init__(skill_layer, downstream, upward, downward)` | L3 层 Manager，包裹 SkillLayer，纯确定性 | build_chain() | — |
 | `L3Manager.process` | `(obs:TaskObservation) → dict` | 按 domain 匹配技能，加载 SKILL.md 全文写入 obs.state["l3_skills"] | LayerManager.query() | SkillLayer.match() |
 | `L3Manager.notify` | `() → dict` | 返回 `{status:"ok", layer:"l3"}` | collect_notify() | — |
+| `L3Manager.apply_update` | `(key, value) → None` | Phase 2: 更新 L3 技能 | L3ReflectionAgent.fix() | SkillLayer.edit_skill() |
+
+## core/layers/l3/reflection_agent.py (Phase 2)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `L3ReflectionAgent.investigate` | `(issues, context) → dict` | 技能问题在 L3 终结，不向下派发 | ReflectCoordinator / L2ReflectionAgent | — |
+| `L3ReflectionAgent.fix` | `(my_issues) → dict` | 通过 Manager.apply_update("update_skill") 修复 | investigate() | L3Manager.apply_update() |
 
 ## core/layers/l2/manager.py (Phase 1)
 
@@ -111,6 +121,14 @@
 | `L2Agent.stage3` | `(query, meta, state, selected_nodes, stage2_result) → dict` | 整合 L3 响应 + 上下文 → 最终 NOTIFY | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
 | `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | stage2/stage3 | FlexibleKnowledge.get_domain_cards() |
 | `L2_DOMAIN_NODES` | `list[dict{name, description}]` | 硬编码 seed 领域节点 (game/leduc, game/doudizhu) | L2Agent.stage1 | — |
+| `L2Manager.apply_update` | `(key, value) → None` | Phase 2: boost/penalize/add 知识卡片 | L2ReflectionAgent.fix() | KnowledgeCard.boost/penalize, FlexibleKnowledge.add_card() |
+
+## core/layers/l2/reflection_agent.py (Phase 2)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `L2ReflectionAgent.investigate` | `(issues, context) → dict` | 卡片问题归自己，技能问题派发 L3 | ReflectCoordinator / L0_5_1ReflectionAgent | query_downstream() |
+| `L2ReflectionAgent.fix` | `(my_issues) → dict` | boost_card/penalize_card/add_card | investigate() | L2Manager.apply_update() |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
 
@@ -125,6 +143,14 @@
 | `L1Agent.stage2` | `(meta, state) → dict{done, result, reasoning}` | 整合 L2 知识卡片 + 行为准则 → 最终决策 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
 | `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
 | `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
+| `L0_5_1Manager.apply_update` | `(key, value) → None` | Phase 2: add/modify/remove 规则（经 MetaDriver 验证） | L0_5_1ReflectionAgent.fix() | MetaDriver.validate_l1_change(), Philosophy |
+
+## core/layers/l0_5_1/reflection_agent.py (Phase 2)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `L0_5_1ReflectionAgent.investigate` | `(issues, context) → dict` | 规则/决策问题归自己，卡片/技能问题派发 L2 | ReflectCoordinator | query_downstream() → L2ReflectionAgent |
+| `L0_5_1ReflectionAgent.fix` | `(my_issues) → dict` | add_rule/modify_rule/remove_rule | investigate() | L0_5_1Manager.apply_update() |
 
 ## scripts/leduc_cognitive_agent.py (Phase 1)
 
@@ -192,8 +218,14 @@
 | `TaskDecomposer.decompose` | `(session:dict, raw_log:Path) → list[LearningUnit]` | Session → LearningUnit 拆解 | AgentRuntime / ReflectCoordinator | _decompose_game_unit(), _decompose_coding() |
 | `ThresholdScorer.score` | `(domain:str) → float` | 计算 domain 的学习积攒评分 | ReflectCoordinator | _domain_records() |
 | `ThresholdScorer.should_trigger` | `(domain:str) → bool` | 评分 ≥ threshold 时返回 True | Executor（Reflect 模式） | score() |
-| `ReflectCoordinator.audit` | `(domain:str) → dict{layer: issues}` | 审核 pending/ 中所有 NOTIFY，标记潜在问题 | Executor（Reflect 模式） | — |
-| `ReflectCoordinator.run_reflect` | `(domain, layer_root, reflection_chain) → dict` | 完整反射周期：audit → 分发 → 修复 → archive | Executor（Reflect 模式） | ReflectionAgent, _archive() |
+| `ReflectCoordinator.audit` | `(domain:str) → dict{layer: issues}` | 扫描 pending/ 中 NOTIFY 提取问题 + 无动作标记 | Executor（Reflect 模式） | — |
+| `ReflectCoordinator.run_reflect` | `(domain, root_manager, root_reflection) → dict` | 完整反射周期：audit → 分发(自上而下) → 修复 → _archive | Executor | ReflectionAgent.investigate/fix, _archive() |
+| `ReflectCoordinator._archive` | `(domain) → None` | 将已处理 pending/*.json 移入 learned/{domain}/ | run_reflect() | shutil.move() |
+| `ThresholdScorer.score` | `(domain:str) → float` | 计算 domain 的学习积攒评分 | ReflectCoordinator.run_reflect() | _domain_records() |
+| `ThresholdScorer.should_trigger` | `(domain:str) → bool` | 评分 ≥ threshold 时返回 True | Executor（Reflect 模式） | score() |
+| `ThresholdScorer.domain_count` | `(domain) → int` | 返回 pending 中该 domain 的记录数 | 外部查询 | _domain_records() |
+| `LearningRefiner` | `__init__(llm_client)` | Phase 2: LLM agent 判读哪些执行步骤值得学习 | ReflectCoordinator | — |
+| `LearningRefiner.refine` | `(meta:str, records:list[dict]) → dict{worth_learning, reasoning}` | LLM 根据 meta 目标判断每步贡献，选出 worth_learning 索引 | ReflectCoordinator.run_reflect() | _call_llm(), _format_steps() |
 
 ## core/layer_message.py (已有)
 

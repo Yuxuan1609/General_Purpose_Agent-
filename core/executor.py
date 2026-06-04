@@ -40,7 +40,11 @@ class Executor:
         self._temperature = temperature
 
     def execute(self, obs: TaskObservation) -> dict:
-        """Execute one action cycle through the cognitive chain."""
+        """Execute one action cycle through the cognitive chain.
+
+        Phase 2: L1's stage2 produces the final decision. Executor uses it directly;
+        LLM fallback only when L1 doesn't output a valid result.
+        """
         session = obs.session or {}
         step = session.get("step_index", 0)
         domain = session.get("domain", "")
@@ -54,12 +58,20 @@ class Executor:
         self._root.query(msg, trace_id)
         notify_layers = self._root.collect_notify()
 
-        context = self._assemble_context(obs)
-        action_text = self._call_llm(context)
+        # Phase 2: Use L1's result as the final action.
+        # L1Agent.stage2 returns {done, result, reasoning} via NOTIFY.
+        # Executor formats output without substantive reasoning.
+        # TODO: Future complex tasks may need an extra LLM formatting call.
+        l1_notify = notify_layers.get("l0_5_1", {})
+        if l1_notify.get("done") and l1_notify.get("result"):
+            action_text = l1_notify["result"]
+        else:
+            logger.debug("L1 result unavailable, falling back to LLM")
+            context = self._assemble_context(obs)
+            action_text = self._call_llm(context)
 
         result = {
             "action_text": action_text,
-            "context": context,
             "notify_layers": notify_layers,
         }
 
