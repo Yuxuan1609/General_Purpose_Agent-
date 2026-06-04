@@ -16,15 +16,13 @@ class L3ReflectionAgent(ReflectionAgent):
                 my_issues.append(issue)
 
         self._log.debug("═══ L3 ReflectionAgent ═══")
-        for i, issue in enumerate(issues):
-            self._log.debug("  [issue %d] type=%s",
-                           i, issue.get("type", "?"))
-        self._log.debug("  → my=%d downstream=%d",
-                       len(my_issues), len(downstream_issues))
-        for mi in my_issues:
-            self._log.debug("    my: %s", mi.get("type", ""))
-        for di in downstream_issues:
-            self._log.debug("    downstream: %s", di.get("type", ""))
+        self._log.debug("  investigate:\n"
+                        "    issues: %d → my=%d downstream=%d\n"
+                        "    my: %s\n"
+                        "    downstream: %s",
+                       len(issues), len(my_issues), len(downstream_issues),
+                       [i.get("type") for i in my_issues],
+                       [i.get("type") for i in downstream_issues])
         return {
             "my_issues": my_issues,
             "downstream_issues": downstream_issues,

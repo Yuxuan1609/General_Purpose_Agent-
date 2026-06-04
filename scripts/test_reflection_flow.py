@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from core.layers.comm import ReflectPacket
+from core.layers.base import _indent
 
 
 def _setup_logging():
@@ -232,9 +233,9 @@ def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger, meta
     """
     log.debug("═══ ReflectPacket → %s ═══", pkt.target_layer)
     log.debug("  record_id: %s | domain: %s", pkt.record_id, pkt.domain)
-    log.debug("  refiner: %s", pkt.refiner_reasoning[:200])
-    log.debug("  layer_notify: %s",
-             json.dumps(pkt.layer_notify, ensure_ascii=False)[:300])
+    log.debug("  refiner: %s", pkt.refiner_reasoning)
+    log.debug("  layer_notify:\n%s",
+             _indent(json.dumps(pkt.layer_notify, ensure_ascii=False, indent=2), 4))
 
     # ── LLM prompt preview (not calling LLM, just logging what it would send) ──
     _log_reflection_prompt(pkt, meta, log)
@@ -247,8 +248,7 @@ def _process_reflect_packet(pkt: ReflectPacket, agent, log: logging.Logger, meta
     }
     issues = pkt.issue_list or _detect_issues(pkt.layer_notify)
     if issues:
-        for i, iss in enumerate(issues):
-            log.debug("  [issue %d] type=%s", i, iss.get("type", "?"))
+        log.debug("  issues: %s", [i.get("type") for i in issues])
         result = agent.investigate(issues, context)
         my = result.get("my_issues", [])
         if my:
@@ -300,11 +300,7 @@ def _log_reflection_prompt(pkt: ReflectPacket, meta: str, log: logging.Logger):
     log.debug("  ── Prompt Preview ──")
     log.debug("  system:\n%s", _indent(system, 4))
     log.debug("  user:\n%s", _indent(user, 4))
-
-
-def _indent(text: str, spaces: int) -> str:
-    prefix = " " * spaces
-    return prefix + text.replace("\n", "\n" + prefix)
+    log.debug("")
 
 
 def _detect_issues(layer_notify: dict) -> list[dict]:
