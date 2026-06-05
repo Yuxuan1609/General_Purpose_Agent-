@@ -76,11 +76,22 @@ class L3Agent(LayerAgent):
             for s in skills
         ) if skills else "（无匹配技能）"
 
+        learning_data = ""
+        if l3_fmt:
+            units = state.get("learning_units", []) if state else []
+            if isinstance(units, list) and units:
+                recs = []
+                for u in units:
+                    recs.append(f"[{u.get('index','?')}] {u.get('reasoning','')[:120]}")
+                learning_data = f"[学习数据]\n" + "\n".join(recs) + "\n\n"
+
         instruction = (
-            "你的职责：根据 L2 下发的具体操作要求，选择相关的技能并基于技能内容执行任务。"
+            "你的核心任务是完成 L2 下发的 l3_task，Meta 提供任务整体背景。\n"
+            "选择相关技能并基于技能内容执行任务。"
         )
         system = self._build_system_prompt(instruction, meta)
         user = (
+            f"{learning_data}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
@@ -124,8 +135,10 @@ class L3Manager(LayerManager):
         # E3: payload is a composite dict {obs, ...} or TaskObservation directly
         if isinstance(data, dict):
             obs = data.get("obs")
+            l3_task = data.get("l3_task", "")
         else:
             obs = data
+            l3_task = ""
         session = obs.session if obs else {}
         domain_path = session.get("domain", "general")
 
@@ -156,7 +169,7 @@ class L3Manager(LayerManager):
         # LLM Agent: select relevant skills + execute
         if self._agent:
             logger.debug("── L3 Agent ──")
-            meta = obs.meta if obs else ""
+            meta = l3_task or (obs.meta if obs else "")
             result = self._agent.execute(meta, obs.state if obs else {},
                                          matched_skills=self._matched_skills)
             logger.debug("  skills_used: %s", result.get("skills_used"))

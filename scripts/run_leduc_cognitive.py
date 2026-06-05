@@ -113,16 +113,8 @@ def build_chain(auxiliary_llm=None):
 
 
 def _seed_knowledge(fk, phil, sl=None):
-    """Seed game-specific L1 rules + L2 knowledge cards + L3 skills."""
+    """Seed L2 knowledge cards + L3 skills. L1 rules are managed via l1_rules.json."""
     from core.task import Domain
-
-    # L1 game-specific rule
-    rule_text = ("棋牌游戏中，面对不完全信息时必须基于概率期望而非直觉决策。"
-                 "手牌强度、对手行为模式、剩余筹码一并考虑，计算期望收益后行动。"
-                 "避免因单局短期结果改变长期策略。")
-    existing = [r.content for r in phil.all_rules()]
-    if rule_text not in existing:
-        phil.add_rule(rule_text, created_by="seed", source="l1")
 
     # L2 knowledge cards — Leduc
     leduc_domain = Domain("game/leduc", "specific")

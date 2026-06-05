@@ -83,7 +83,7 @@ def main():
     print(f"  Agent prompts:    {agent_log.name}")
 
     # ── Layer agent logs to own directory ──────────────────────────
-    fmt = logging.Formatter("%(asctime)s | %(message)s")
+    fmt = logging.Formatter("%(message)s")
     for noisy in ("httpx", "httpcore", "openai", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     for lg_name, fn in [("l0_5_1", "l0_5_1"), ("l2", "l2"),

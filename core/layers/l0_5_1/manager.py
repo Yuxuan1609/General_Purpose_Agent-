@@ -84,9 +84,30 @@ class L1Agent(LayerAgent):
         is_learning = "l1_output_format" in state
 
         if is_learning:
-            # Learning data is in state.learning_units, accessible by all layers.
-            # L1's query passes task decomposition, not raw data.
-            return f"[学习数据] 详见 state.learning_units"
+            units = state.get("learning_units", [])
+            recs = []
+            if isinstance(units, list):
+                for u in units:
+                    idx = u.get("index", "?")
+                    action = u.get("action", "")
+                    result = u.get("result", "")
+                    reasoning = u.get("reasoning", "")
+                    l1_r = u.get("l1_reasoning", "")
+                    l2_r = u.get("l2_reasoning", "")
+                    l3_r = u.get("l3_reasoning", "")
+                    line = f"[{idx}] action={action} result={result} | {reasoning[:120]}"
+                    if l1_r or l2_r or l3_r:
+                        parts = []
+                        if l1_r:
+                            parts.append(f"L1: {l1_r[:100]}")
+                        if l2_r:
+                            parts.append(f"L2: {l2_r[:100]}")
+                        if l3_r:
+                            parts.append(f"L3: {l3_r[:100]}")
+                        line += f"\n  | " + " | ".join(parts)
+                    recs.append(line)
+            records_text = "\n".join(recs) if recs else "（无）"
+            return f"[学习数据]\n{records_text}"
         return (
             f"[当前局面]\n{current}\n\n"
             f"[对局历史]\n{history or '（无）'}"

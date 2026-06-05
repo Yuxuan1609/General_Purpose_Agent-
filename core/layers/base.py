@@ -90,8 +90,8 @@ class LayerAgent(ABC):
                 f"```json\n{schema_text}\n```"
             )
 
-        self._log.debug("  system:\n%s", _indent(system, 4))
-        self._log.debug("  user:\n%s", _indent(user, 4))
+        self._log.debug("  ── system ──\n%s", _indent(system, 4))
+        self._log.debug("\n\n\n  ── user ──\n%s", _indent(user, 4))
 
         resp = self._llm.chat(
             messages=[

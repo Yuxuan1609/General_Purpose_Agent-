@@ -63,7 +63,7 @@ class L2Agent(LayerAgent):
     MAX_CARDS = 15
 
     STAGE1_SCHEMA = {
-        "cards": ["string (筛选后的卡片内容)"],
+        "cards": ["string (筛选后的知识卡片内容)"],
         "call_l3": "boolean",
         "l3_task": "string (需要L3执行的任务，call_l3=false时可为空)",
         "reasoning": "string (推理过程)",
@@ -103,6 +103,25 @@ class L2Agent(LayerAgent):
             f"{extra}"
         )
 
+    def _build_learning_section(self, state: dict) -> str:
+        units = state.get("learning_units", [])
+        if not isinstance(units, list) or not units:
+            return ""
+        recs = []
+        for u in units:
+            line = f"[{u.get('index', '?')}] action={u.get('action', '')} result={u.get('result', '')} | {u.get('reasoning', '')[:120]}"
+            l1_r = u.get("l1_reasoning", "")
+            l2_r = u.get("l2_reasoning", "")
+            l3_r = u.get("l3_reasoning", "")
+            if l1_r or l2_r or l3_r:
+                parts = []
+                if l1_r: parts.append(f"L1:{l1_r[:80]}")
+                if l2_r: parts.append(f"L2:{l2_r[:80]}")
+                if l3_r: parts.append(f"L3:{l3_r[:80]}")
+                line += "\n  | " + " | ".join(parts)
+            recs.append(line)
+        return "| " + " | ".join(recs) if recs else ""
+
     def stage1(self, query: str, meta: str, state: dict,
                selected_nodes: list[dict]) -> dict:
         """Decompose: filter cards from selected nodes, decide L3 delegation.
@@ -123,6 +142,10 @@ class L2Agent(LayerAgent):
         )
         system = self._build_system_prompt(instruction, meta)
         user = (
+            f"[上层查询]\n{query}\n\n"
+            f"[学习数据]\n{self._build_learning_section(state)}\n\n"
+            f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
+        ) if state.get("l1_output_format") else (
             f"[上层查询]\n{query}\n\n"
             f"[当前局面]\n{current}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
@@ -165,6 +188,7 @@ class L2Agent(LayerAgent):
         if l2_fmt:
             user = (
                 f"[上层查询]\n{query}\n\n"
+                f"[学习数据]\n{self._build_learning_section(state)}\n\n"
                 f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
                 f"[L3 返回]\n{l3_text}\n\n"
                 f"[Stage1 决策]\n"
@@ -274,7 +298,8 @@ class L2Manager(LayerManager):
         # Propagate to L3 only when needed
         call_l3 = stage1_result.get("call_l3", False)
         if call_l3:
-            self._propagate(obs, trace_id)
+            l3_task = stage1_result.get("l3_task", "")
+            self._propagate(obs, trace_id, l3_task=l3_task)
 
         # E3: L3 skills from downstream manager, not obs.state
         l3_skills = getattr(self._downstream, '_matched_skills', []) if (self._downstream and call_l3) else []
@@ -297,10 +322,10 @@ class L2Manager(LayerManager):
 
         self._result = final
 
-    def _propagate(self, obs, trace_id: str) -> None:
+    def _propagate(self, obs, trace_id: str, l3_task: str = "") -> None:
         if self._downstream:
             q_msg = self._downward.wrap_query(
-                payload={"obs": obs}, source=self.name,
+                payload={"obs": obs, "l3_task": l3_task}, source=self.name,
                 target=self._downstream.name, trace_id=trace_id,
             )
             self._downstream.query(q_msg, trace_id)
