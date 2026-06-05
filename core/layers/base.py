@@ -4,58 +4,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from core.layer_message import LayerMessage, MessageType
+from core.layer_message import LayerMessage
 from core.layers.comm import UpwardComm, DownwardComm
-
-
-# --- REFACTOR: LearningEnv ---
-# ReflectionAgent(ABC) is the base for the old hardcoded reflection system.
-# Will be replaced by LearningEnv — reflection modeled as a normal domain
-# flowing through the same Executor + Layers pipeline.
-# Recyclable: `investigate()`/`fix()` semantics → LearningEnv action space;
-# `LayerManager.apply_update()` → LearningEnv's write-back to knowledge.
-class ReflectionAgent(ABC):
-    """Phase 2 (DEPRECATED): Per-layer reflection coordinator.
-
-    Superseded by LearningEnv design — see README architecture section.
-    """
-
-    def __init__(self, layer_name: str, manager,
-                 downstream: "ReflectionAgent | None" = None):
-        self._name = layer_name
-        self._manager = manager
-        self._downstream = downstream
-        self._log = logging.getLogger(f"{layer_name}_reflect")
-
-    @abstractmethod
-    def investigate(self, issues: list[dict], context: dict) -> dict:
-        """Determine which issues belong to this layer.
-
-        Returns:
-            {"my_issues": [...], "downstream_issues": [...], "actions": [...]}
-        """
-        ...
-
-    @abstractmethod
-    def fix(self, my_issues: list[dict]) -> dict:
-        """Repair confirmed issues via Manager.apply_update().
-
-        Returns:
-            {"fixes_applied": int, "details": [...]}
-        """
-        ...
-
-    def query_downstream(self, issues: list[dict], context: dict) -> dict:
-        """Delegate investigation to downstream ReflectionAgent."""
-        if self._downstream:
-            self._log.debug("  ═══ cascading %d issues → %s ═══",
-                           len(issues), self._downstream._name)
-            result = self._downstream.investigate(issues, context)
-            self._log.debug("  cascade result: my=%d downstream=%d",
-                           len(result.get("my_issues", [])),
-                           len(result.get("downstream_issues", [])))
-            return result
-        return {"my_issues": [], "downstream_issues": []}
 
 
 def _indent(text: str, spaces: int) -> str:
@@ -142,15 +92,6 @@ class LayerManager(ABC):
     @abstractmethod
     def notify(self) -> Any:
         """Return the payload for this layer's NOTIFY to the Executor."""
-        ...
-
-    @abstractmethod
-    def apply_update(self, key: str, value: Any) -> None:
-        """Phase 2: Apply a fix from ReflectionAgent to this layer's data.
-
-        Called by ReflectionAgent.fix() to write back repaired data.
-        Implementation is layer-specific (rule CRUD, card boost/penalize, skill update).
-        """
         ...
 
     def query(self, msg: LayerMessage | Any, trace_id: str = "") -> None:

@@ -23,30 +23,6 @@ class AgentPacket:
     content: dict = field(default_factory=dict)
 
 
-# --- REFACTOR: LearningEnv ---
-# ReflectPacket is part of the old reflection system. LearningEnv uses standard
-# LayerMessage (AgentPacket) for communication — no special reflection envelope needed.
-@dataclass(frozen=True)
-class ReflectPacket:
-    """Reflection-phase communication: Coordinator → ReflectionAgent.
-
-    Per-layer customized packet: each layer receives its own NOTIFY data
-    from the execute phase plus the Refiner's reasoning about this step.
-
-    Distinct from AgentPacket (execute phase) and LayerMessage (transport).
-    """
-    record_id: str              # which execution record
-    domain: str                 # domain for context
-    target_layer: str           # "l0_5_1" | "l2" | "l3"
-    refiner_reasoning: str      # why Refiner selected this step
-    layer_notify: dict = field(default_factory=dict)  # this layer's execute NOTIFY
-    issues: tuple = field(default_factory=tuple)       # pre-detected issues (optional)
-
-    @property
-    def issue_list(self) -> list[dict]:
-        return list(self.issues)
-
-
 class UpwardComm:
     """Handles QUERY reception from above and RESPONSE/NOTIFY send to above."""
 

@@ -1,4 +1,4 @@
-from core.task import Domain, LearningUnit, TaskResult, TaskContext
+from core.task import Domain, LearningUnit
 
 
 class TestDomain:
@@ -55,15 +55,3 @@ class TestTask:
         t = LearningUnit(description="do something")
         assert t.domain.path == "general"
         assert t.domain.is_general is True
-
-
-class TestTaskResult:
-    def test_task_result_eval_fields(self):
-        tr = TaskResult(success=True, eval_result="success", eval_score=0.95)
-        assert tr.eval_result == "success"
-        assert tr.eval_score == 0.95
-
-    def test_task_result_default_eval(self):
-        tr = TaskResult()
-        assert tr.eval_result == ""
-        assert tr.eval_score == 0.0

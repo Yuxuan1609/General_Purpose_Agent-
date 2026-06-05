@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.env.base import Environment, EnvState, EnvStep
-from core.orchestrator.threshold_scorer import ThresholdScorer
+from core.env.threshold_scorer import ThresholdScorer
 from core.types import TaskObservation
 
 logger = logging.getLogger(__name__)

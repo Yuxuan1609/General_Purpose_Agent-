@@ -199,7 +199,7 @@ def _run_learning_cycle(log_dir, llm_client, chain, executor,
                         pending_dir, phil, fk, sl, pre_win_rate=0.0):
     """Phase 2.2: run learning env cycle after game batch."""
     from core.env.learning_env import LearningEnv
-    from core.orchestrator.threshold_scorer import ThresholdScorer
+    from core.env.threshold_scorer import ThresholdScorer
     import json
 
     logger.info("")
@@ -339,7 +339,7 @@ def main():
         logger.info(line)
 
     # ── Phase 2.2: Learning cycle ────────────────────────────────────
-    from core.orchestrator.threshold_scorer import ThresholdScorer
+    from core.env.threshold_scorer import ThresholdScorer
     pending_dir = PROJECT_ROOT / "data" / "learning" / "pending"
     scorer = ThresholdScorer(pending_dir)
     if scorer.should_trigger("game/leduc"):

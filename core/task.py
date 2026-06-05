@@ -1,7 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -48,27 +46,3 @@ class LearningUnit:
     subtasks: list[LearningUnit] = field(default_factory=list)
     enable_learning: bool = False
     token_count: int = 0
-
-
-@dataclass
-class TaskResult:
-    """Output of a completed task execution."""
-    success: bool = False
-    final_response: str = ""
-    new_knowledge_cards: int = 0
-    l1_changes: list[str] = field(default_factory=list)
-    l1_rejections: list[str] = field(default_factory=list)
-    new_skills: list[str] = field(default_factory=list)
-    iterations_used: int = 0
-    summary: str = ""
-    eval_result: str = ""
-    eval_score: float = 0.0
-
-
-@dataclass
-class TaskContext:
-    """Mutable context tracked during a single task execution."""
-    task: LearningUnit
-    consecutive_no_progress: int = 0
-    eval_result: str = ""
-    rounds: int = 0
