@@ -67,9 +67,8 @@ def l1_philosophy(tmp_path):
 
 @pytest.fixture
 def l0_5_meta():
-    from core.meta_driver import MetaDriver, DEFAULT_TRIGGERS, DEFAULT_VALIDATORS
+    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     return MetaDriver(
-        triggers=DEFAULT_TRIGGERS.copy(),
         validation_rules=DEFAULT_VALIDATORS.copy(),
         auxiliary_llm=None,
     )

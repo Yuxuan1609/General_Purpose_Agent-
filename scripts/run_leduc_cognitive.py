@@ -95,14 +95,14 @@ def build_llm_client(model=None, temperature=0.1):
 
 
 def build_chain(auxiliary_llm=None):
-    from core.meta_driver import MetaDriver, DEFAULT_TRIGGERS, DEFAULT_VALIDATORS
+    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
     from core.tools.registry import ToolRegistry
     from core.layers import build_chain as _build
 
-    meta = MetaDriver(DEFAULT_TRIGGERS.copy(), DEFAULT_VALIDATORS.copy())
+    meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
     fk = FlexibleKnowledge(PROJECT_ROOT / "data" / "layers" / "knowledge",
                            PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json")

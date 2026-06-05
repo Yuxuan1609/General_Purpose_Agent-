@@ -9,7 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统代码 + 迁移 ThresholdScorer。删除 `core/task.py` 中未使用的 `TaskResult`/`TaskContext`。 |
+| 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统 + `MetaDriver` 旧触发器。迁移 `ThresholdScorer`。 |
 
 ---
 
@@ -154,14 +154,17 @@
 |----------|------|------|-----------|---------|
 | `build_chain` | `(meta_driver, philosophy, flexible_knowledge, skill_layer, auxiliary_llm) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1) | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
 
-## core/meta_driver.py (已有，层内部使用)
+## core/meta_driver.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `MetaDriver` | `__init__(triggers, validation_rules, auxiliary_llm, max_rules, max_rule_length)` | L0.5 不可变核心：触发器+验证器+安全过滤 | L0_5_1Manager | — |
-| `MetaDriver.filter_dangerous` | `(tool_calls:list) → list` | 过滤危险工具调用（rm -rf, delete_all 等） | L0_5_1Manager.process() | — |
-| `MetaDriver.check_completion` | `(task, messages) → str` | 判断任务是否完成（"done"/"continue"） | AgentLoop.run()（旧架构） | — |
-| `MetaDriver.validate_l1_change` | `(proposal, existing_rules) → tuple[bool, str]` | L0.5 验证器：检查 not_duplicate + no_contradiction + under_limit + under_length | LearningEnv._apply_l1() | Philosophy |
+| `MetaDriver` | `__init__(validation_rules, auxiliary_llm, max_rules, max_rule_length)` | L0.5 验证器 + 安全过滤 | L0_5_1Manager, build_chain | — |
+| `MetaDriver.validate_l1_change` | `(proposal, existing_rules) → tuple[bool, str]` | 检查 not_duplicate + no_contradiction + under_limit + under_length | LearningEnv._apply_l1() | ValidationRule.check_fn |
+| `MetaDriver.filter_dangerous` | `(tool_calls:list) → list` | 过滤危险工具调用 | — | — |
+| `MetaDriver.check_completion` | `(task, messages) → str` | 判断任务完成 ("done"/"continue") | — | — |
+| `ValidationRule` | `@dataclass(id, description, check_fn)` | 验证规则容器 | DEFAULT_VALIDATORS | MetaDriver |
+| `DEFAULT_VALIDATORS` | `list[ValidationRule]` | 默认验证器 (not_duplicate, no_contradiction) | build_chain, tests | — |
+| `L1ProposalProxy` | `__init__(content, reason, domain)` | L1Proposal 轻量代理 | — | — |
 
 ## core/philosophy.py (已有，层内部使用)
 

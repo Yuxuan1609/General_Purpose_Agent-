@@ -97,14 +97,14 @@ def _make_agent(
             from core.executor import Executor
             from core.layers import build_chain
             if layers is None:
-                from core.meta_driver import MetaDriver, DEFAULT_TRIGGERS, DEFAULT_VALIDATORS
+                from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
                 from core.philosophy import Philosophy
                 from core.flexible_knowledge import FlexibleKnowledge
                 from core.skill_layer import SkillLayer
                 from core.tools.registry import ToolRegistry
                 from pathlib import Path
 
-                meta = MetaDriver(DEFAULT_TRIGGERS.copy(), DEFAULT_VALIDATORS.copy())
+                meta = MetaDriver(DEFAULT_VALIDATORS.copy())
                 phil = Philosophy(Path("./data/l1_rules.json"))
                 fk = FlexibleKnowledge(Path("./knowledge"), Path("./knowledge/l2_index.json"))
                 sl = SkillLayer(Path("./skills"), ToolRegistry())
