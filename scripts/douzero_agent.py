@@ -389,6 +389,14 @@ class DouZeroCognitiveAgent:
     def llm_steps(self) -> int:
         return self._llm_steps
 
+    def record_game_end(self, winner: str, score: int):
+        """Write game result to pending file (no agent call)."""
+        self._executor.write_game_result(
+            session_id=self._session_id,
+            domain="game/doudizhu",
+            result={"winner": winner, "score": score},
+        )
+
     def act(self, infoset) -> list[int]:
         if len(infoset.legal_actions) == 1:
             return infoset.legal_actions[0]

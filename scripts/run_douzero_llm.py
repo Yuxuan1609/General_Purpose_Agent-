@@ -189,6 +189,11 @@ def run_episodes(
             scores['farmer'] += score
             scores['landlord'] -= score
 
+        # Record game end to pending (no agent call)
+        for agent in players.values():
+            if hasattr(agent, 'record_game_end'):
+                agent.record_game_end(winner, score)
+
         env.reset()
 
         if verbose and ep % max(1, episodes // 10) == 0:

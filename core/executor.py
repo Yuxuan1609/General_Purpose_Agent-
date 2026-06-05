@@ -195,3 +195,33 @@ class Executor:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(content)
         Path(tmp).replace(filepath)
+
+    def write_game_result(self, session_id: str, domain: str, result: dict) -> None:
+        """Write game-end summary to session's pending file (no agent call)."""
+        if not self._learning_dir:
+            return
+        task_dir = self._learning_dir / "pending" / domain.replace("/", "_")
+        task_dir.mkdir(parents=True, exist_ok=True)
+
+        if session_id not in self._session_files:
+            return
+        filepath = self._session_files[session_id]
+        if not filepath.exists():
+            return
+
+        existing: list = []
+        try:
+            existing = json.loads(filepath.read_text(encoding="utf-8"))
+            if not isinstance(existing, list):
+                existing = [existing]
+        except (json.JSONDecodeError, OSError):
+            return
+
+        existing.append({"type": "game_end", **result})
+
+        import tempfile
+        tmp = tempfile.mktemp(suffix=".json", dir=str(task_dir))
+        content = json.dumps(existing, ensure_ascii=False, indent=2, default=str)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(content)
+        Path(tmp).replace(filepath)
