@@ -48,6 +48,8 @@ def main():
     parser = argparse.ArgumentParser(description="LearningEnv dry-run")
     parser.add_argument("--real", action="store_true", help="Use real DeepSeek API")
     parser.add_argument("--mock", action="store_true", help="Use mock LLM (default)")
+    parser.add_argument("--no-apply", action="store_true", help="Dry-run: Agent proposes but does NOT write to knowledge")
+    parser.add_argument("--domain", default="game/leduc", help="Domain to learn from (default: game/leduc)")
     args = parser.parse_args()
     use_mock = not args.real  # default to mock; --real overrides
 
@@ -73,7 +75,8 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     pending_dir = PROJECT_ROOT / "data" / "learning" / "pending"
     records = []
-    record_files = sorted((pending_dir / "game_leduc").glob("*.json"))
+    domain_subdir = args.domain.replace("/", "_")
+    record_files = sorted((pending_dir / domain_subdir).glob("*.json"))
     for f in record_files:
         data = json.loads(f.read_text(encoding="utf-8"))
         records.extend(data if isinstance(data, list) else [data])
@@ -123,6 +126,7 @@ def main():
         knowledge,
         preprocessing_llm=pre_llm,
         stats_file=stats_file,
+        dry_run=args.no_apply,
     )
 
     _write_log(env_log, "LLM1: Preprocessing (raw -> LearningUnits)",
@@ -148,7 +152,7 @@ def main():
     # Build TaskObservation for Agent
     # ═══════════════════════════════════════════════════════════════
     # Use reset properly so domain is extracted
-    state = lenv.reset("learn from recent leduc games")
+    state = lenv.reset(f"learn from recent {args.domain} games")
     obs = lenv.build_task_observation()
 
     _write_log(env_log, "TaskObservation dispatched to Agent",
@@ -188,7 +192,7 @@ def main():
     action_json = json.dumps(notify_layers, ensure_ascii=False, default=str)
     step = lenv.step(action_json)
 
-    _write_log(env_log, "LearningEnv.step() result",
+    _write_log(env_log, f"LearningEnv.step() result {'(dry-run, no changes applied)' if args.no_apply else ''}",
                f"state: {step.state.observation}\n"
                f"reward: {step.reward}\n"
                f"done: {step.done}")

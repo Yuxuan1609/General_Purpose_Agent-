@@ -77,7 +77,8 @@ class LearningEnv(Environment):
 
     def __init__(self, pending_dir: Path, knowledge_stores: dict,
                  preprocessing_llm=None, stats_file: Path | None = None,
-                 l2_card_limit: int = 30, l3_skill_limit: int = 20):
+                 l2_card_limit: int = 30, l3_skill_limit: int = 20,
+                 dry_run: bool = False):
         self._pending_dir = Path(pending_dir)
         self._knowledge = knowledge_stores
         self._pre_llm = preprocessing_llm
@@ -86,6 +87,7 @@ class LearningEnv(Environment):
             self._pending_dir.parent / "learning_stats.json")
         self._l2_limit = l2_card_limit
         self._l3_limit = l3_skill_limit
+        self._dry_run = dry_run
 
         self._pending_records: list[dict] = []
         self._enriched_units: list[dict] = []
@@ -126,21 +128,24 @@ class LearningEnv(Environment):
                 state=EnvState(observation="(no modifications parsed)"),
                 reward=0.0, done=True)
 
-        self._update_usage_stats(parsed)
+        if not self._dry_run:
+            self._update_usage_stats(parsed)
 
         summary = {"l1": [], "l2": [], "l3": [], "errors": []}
         for layer_key in ("l1", "l2", "l3"):
             mods = parsed.get(f"{layer_key}_modifications", [])
             for mod in mods:
                 try:
-                    self._apply_layer_mod(layer_key, mod)
+                    if not self._dry_run:
+                        self._apply_layer_mod(layer_key, mod)
                     summary[layer_key].append(mod.get("target", "?"))
                 except Exception as e:
                     summary["errors"].append(
                         {"target": mod.get("target", "?"), "error": str(e)})
                     logger.warning("Failed to apply %s mod: %s", layer_key, e)
 
-        self._save_stats()
+        if not self._dry_run:
+            self._save_stats()
         self._step_count += 1
         self._done = True
 
