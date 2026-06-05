@@ -105,6 +105,43 @@ def _parse_card_tokens(text: str) -> list[int]:
     return tokens
 
 
+def _parse_action(text: str, legal_actions: list[list[int]]) -> list[int]:
+    """Parse LLM text response into an action.
+
+    Strategy (in order):
+      1. Match numbered choice (e.g. "1", "选择3")
+      2. Extract card tokens and match against legal actions
+      3. Detect pass keywords ("过", "不出", "pass")
+      4. Random legal action as fallback
+    """
+    text = text.strip()
+
+    # 1. Numbered choice
+    match = re.search(r'(\d+)', text)
+    if match:
+        idx = int(match.group(1))
+        if 1 <= idx <= len(legal_actions):
+            return legal_actions[idx - 1]
+
+    # 2. Parse card tokens and match
+    tokens = _parse_card_tokens(text)
+    if tokens:
+        tokens_sorted = sorted(tokens)
+        for act in legal_actions:
+            if sorted(act) == tokens_sorted:
+                return act
+
+    # 3. Pass detection
+    _pass_keywords = {'pass', '过', '不出', '不要', '要不起', 'none', 'no'}
+    if any(kw in text.lower() for kw in _pass_keywords):
+        for act in legal_actions:
+            if not act:
+                return act
+
+    # 4. Random fallback
+    return random.choice(legal_actions)
+
+
 # ═══════════════════════════════════════════════════════════════
 # DouZeroLLMAgent
 # ═══════════════════════════════════════════════════════════════
@@ -130,28 +167,7 @@ DOUDIZHU_GAME_RULES = """牌面大小：3<4<5<6<7<8<9<10<J<Q<K<A<2<小王(X)<大
 
 回复要求：只输出"不出"或牌面字符串，不要解释。"""
 
-_SYSTEM_PROMPT_TEMPLATE = """你正在玩斗地主。你的身份是{position_cn}。
-
-牌面大小：3<4<5<6<7<8<9<10<J<Q<K<A<2<小王(X)<大王(D)
-
-牌型（必须严格按类型出牌）：
-- 单张：1张牌
-- 对子：2张相同牌
-- 三张：3张相同牌
-- 三带一：3张相同牌+1张任意牌
-- 三带二：3张相同牌+1个对子
-- 顺子：≥5张连续牌（3-A之间，不含2和大小王）
-- 连对：≥3个连续对子（如334455）
-- 飞机：≥2个连续三张，可带等量单张或对子（如33344456）
-- 炸弹：4张相同牌（可管任何牌型）
-- 火箭：小王+大王（XD），最大牌型，可管一切
-
-出牌规则：
-- 必须出牌型相同且更大的牌（炸弹/火箭除外）
-- 可以选择"不出"（跳过本轮）
-- 新一回合你是先手时可自由出牌
-
-回复要求：只输出"不出"或牌面字符串，不要解释。"""
+_SYSTEM_PROMPT_TEMPLATE = "{role_preamble}\n\n{game_rules}\n\n回复要求：只输出\"不出\"或牌面字符串，不要解释。"
 
 
 class DouZeroLLMAgent:
@@ -204,7 +220,10 @@ class DouZeroLLMAgent:
     # ── Prompt builders ────────────────────────────────────────
 
     def _build_system_prompt(self) -> str:
-        return _SYSTEM_PROMPT_TEMPLATE.format(position_cn=self._position_cn)
+        return _SYSTEM_PROMPT_TEMPLATE.format(
+            role_preamble=f"你正在玩斗地主。你的身份是{self._position_cn}。",
+            game_rules=DOUDIZHU_GAME_RULES,
+        )
 
     def build_prompt(self, infoset) -> dict:
         """Convert InfoSet to structured game state for the Cognitive Agent System.
@@ -338,40 +357,8 @@ class DouZeroLLMAgent:
     # ── Response parsing ───────────────────────────────────────
 
     def parse_action(self, llm_response: str, legal_actions: list[list[int]]) -> list[int]:
-        """Parse LLM text response into an action.
-
-        Strategy (in order):
-          1. Match numbered choice (e.g. "1", "选择3")
-          2. Extract card tokens and match against legal actions
-          3. Detect pass keywords ("过", "不出", "pass")
-          4. Random legal action as fallback
-        """
-        text = llm_response.strip()
-
-        # 1. Numbered choice
-        match = re.search(r'(\d+)', text)
-        if match:
-            idx = int(match.group(1))
-            if 1 <= idx <= len(legal_actions):
-                return legal_actions[idx - 1]
-
-        # 2. Parse card tokens and match
-        tokens = _parse_card_tokens(text)
-        if tokens:
-            tokens_sorted = sorted(tokens)
-            for act in legal_actions:
-                if sorted(act) == tokens_sorted:
-                    return act
-
-        # 3. Pass detection
-        _pass_keywords = {'pass', '过', '不出', '不要', '要不起', 'none', 'no'}
-        if any(kw in text.lower() for kw in _pass_keywords):
-            for act in legal_actions:
-                if not act:
-                    return act
-
-        # 4. Random fallback
-        return random.choice(legal_actions)
+        """Parse LLM response into an action (reuses module-level _parse_action)."""
+        return _parse_action(llm_response, legal_actions)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -386,20 +373,34 @@ class DouZeroCognitiveAgent:
         self._executor = executor
         self.position = position
         self._position_cn = POSITION_CN.get(position, position)
+        self._step = 0
+        self._session_id = ""
+
+    def reset_session(self, session_id: str = ""):
+        self._step = 0
+        self._session_id = session_id
 
     def act(self, infoset) -> list[int]:
         if len(infoset.legal_actions) == 1:
             return infoset.legal_actions[0]
 
+        self._step += 1
+
         obs = TaskObservation(
             meta=DOUDIZHU_GAME_RULES,
             state=self._build_state(infoset),
-            session={"domain": "game/doudizhu", "role": self._position_cn},
+            session={
+                "id": self._session_id,
+                "domain": "game/doudizhu",
+                "domains_hint": ["game/doudizhu"],
+                "step_index": self._step,
+                "enable_learning": True,
+            } if self._session_id else None,
         )
 
         result = self._executor.execute(obs)
         action_text = result["action_text"]
-        action = self.parse_action(action_text, infoset.legal_actions)
+        action = _parse_action(action_text, infoset.legal_actions)
         logger.info("CognitiveAgent action: %s", cards_to_str(action) if action else "pass")
         return action
 
@@ -445,11 +446,6 @@ class DouZeroCognitiveAgent:
             "current": current_text,
             "history": history_text,
         }
-
-    def parse_action(self, llm_response: str, legal_actions: list[list[int]]) -> list[int]:
-        """Reuse DouZeroLLMAgent's parsing logic."""
-        dummy = DouZeroLLMAgent.__new__(DouZeroLLMAgent)
-        return DouZeroLLMAgent.parse_action(dummy, llm_response, legal_actions)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -553,17 +549,9 @@ if __name__ == '__main__':
         import os
         import yaml
         from openai import OpenAI
+        from core.env_loader import load_env
 
-        env_path = Path(__file__).resolve().parent.parent / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key, val = key.strip(), val.strip()
-                if key not in os.environ:
-                    os.environ[key] = val
+        load_env(Path(__file__).resolve().parent.parent)
 
         config_path = Path(__file__).resolve().parent.parent / "config.yaml"
         with open(config_path, encoding="utf-8") as f:

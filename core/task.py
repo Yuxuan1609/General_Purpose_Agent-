@@ -41,8 +41,3 @@ class LearningUnit:
     """
     description: str
     domain: Domain = field(default_factory=lambda: Domain("general", "general"))
-    context: str = ""
-    needs_decomposition: bool = False
-    subtasks: list[LearningUnit] = field(default_factory=list)
-    enable_learning: bool = False
-    token_count: int = 0

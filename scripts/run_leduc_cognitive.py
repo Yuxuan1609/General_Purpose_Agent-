@@ -65,134 +65,30 @@ def _setup_logging():
 
 
 def _load_env():
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key, val = key.strip(), val.strip()
-            if key not in os.environ:
-                os.environ[key] = val
+    from core.env_loader import load_env
+    load_env(PROJECT_ROOT)
 
 
 def build_llm_client(model=None, temperature=0.1):
-    import yaml
-    from openai import OpenAI
-    from core.llm_client import LLMClient
-
-    _load_env()
-    with open(PROJECT_ROOT / "config.yaml", encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    cfg = raw.get("main_llm", {})
-    base_url = cfg.get("base_url", "https://api.deepseek.com")
-    api_key = os.environ.get(cfg.get("api_key_env", "DEEPSEEK_API_KEY"), "")
-    oai = OpenAI(base_url=base_url, api_key=api_key)
-    llm = LLMClient(oai, model or cfg.get("model", "deepseek-v4-flash"))
-    llm.temperature = temperature
-    return llm
+    from core.llm_factory import build_llm_client as _build
+    return _build(PROJECT_ROOT / "config.yaml", model=model, temperature=temperature)
 
 
 def build_chain(auxiliary_llm=None):
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
-    from core.philosophy import Philosophy
-    from core.flexible_knowledge import FlexibleKnowledge
-    from core.skill_layer import SkillLayer
-    from core.tools.registry import ToolRegistry
-    from core.layers import build_chain as _build
-
-    meta = MetaDriver(DEFAULT_VALIDATORS.copy())
-    phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
-    fk = FlexibleKnowledge(PROJECT_ROOT / "data" / "layers" / "knowledge",
-                           PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json")
-    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", ToolRegistry())
-
-    _seed_knowledge(fk, phil, sl)
-    return _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm)
+    from core.chain_factory import build_default_chain
+    return build_default_chain(PROJECT_ROOT, auxiliary_llm=auxiliary_llm, seed=True)
 
 
 def _seed_knowledge(fk, phil, sl=None):
-    """Seed L2 knowledge cards + L3 skills. L1 rules are managed via l1_rules.json."""
-    from core.task import Domain
-
-    # L2 knowledge cards — Leduc
-    leduc_domain = Domain("game/leduc", "specific")
-    leduc_cards = [
-        ("持有K（最大牌）时翻牌前激进加注。对手Call说明对手有Q或J并赌公共牌。max 2 raises per round，"
-         "尽量打满加注次数。" , 0.8),
-        ("公共牌与手牌配对时全力加注。翻牌后加注额4筹码。对手未配对时大概率fold。"
-         "如对手仍call，说明对手可能也有高牌或已成对。" , 0.85),
-        ("翻牌后未成对且手牌为J时，若对手加注应考虑fold。公共牌即使是K，对手可能已配对或持有更高单张。"
-         "fold损失已有投入但避免更大损失。" , 0.7),
-    ]
-    for content, conf in leduc_cards:
-        fk.add_card(content=content, domain=leduc_domain, confidence=conf, source="seed")
-
-    # L2 knowledge cards — Douzero
-    dz_domain = Domain("game/doudizhu", "specific")
-    dz_cards = [
-        ("作为地主上家，核心职责是顶牌——用较大的单张或对子卡住地主的小牌，给下家创造跑牌机会。"
-         "不要只顾自己出完。出单张时尽量出≥10的牌迫使地主消耗大牌。" , 0.8),
-        ("炸弹(4张相同)可管任何牌型，火箭(XD)最大。农民保留炸弹到残局压制地主；"
-         "地主尽早用炸弹确立牌权。追踪已出炸弹数判断剩余威胁。" , 0.85),
-    ]
-    for content, conf in dz_cards:
-        fk.add_card(content=content, domain=dz_domain, confidence=conf, source="seed")
-
-    # L3 skills — each maps to L2 Node via Relevance Domain field
-    if sl:
-        _seed_l3_skills(sl)
-
-    logger.info("Seeded: L1 rules=%d L2 cards=%d L3 skills=%d",
-                len(phil.all_rules()), len(fk.cards),
-                len(sl.list_all()) if sl else 0)
+    """Deprecated — use core.seed_knowledge.seed_knowledge()."""
+    from core.seed_knowledge import seed_knowledge
+    seed_knowledge(fk, phil, sl)
 
 
-def _seed_l3_skills(sl):
-    """Create L3 skills with Relevance Domain mapping to L2 Node name."""
-    from core.task import Domain
-
-    leduc_domain = Domain("game/leduc", "specific")
-    leduc_skills = [
-        ("leduc-preflop-raise", "翻牌前加注策略",
-         "---\nname: leduc-preflop-raise\ndescription: 翻牌前加注策略\ndomain: game/leduc\nrelevance_domain: game/leduc\n---\n"
-         "# 翻牌前加注策略\n\n持有K时强制加注，持有Q时根据对手行为判断，持有J时倾向call观察。\n"
-         "加注迫使弱牌fold或支付更高代价看公共牌。\n\n## 决策树\n"
-         "- K → raise\n"
-         "- Q → 对手raise则fold，对手call则call\n"
-         "- J → call/fold，避免主动加注"),
-        ("leduc-postflop-pair", "翻牌后成对加注",
-         "---\nname: leduc-postflop-pair\ndescription: 翻牌后成对加注\ndomain: game/leduc\nrelevance_domain: game/leduc\n---\n"
-         "# 翻牌后成对加注\n\n公共牌与手牌配对时，你有最高牌型。\n"
-         "max 2 raises per round，尽量打满加注。每次加注4筹码。\n\n"
-         "## 对手信号\n"
-         "- 对手call → 对手可能也有较高单张\n"
-         "- 对手fold → 收底池\n"
-         "- 对手re-raise → 评估对手是否可能已成对"),
-    ]
-    for name, desc, content in leduc_skills:
-        try:
-            sl.create_skill(name=name, content=content, domain=leduc_domain)
-        except Exception:
-            pass  # skill already exists
-
-    dz_domain = Domain("game/doudizhu", "specific")
-    dz_skills = [
-        ("doudizhu-top-card", "顶牌策略",
-         "---\nname: doudizhu-top-card\ndescription: 顶牌策略\ndomain: game/doudizhu\nrelevance_domain: game/doudizhu\n---\n"
-         "# 顶牌策略\n\n作为地主上家，核心任务是顶住地主的出牌。出单张时优先出≥10的牌。\n"
-         "迫使地主消耗2或大小王等大牌资源。\n\n"
-         "## 顶牌优先级\n"
-         "- 出单张: 10 → J → Q → K → A → 2\n"
-         "- 出对子: 优先出较大的对子\n"
-         "- 不要出炸弹或火箭作为顶牌（留给残局）"),
-    ]
-    for name, desc, content in dz_skills:
-        try:
-            sl.create_skill(name=name, content=content, domain=dz_domain)
-        except Exception:
-            pass
+def _seed_knowledge(fk, phil, sl=None):
+    """Deprecated — use core.seed_knowledge.seed_knowledge()."""
+    from core.seed_knowledge import seed_knowledge
+    seed_knowledge(fk, phil, sl)
 
 
 def _run_learning_cycle(log_dir, llm_client, chain, executor,

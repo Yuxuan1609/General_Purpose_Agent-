@@ -95,20 +95,10 @@ def _make_agent(
         if mode == "cognitive":
             from scripts.douzero_agent import DouZeroCognitiveAgent
             from core.executor import Executor
-            from core.layers import build_chain
             if layers is None:
-                from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
-                from core.philosophy import Philosophy
-                from core.flexible_knowledge import FlexibleKnowledge
-                from core.skill_layer import SkillLayer
-                from core.tools.registry import ToolRegistry
-                from pathlib import Path
+                from core.chain_factory import build_default_chain
 
-                meta = MetaDriver(DEFAULT_VALIDATORS.copy())
-                phil = Philosophy(Path("./data/l1_rules.json"))
-                fk = FlexibleKnowledge(Path("./knowledge"), Path("./knowledge/l2_index.json"))
-                sl = SkillLayer(Path("./skills"), ToolRegistry())
-                chain = build_chain(meta, phil, fk, sl)
+                chain = build_default_chain(PROJECT_ROOT, auxiliary_llm=None, seed=True)
             else:
                 chain = layers
             executor = Executor(layer_root=chain, llm_client=llm_client)
@@ -137,8 +127,8 @@ def _get_position_cn(pos: str) -> str:
 
 
 def _cards_to_str(cards: list[int]) -> str:
-    m = {3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K',14:'A',17:'2',20:'X',30:'D'}
-    return ' '.join(m.get(c, str(c)) for c in cards)
+    from scripts.douzero_agent import cards_to_str
+    return cards_to_str(cards)
 
 
 def run_episodes(
@@ -156,6 +146,10 @@ def run_episodes(
         deck = _shuffle_deck(seed + ep - 1 if seed is not None else None)
         game_data = _gen_game_data(deck)
         env.card_play_init(game_data)
+
+        for pos, agent in players.items():
+            if hasattr(agent, 'reset_session'):
+                agent.reset_session(f"douzero_{pos}_ep{ep}")
 
         step_count = 0
         while not env.game_over:
@@ -248,33 +242,11 @@ def main():
         logger.info("DRY RUN mode - using RandomAgent for LLM position")
 
     if not args.dry_run:
-        from core.llm_client import LLMClient
-        import yaml
-        from openai import OpenAI
+        from core.llm_factory import build_llm_client
 
-        env_path = PROJECT_ROOT / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key, val = key.strip(), val.strip()
-                if key not in os.environ:
-                    os.environ[key] = val
-
-        with open(PROJECT_ROOT / "config.yaml", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-        cfg = raw.get("main_llm", {})
-        oai = OpenAI(
-            base_url=cfg.get("base_url", "https://api.deepseek.com"),
-            api_key=os.environ.get(cfg.get("api_key_env", "DEEPSEEK_API_KEY"), ""),
-        )
-        model = cfg.get("model", "deepseek-v4-flash")
-        llm_client = LLMClient(oai, model)
-        if cfg.get("thinking", False):
-            llm_client.thinking_enabled = True
-        logger.info("LLM: %s  thinking=%s", model, getattr(llm_client, "thinking_enabled", False))
+        llm_client = build_llm_client(PROJECT_ROOT / "config.yaml")
+        logger.info("LLM: %s  thinking=%s", getattr(llm_client, "model", "?"),
+                    getattr(llm_client, "thinking_enabled", False))
 
     # Build players
     players = {}

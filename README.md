@@ -18,7 +18,7 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 | **L3** | SkillLayer | SKILL.md 技能执行；domain 确定性匹配 + **L3Agent（LLM 选择+执行）** |
 | **L4**（预留） | — | 静态知识存储，L3 dispatch 目标 |
 
-> **核心洞察**：Reflection 不需要独立的架构设施。将其建模为 **LearningEnv**（一个实现 `Environment` 接口的普通环境），与 GameEnv 共享 Executor + Layers + ToolUse。学习策略通过 `domain="learning"` 走现有链式通道，系统因此可以学到"如何学习"（自举）。整个 Phase 2 的 ReflectionAgent/ReflectCoordinator 等写死逻辑将被 LearningEnv 取代，pending records 回收为 LearningEnv 的输入源。
+> **核心洞察**：Reflection 不需要独立的架构设施。将其建模为 **LearningEnv**（一个实现 `Environment` 接口的普通环境），与 GameEnv 共享 Executor + Layers + ToolUse。学习策略通过 `domain="learning"` 走现有链式通道，系统因此可以学到"如何学习"（自举）。Phase 2.3 已删除所有旧 ReflectionAgent/ReflectCoordinator 代码。
 
 > **L1-L4 每层都在执行**：任务分派到各层后，每层基于自己持有的信息和 LLM Agent 独立执行认知任务。区别在于执行"重量"——L2/L3 涉及检索+筛选+推理，较重；L1（行为准则匹配）和 L4（静态知识查询）相对轻量。游戏环境（Leduc）中差异不显著（任务粒度小、技能含策略描述）；通用任务（编程、搜索）中差异更明显。
 
@@ -136,12 +136,12 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 
 **当前代码中违反此原则的已知点**（供后续重构参照）：
 
-> Phase 1 + 1.5 重构后，星型通信已替换为链式相邻传递。以下违规点为旧架构残留：
+> Phase 1 + 1.5 重构后，星型通信已替换为链式相邻传递。旧 `main.py` / `core/agent_loop.py` / `core/layer_context.py` 已归档至 `_archive/`。
 
 | 违规点 | 位置 | 当前行为 | 目标行为 |
 |--------|------|----------|----------|
-| POST-TASK 学习闭环 | `core/layer_context.py:post_task()` | MetaDriver 对 L1/L2/L3 直接操作 | 反思结果→L1→L2→L3 逐级转发（Phase 2） |
-| 事件循环直接读 L1 规则 | `core/agent_loop.py:_build_system_prompt()` | 直接调用 `layers.l1.all_rules()` | 通过 `build_chain()` 统一入口（已部分修复） |
+| POST-TASK 学习闭环 | `_archive/core/layer_context.py:post_task()` | MetaDriver 对 L1/L2/L3 直接操作 | 反思结果→L1→L2→L3 逐级转发（已由 LearningEnv 替代） |
+| 事件循环直接读 L1 规则 | `_archive/core/agent_loop.py:_build_system_prompt()` | 直接调用 `layers.l1.all_rules()` | 通过 `build_chain()` 统一入口（已由新 Executor 替代） |
 
 #### A2：统一层间消息信封
 
@@ -533,7 +533,7 @@ baselines/
 
 仍作为数据对象保留，但不再作为独立层运行：
 
-- **MetaDriver** (`core/meta_driver.py`)：4 个反射触发器（stagnation/task_failed/task_completed/domain_shift）、2 个验证器（not_duplicate/no_contradiction）、危险工具过滤
+- **MetaDriver** (`core/meta_driver.py`)：2 个验证器（not_duplicate/no_contradiction）、危险工具过滤
 - **Philosophy** (`core/philosophy.py`)：Rule.source 区分 L0.5 宪法（不可变，仅用户手动修改）和 L1 行为规则（可变，反射可修改）。持久化到 `data/layers/l1_rules.json`
 - **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard + KnowledgeGraph，MD+JSON 双存。支持 add/remove/modify 卡片
 - **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，支持 create/edit/delete
@@ -615,34 +615,29 @@ cognitive-agent/
       l1.yaml                   # L1 行为规则种子 (max: 20, ≤300字/rule)
       l2.yaml                   # L2 激活权重、衰减率、limits (≤10 cards/query)
       l3.yaml                   # L3 编译阈值、匹配分数、limits (≤15 skills/query)
-      reflect.yaml              # ⚠ REFACTOR: 旧反射配置，将迁移到 learning domain config
+      learning.yaml             # LearningEnv domain 配置
   core/                       # 核心源代码
     types.py                  # TaskObservation, ExecutionRecord
     executor.py               # Executor — 独立决策者（新架构入口）
     llm_client.py             # LLMResponse + LLMClient
     layer_message.py          # LayerMessage 信封 + MessageType 枚举 (A2)
-    config.py                 # AgentConfig dataclass
-    task.py                   # Domain, Task, TaskResult, TaskContext
-    meta_driver.py            # L0.5 触发器 + 验证器
+    task.py                   # Domain, LearningUnit
+    meta_driver.py            # L0.5 验证器 + 安全过滤
     philosophy.py             # L1 规则 CRUD
     flexible_knowledge.py     # L2 知识卡片 + KnowledgeGraph
     skill_layer.py            # L3 技能 + L2→L3 编译
-    reflect_config.py         # ⚠ REFACTOR: 旧反射配置加载器
     env/                      # 环境抽象 (ABC)
       base.py                 # Environment, EnvState, EnvStep
+      learning_env.py         # LearningEnv — 将学习建模为环境
+      threshold_scorer.py     # 按 domain 评分触发学习
       __init__.py
     layers/                   # 新架构：三层链式 Manager + Comm Agent
-      base.py                 # LayerManager ABC + LayerAgent ABC + ReflectionAgent ABC⚠
-      comm.py                 # UpwardComm/DownwardComm + AgentPacket + ReflectPacket⚠
+      base.py                 # LayerManager ABC + LayerAgent ABC
+      comm.py                 # UpwardComm/DownwardComm + AgentPacket
       __init__.py             # build_chain() — 自底向上构建
-      l0_5_1/                 # L(0.5+1)Manager + L1Agent + reflection_agent.py⚠
-      l2/                     # L2Manager + L2Agent + reflection_agent.py⚠
-      l3/                     # L3Manager + reflection_agent.py⚠
-    orchestrator/             # ⚠ REFACTOR: 旧编排器（待 LearningEnv 取代）
-      task_decomposer.py      # 部分可回收 → LearningEnv batch splitter
-      reflect_coordinator.py  # ⚠ 旧反射协调器
-      threshold_scorer.py     # 可回收 → LearningEnv reward
-      learning_refiner.py     # 可回收 → LearningEnv L1 规则
+      l0_5_1/                 # L(0.5+1)Manager + L1Agent
+      l2/                     # L2Manager + L2Agent
+      l3/                     # L3Manager + L3Agent
     tools/
       registry.py             # ToolRegistry 单例（线程安全）
       todo_tool.py            # 子任务跟踪
@@ -653,9 +648,12 @@ cognitive-agent/
     leduc_cognitive_agent.py  # LeducCognitiveAgent — RLCard接口+Executor
     run_douzero_llm.py        # DouZero 对局 (--mode direct|cognitive)
     douzero_agent.py          # DouZeroLLMAgent + DouZeroCognitiveAgent
+    run_learning_dryrun.py    # 学习 dry-run (--mock|--real)
     run_parallel_test.py      # 并行 Leduc 测试
     smoke_test_managers.py    # LayerManager 烟雾测试
-    test_reflection_flow.py   # ⚠ 旧反射流程测试
+    mock_llm.py              # Mock LLM client
+    smoke_test_integration.py # 集成烟雾测试
+    smoke_test_learning_env.py# LearningEnv 烟雾测试
   data/                       # 运行时数据
     layers/
       l1_rules.json             # L1 持久化
@@ -665,73 +663,26 @@ cognitive-agent/
       skills/                   # L3 技能 SKILL.md
         game/leduc/             # leduc-preflop-raise, leduc-postflop-pair
         game/doudizhu/          # doudizhu-top-card
-    learning/pending/           # ExecutionRecord 待处理（→ LearningEnv 输入源）
+        learning/               # 学习 domain skills
+    learning/                   # 学习数据
+      pending/                  # ExecutionRecord 待处理（→ LearningEnv 输入源）
+      learned/                  # 已处理记录归档
   logs/                         # 运行日志
-  tests/                      # pytest (24 test files, +5 reflection tests marked ⚠)
+  tests/                      # pytest (~18 test files)
   docs/                       # 设计文档
 ```
 
-> ⚠ = REFACTOR: LearningEnv — 旧反射系统代码，将被 LearningEnv 替代。参见 `docs/superpowers/specs/2026-06-04-learning-env-design.md`。
+- **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表
 
 ## 实现计划
 
-| 阶段 | 文档 | 状态 |
-|------|------|------|
-| Phase 1 — Execute 链路 | `docs/superpowers/plans/...-implementation.md` | ✅ 已完成 |
-| Phase 1.5 — Comm Agent + LayerMessage + V-structure | `docs/superpowers/plans/...-implementation-phase1.5.md` | ✅ 已完成 |
-| Phase 2.1 — LearningEnv 骨架 | `docs/superpowers/plans/2026-06-04-learning-env-implementation.md` | ✅ 已完成 |
-| Phase 2.2 — 接入游戏循环 + 双域激活 | 同上 | ✅ 已完成 |
-| Phase 2.3 — 清理旧代码 + 元学习轨 | 同上 | 📋 待实施 |
-
-> **TODO**: L2 `create` 修改的 `domain` / `confidence` 字段仅在 `_apply_l2` 的 `create` 分支消费，`update`/`deprecate` 不消费。当前 schema 描述为 `only for create`，后续需确认是否需要为 `update` 也支持修改 domain/confidence。
-
-
-> **Phase 2 重构说明**：当前旧 `ReflectionAgent` 递归判责 + `ReflectCoordinator` 设计已被 LearningEnv 方案取代。旧代码已标记 ⚠ REFACTOR，将在 Phase 2.3 删除。
-
-## 架构设计文档
-
-| 文档 | 说明 |
+| 阶段 | 状态 |
 |------|------|
-| `docs/superpowers/specs/2026-06-03-agent-communication-design.md` | **当前架构 v2**：三层链式通信、Executor 独立决策、V-structure Agent |
-| `docs/superpowers/specs/2026-06-04-learning-env-design.md` | **🔧 LearningEnv 设计**：将学习建模为独立环境，与 GameEnv 共享层链 |
-| `docs/superpowers/specs/2026-06-04-reflection-design.md` | **⚠ 旧**：ReflectionAgent 递归判责（被 LearningEnv 取代） |
-| `docs/superpowers/specs/2026-06-03-agent-communication-design-phase2.md` | **⚠ 旧**：Phase 2 ReflectionAgent + Task Decomposer（被 LearningEnv 取代） |
-| `docs/4.5-layer-agent-design.md` | 初始架构设计，含 TextWorld 验证策略与冷启动方案 |
-| `docs/cognitive-agent-design-v2.md` | 详细设计文档（~1500+ 行），含伪代码与数据结构模式 |
-| `docs/cognitive-agent-phase1-plan.md` | 分阶段实现计划（~1800+ 行），TDD 风格逐步分解 |
-| `docs/4.5-layer-agent-references.md` | 33 篇学术/开源参考文献（CoALA, Reflexion, Voyager, MemGPT, HippoRAG 等） |
-| `docs/voyager-skill-system-detail.md` | Voyager 技能系统详解 — L3 SKILL.md 格式参考 |
-| `docs/reflexion-architecture-detail.md` | Reflexion 架构详解 — ReflectionAgent 递归判责模式 |
-| `docs/environment-setup.md` | RLCard + DouZero 环境配置说明 |
-
-## 长期规划 / Future Work
-
-### 1. Short Circuit：同 Session 信息复用
-
-当前每次 `Executor.execute()` 都完整执行全链路（L1 Stage1 → L2 Stage1/2/3 → L3 → L1 Stage2）。对于同一 session 内的连续步骤（或 `meta` 字段高度相似的任务），大部分层间通信结果可以复用：
-
-- **策略**：检测当前 `meta` + `state.current` 与上一步相比是否发生变化。若未变，直接沿用上一步的 L2/L3 NOTIFY 结果，跳过 LLM 调用
-- **复杂度**：只需在 `Executor` 层维护一个轻量缓存，`_assemble_context()` 中比对 hash 决定是否短路
-- **收益**：典型博弈场景（如 Leduc/DouZero）每步状态变化小而多，可节省 60-80% 的 LLM 调用
-
-### 2. 多轮对话与会话并发
-
-从当前单步决策扩展到多轮对话场景时，需要解决：
-
-- **历史会话管理**：同一 session 的多轮历史不应重复经过层链，需设计增量路由（仅新内容参与 QUERY）
-- **并发控制**：多 session 并发时，各层 Manager 的 `_final_result` 等可变状态需做到 session 级隔离，避免交叉污染
-- **方向**：可参考 `trace_id` 扩展到 `session_id` 粒度的状态隔离，或为每个 session 实例化独立的层链
-
-### 3. 真实世界 Coding 场景
-
-Phase 2.1 — Benchmark 评估：
-- 使用开源基准（如 **SWE-bench**）评估 Agent 在真实代码仓库上的修复/开发能力
-- 评估粒度从"测试是否通过"扩展到**工程质量**（代码风格、模块化程度、可维护性）和**执行效率**（迭代次数、Token 消耗、运行时间）
-
-Phase 2.2 — 对抗性评测：
-- 构建对抗性 Agent，在代码仓库中**人为制造问题**（Bug、性能缺陷、安全隐患），然后验证主 Agent 能否发现并修复
-- 或直接利用 Git 提交记录 / Pull Request 中的真实修复案例作为训练和评估数据
-- 目标：从"通过测试"到"写出好代码"的评估范式迁移
+| Phase 1 — Execute 链路 | ✅ 已完成 |
+| Phase 1.5 — Comm Agent + LayerMessage + V-structure | ✅ 已完成 |
+| Phase 2.1 — LearningEnv 骨架 | ✅ 已完成 |
+| Phase 2.2 — 接入游戏循环 + 双域激活 | ✅ 已完成 |
+| Phase 2.3 — 清理旧代码 + 元学习轨 | ✅ 已完成 |
 
 ## 工程文件
 

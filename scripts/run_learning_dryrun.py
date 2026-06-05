@@ -20,16 +20,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def _load_env():
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            key, val = key.strip(), val.strip()
-            if key not in os.environ:
-                os.environ[key] = val
+    from core.env_loader import load_env
+    load_env(PROJECT_ROOT)
 
 
 def build_llm_client(mock: bool = True, model=None, temperature=0.1):
@@ -38,19 +30,8 @@ def build_llm_client(mock: bool = True, model=None, temperature=0.1):
     if mock:
         from scripts.mock_llm import MockLLMClient
         return MockLLMClient()
-    import yaml
-    from openai import OpenAI
-    from core.llm_client import LLMClient
-    _load_env()
-    with open(PROJECT_ROOT / "config.yaml", encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    cfg = raw.get("main_llm", {})
-    base_url = cfg.get("base_url", "https://api.deepseek.com")
-    api_key = os.environ.get(cfg.get("api_key_env", "DEEPSEEK_API_KEY"), "")
-    oai = OpenAI(base_url=base_url, api_key=api_key)
-    llm = LLMClient(oai, model or cfg.get("model", "deepseek-v4-flash"))
-    llm.temperature = temperature
-    return llm
+    from core.llm_factory import build_llm_client as _build
+    return _build(PROJECT_ROOT / "config.yaml", model=model, temperature=temperature)
 
 
 def _write_log(path: Path, title: str, content: str):
@@ -115,21 +96,19 @@ def main():
 
     # ═══════════════════════════════════════════════════════════════
     # Setup knowledge stores + chain
-    # ═══════════════════════════════════════════════════════════════
     _load_env()
     from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
     from core.tools.registry import ToolRegistry
-    from core.layers import build_chain as _build
-    from scripts.run_leduc_cognitive import _seed_knowledge
+    from core.seed_knowledge import seed_knowledge
 
     phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
     fk = FlexibleKnowledge(PROJECT_ROOT / "data" / "layers" / "knowledge",
                            PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json")
     sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", ToolRegistry())
-    _seed_knowledge(fk, phil, sl)
+    seed_knowledge(fk, phil, sl)
 
     _write_log(env_log, "Knowledge state (pre-learn)",
                f"L1 rules: {len(phil.all_rules())}\n"
