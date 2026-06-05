@@ -116,7 +116,6 @@ class TestLearningEnvReset:
         self, learning_env, sample_pending_records,
     ):
         state = learning_env.reset("learn from leduc games")
-        assert "raise" in state.observation
         assert "game/leduc" in state.observation
 
 
@@ -308,8 +307,7 @@ class TestBuildTaskObservation:
         learning_env.reset("learn from leduc games")
         obs = learning_env.build_task_observation()
         assert obs is not None
-        assert "Objective" in obs.meta
-        assert "Execution Records" in obs.meta
+        assert "game/leduc" in obs.meta
 
     def test_state_has_per_layer_format(self, learning_env,
                                         sample_pending_records):

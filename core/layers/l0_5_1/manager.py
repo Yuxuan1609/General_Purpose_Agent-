@@ -29,7 +29,7 @@ class L1Agent(LayerAgent):
     MAX_LOOPS = 1
 
     STAGE1_SCHEMA = {
-        "query": "string (需要下层根据领域知识完成的任务，可附上基于【行为准则】的完成建议)",
+        "query": "string (需要下层根据领域知识完成的任务。可附上基于【行为准则】的完成建议，给出可直接使用的相关准则整合。注意下层看不到完整的【行为准则】)",
         "domain_nodes": [
             {"name": "string (从领域节点列表中选出的节点路径，如 game/leduc)",
              "score": "float (该节点与当前决策的相关度分数，0.0-1.0)",
@@ -66,28 +66,27 @@ class L1Agent(LayerAgent):
         rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
         return (
-            f"你是 L1 层的认知 Agent。\n\n"
+            f"你是 L1 层的认知 Agent。\n"
+            f"{instruction}\n\n"
             f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
             f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"
             f"{extra}"
-            f"{instruction}"
         )
 
     def _build_user_context(self, state: dict) -> str:
         """Build user prompt body: current state + history (dynamic per-step).
 
-        For learning tasks, current state is already in meta/system prompt,
-        so skip to avoid duplication. Learning context comes from learning_units.
+        For learning tasks, include Execution Records here instead of system prompt.
         """
         current = state.get("current", "")
         history = state.get("history", "")
         is_learning = "l1_output_format" in state
 
         if is_learning:
-            units = state.get("learning_units", [])
-            unit_count = len(units) if isinstance(units, list) else 0
-            return f"[学习数据] {unit_count} 条记录（详见系统提示词）\n\n[对局历史]\n{history or '（无）'}"
+            # Learning data is in state.learning_units, accessible by all layers.
+            # L1's query passes task decomposition, not raw data.
+            return f"[学习数据] 详见 state.learning_units"
         return (
             f"[当前局面]\n{current}\n\n"
             f"[对局历史]\n{history or '（无）'}"
@@ -105,8 +104,11 @@ class L1Agent(LayerAgent):
             for i, n in enumerate(nodes)
         )
         instruction = (
-            "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。"
-            "从领域节点中选出最相关的 1-5 个节点，并给出清晰的语义查询交给 L2 层检索知识卡片。"
+            "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。\n"
+            "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
+            "下层 L2 层的职责：根据你的查询检索相关知识卡片，筛选最相关的卡片并判断是否需要 L3 技能协助。\n"
+            "你的 query 应结合本层的行为准则和任务目标，给出清晰的拆解任务交给 L2 层。\n\n"
+            "从领域节点中选出最相关的 1-5 个节点，输出语义查询。"
             "如果不需要领域知识，返回空的 domain_nodes（[]）。"
         )
         system = self._build_system_prompt(
@@ -118,12 +120,9 @@ class L1Agent(LayerAgent):
         return result
 
     def stage2(self, meta: str, state: dict,
-               l2_cards: list[dict] | None = None,
                l2_result: dict | None = None) -> dict:
         """Stage2: integrate L2 knowledge and produce final decision.
-
-        Accepts L2 results as explicit params (E3: no shared mutable state).
-        Detects learning tasks via state.l1_output_format.
+        Only sees L2's reply + reasoning, not L2's modifications.
         """
         l1_fmt = state.get("l1_output_format")
 
@@ -133,22 +132,22 @@ class L1Agent(LayerAgent):
         )
         system = self._build_system_prompt(instruction, meta)
 
-        cards = l2_cards or []
-        cards_text = "\n".join(
-            f"- [{c.get('domain', '')}] {c.get('content', '')}"
-            for c in cards
-        ) if cards else "（下层未返回信息）"
-
-        user = f"{self._build_user_context(state)}\n\n[下层知识]\n{cards_text}"
+        l2 = l2_result or {}
+        reply = l2.get("reply", "")
+        reasoning = l2.get("reasoning", "")
+        parts = []
+        if reply:
+            parts.append(f"L2回复: {reply}")
+        if reasoning:
+            parts.append(f"L2推理: {reasoning}")
+        response_text = "\n\n".join(parts) if parts else "（下层未返回信息）"
+        user = f"{self._build_user_context(state)}\n\n[下层任务返回]\n{response_text}"
 
         schema = self.STAGE2_SCHEMA
         if l1_fmt:
             schema = {**schema, **self._L1_MOD_SCHEMA}
         result = self._call_llm(system, user, schema=schema)
 
-        # NOTIFY enrichment: rules actually used (from LLM)
-        l2 = l2_result or {}
-        result["l2_reply"] = str(l2.get("reply", ""))[:300]
         return result
 
 
@@ -202,7 +201,8 @@ class L0_5_1Manager(LayerManager):
             for n in selected_nodes:
                 logger.debug("    node: %s (score=%s)", n.get("name"), n.get("score"))
 
-            if self._downstream:
+            need_l2 = bool(selected_nodes) or bool(query_text)
+            if self._downstream and need_l2:
                 # E3: pass data via LayerMessage payload, not obs.state mutation
                 q_msg = self._downward.wrap_query(
                     payload={"obs": obs, "query": query_text,
@@ -212,13 +212,15 @@ class L0_5_1Manager(LayerManager):
                 )
                 self._downstream.query(q_msg, trace_id)
 
-            # E3: read L2 results from downstream manager, not from obs.state
-            l2_cards = getattr(self._downstream, '_cards', []) if self._downstream else []
-            l2_result = self._downstream._result if self._downstream else {}
+            # E3: read L2 results only if L2 was queried
+            if need_l2:
+                l2_result = self._downstream._result if self._downstream else {}
+            else:
+                l2_result = {}
 
             logger.debug("── L1 Stage 2 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
             result = self._agent.stage2(meta, obs.state,
-                                        l2_cards=l2_cards, l2_result=l2_result)
+                                        l2_result=l2_result)
             logger.debug("  result: done=%s result=%s",
                          result.get("done"), str(result.get("result", ""))[:200])
 

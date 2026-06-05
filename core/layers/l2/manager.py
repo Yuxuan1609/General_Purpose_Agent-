@@ -33,9 +33,9 @@ L2_DOMAIN_NODES = [
     {
         "name": "learning/reflect",
         "description": (
-            "学习反思域。消费 GameEnv 产出的 ExecutionRecord，分析对局中的策略问题，"
-            "识别失败模式和成功模式，提出 L1 行为准则修改建议和 L2 知识卡片增删改建议。"
-            "子域包括 learning/compile（卡片→技能编译）和 learning/verify（验证学习效果）。"
+            "学习反思域。消费执行记录，分析策略问题、成功/失败模式，"
+            "基于工作反馈提出各层知识改进建议。"
+            "子域包括 learning/compile 和 learning/verify。"
         ),
     },
 ]
@@ -63,17 +63,12 @@ class L2Agent(LayerAgent):
     MAX_CARDS = 15
 
     STAGE1_SCHEMA = {
-        "nodes": [
-            {"name": "string (domain path)", "score": "float (0-1)", "reason": "string"}
-        ]
-    }
-    STAGE2_SCHEMA = {
         "cards": ["string (筛选后的卡片内容)"],
         "call_l3": "boolean",
         "l3_task": "string (需要L3执行的任务，call_l3=false时可为空)",
         "reasoning": "string (推理过程)",
     }
-    STAGE3_SCHEMA = {
+    STAGE2_SCHEMA = {
         "reply": "string (对【上层查询】的最终回复)",
         "cards": ["string (精选知识卡片内容)"],
         "reasoning": "string (综合推理过程)",
@@ -98,52 +93,48 @@ class L2Agent(LayerAgent):
         self._knowledge = knowledge
         self._nodes = domain_nodes or L2_DOMAIN_NODES
 
-    def stage1(self, query: str, meta: str, state: dict) -> list[dict]:
-        current = state.get("current", "")
-        nodes_text = "\n".join(
-            f"{i + 1}. {n['name']}\n   {n['description']}"
-            for i, n in enumerate(self._nodes)
+    def _build_system_prompt(self, instruction: str, meta: str,
+                              static_context: str = "") -> str:
+        extra = f"\n{static_context}\n" if static_context else ""
+        return (
+            f"你是 L2 层的认知 Agent。\n"
+            f"{instruction}\n\n"
+            f"[Meta]\n{meta}\n"
+            f"{extra}"
         )
-        system = (
-            "你是 L2 层的认知 Agent，负责知识检索。\n"
-            "根据上层查询，从领域节点中选出最相关的 1-5 个节点，给出名称、相关度分数和选择理由。\n\n"
-            f"[Meta]\n{meta}"
-        )
-        user = (
-            f"[上层查询]\n{query}\n\n"
-            f"[当前局面]\n{current}\n\n"
-            f"[领域节点]\n{nodes_text}"
-        )
-        result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
-        return result.get("nodes", [])
 
-    def stage2(self, query: str, meta: str, state: dict,
+    def stage1(self, query: str, meta: str, state: dict,
                selected_nodes: list[dict]) -> dict:
+        """Decompose: filter cards from selected nodes, decide L3 delegation.
+
+        Lower layer: L3 — matches and executes skills per L2's task description.
+        """
         cards = self._get_cards_for_nodes(selected_nodes)
         node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
         cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
 
         current = state.get("current", "")
-        system = (
-            "你是 L2 层的认知 Agent，负责知识筛选和下层调度。\n"
-            "你的职责：根据上层拆解的任务，从【知识卡片】中筛选最相关的卡片（最多15张），"
-            "并判断是否需要 L3 层技能执行具体操作。如需 L3，明确下发给 L3 的任务。\n\n"
-            f"[Meta]\n{meta}"
+        instruction = (
+            "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
+            "你的局部任务是思考：核心任务怎么完成、还差什么要素、"
+            "缺失要素能否由 L3 提供。需要 L3 则输出具体 l3_task，"
+            "不需要则 call_l3=false。\n"
+            "注意你负责任务的部分执行和拆解下发，不做最终决策。"
         )
+        system = self._build_system_prompt(instruction, meta)
         user = (
             f"[上层查询]\n{query}\n\n"
             f"[当前局面]\n{current}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         )
-        return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
+        return self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
 
-    def stage3(self, query: str, meta: str, state: dict,
-               selected_nodes: list[dict], stage2_result: dict,
-               l3_skills: list[dict] | None = None) -> dict:
-        """Final NOTIFY: integrate L3 response + all prior context.
-
-        E3: l3_skills passed explicitly, not read from shared mutable state.
-        Detects learning tasks via state.l2_output_format.
+    def stage2(self, query: str, meta: str, state: dict,
+               selected_nodes: list[dict], stage1_result: dict,
+               l3_skills: list[dict] | None = None,
+               l3_result: dict | None = None) -> dict:
+        """Integrate: combine cards + L3 skills → final NOTIFY reply.
+        Only sees L3's result + reasoning, not L3's modifications.
         """
         l2_fmt = state.get("l2_output_format")
 
@@ -152,27 +143,33 @@ class L2Agent(LayerAgent):
         cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
 
         skills = l3_skills or []
-        skills_text = "\n".join(
-            f"[{s.get('name', '')}] {s.get('content', '')}"
-            for s in skills
-        ) if skills else "（L3 未返回信息）"
+        l3 = l3_result or {}
+        l3_reply = l3.get("result", "")
+        l3_reasoning = l3.get("reasoning", "")
+        parts = []
+        if l3_reply:
+            parts.append(f"L3执行结果: {l3_reply}")
+        if l3_reasoning:
+            parts.append(f"L3推理: {l3_reasoning}")
+        if skills:
+            skill_names = ", ".join(s.get("name", "") for s in skills)
+            parts.append(f"可用技能: {skill_names}")
+        l3_text = "\n".join(parts) if parts else "（L3 未返回信息）"
 
-        system = (
-            "你是 L2 层的认知 Agent，负责最终知识整合与任务执行。\n"
+        instruction = (
             "你的职责：基于上层拆解的任务和筛选出的知识卡片，整合 L3 返回的执行结果，"
-            "给出最终答复。以下 Meta 仅为辅助上下文。\n\n"
-            f"[Meta]\n{meta}"
+            "给出最终答复。"
         )
+        system = self._build_system_prompt(instruction, meta)
 
-        # User context: for learning tasks, skip current (already in meta)
         if l2_fmt:
             user = (
                 f"[上层查询]\n{query}\n\n"
                 f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
-                f"[L3 技能]\n{skills_text}\n\n"
-                f"[Stage2 分析]\n"
-                f"call_l3: {stage2_result.get('call_l3', False)}\n"
-                f"reasoning: {stage2_result.get('reasoning', '')}"
+                f"[L3 返回]\n{l3_text}\n\n"
+                f"[Stage1 决策]\n"
+                f"call_l3: {stage1_result.get('call_l3', False)}\n"
+                f"l3_task: {stage1_result.get('l3_task', '')}"
             )
         else:
             current = state.get("current", "")
@@ -180,13 +177,10 @@ class L2Agent(LayerAgent):
                 f"[上层查询]\n{query}\n\n"
                 f"[当前局面]\n{current}\n\n"
                 f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
-                f"[L3 技能]\n{skills_text}\n\n"
-                f"[Stage2 分析]\n"
-                f"call_l3: {stage2_result.get('call_l3', False)}\n"
-                f"reasoning: {stage2_result.get('reasoning', '')}"
+                f"[L3 返回]\n{l3_text}"
             )
 
-        schema = self.STAGE3_SCHEMA
+        schema = self.STAGE2_SCHEMA
         if l2_fmt:
             schema = {**schema, **self._L2_MOD_SCHEMA}
         return self._call_llm(system, user, schema=schema)
@@ -264,44 +258,34 @@ class L2Manager(LayerManager):
             self._propagate(obs, trace_id)
             return
 
-        # ═══ Stage 1: Node Selection ═══
-        # Phase 2a: L1 supplies selected_nodes. Fallback if empty.
-        if not selected_nodes:
-            logger.debug("  ═══ L2 Stage 1 — Node Selection (fallback) ═══")
-            selected_nodes = self._agent.stage1(query, meta, obs.state)
-            logger.debug("  ── Stage 1 结果 ──")
-            for n in selected_nodes:
-                logger.debug("    %s (score=%s)", n.get("name"), n.get("score"))
-        else:
-            logger.debug("  L2 Stage 1: using L1-selected nodes (%d)", len(selected_nodes))
-            for n in selected_nodes:
-                logger.debug("    %s (score=%s)", n.get("name"), n.get("score"))
-        logger.debug("")
-
-        # ═══ Stage 2: Card Filter + L3 Decision ═══
-        logger.debug("  ═══ L2 Stage 2 — Card Filter ═══")
-        stage2_result = self._agent.stage2(query, meta, obs.state, selected_nodes)
-        logger.debug("  ── Stage 2 结果 ──")
-        logger.debug("    call_l3: %s", stage2_result.get("call_l3"))
-        logger.debug("    cards: %d 张", len(stage2_result.get("cards", [])))
+        # ═══ Stage 1: Card Filter + L3 Decision (Decompose) ═══
+        logger.debug("  ═══ L2 Stage 1 — Card Filter ═══")
+        stage1_result = self._agent.stage1(query, meta, obs.state, selected_nodes)
+        logger.debug("  ── Stage 1 结果 ──")
+        logger.debug("    call_l3: %s", stage1_result.get("call_l3"))
+        logger.debug("    cards: %d 张", len(stage1_result.get("cards", [])))
         logger.debug("    l3_task: %s",
-                     str(stage2_result.get("l3_task", ""))[:120])
+                     str(stage1_result.get("l3_task", ""))[:120])
         logger.debug("")
 
         # E3: store cards locally, not in obs.state
         self._cards = self._build_cards(selected_nodes)
 
-        # Propagate to L3
-        self._propagate(obs, trace_id)
+        # Propagate to L3 only when needed
+        call_l3 = stage1_result.get("call_l3", False)
+        if call_l3:
+            self._propagate(obs, trace_id)
 
         # E3: L3 skills from downstream manager, not obs.state
-        l3_skills = getattr(self._downstream, '_matched_skills', []) if self._downstream else []
+        l3_skills = getattr(self._downstream, '_matched_skills', []) if (self._downstream and call_l3) else []
+        l3_result = self._downstream._result if (self._downstream and call_l3) else {}
 
-        # ═══ Stage 3: Notify — integrate L3 + final reply ═══
-        logger.debug("  ═══ L2 Stage 3 — Notify ═══")
-        final = self._agent.stage3(query, meta, obs.state, selected_nodes,
-                                    stage2_result, l3_skills=l3_skills)
-        logger.debug("  ── Stage 3 结果 ──")
+        # ═══ Stage 2: Notify — integrate L3 + final reply (Integrate) ═══
+        logger.debug("  ═══ L2 Stage 2 — Notify ═══")
+        final = self._agent.stage2(query, meta, obs.state, selected_nodes,
+                                    stage1_result, l3_skills=l3_skills,
+                                    l3_result=l3_result)
+        logger.debug("  ── Stage 2 结果 ──")
         logger.debug("    reply: %s", str(final.get("reply", ""))[:200])
         logger.debug("    cards: %d 张", len(final.get("cards", [])))
         logger.debug("    reasoning: %s", str(final.get("reasoning", ""))[:200])

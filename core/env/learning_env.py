@@ -88,6 +88,7 @@ class LearningEnv(Environment):
         self._l3_limit = l3_skill_limit
 
         self._pending_records: list[dict] = []
+        self._enriched_units: list[dict] = []
         self._step_count: int = 0
         self._done: bool = False
         self._current_observation: str = ""
@@ -114,6 +115,7 @@ class LearningEnv(Environment):
         obs_text = self._format_observation(learning_units, domain)
 
         self._current_observation = obs_text
+        self._enriched_units = learning_units  # for build_task_observation
         return EnvState(observation=obs_text)
 
     def step(self, action: str) -> EnvStep:
@@ -150,12 +152,15 @@ class LearningEnv(Environment):
         if not self._current_observation:
             return None
 
+        # Per-layer design: each layer reads state.learning_units directly.
+        # L1's query to L2 carries task decomposition, not raw data.
+        # L2's l3_task to L3 carries operation description, not raw data.
         return TaskObservation(
             meta=self._current_observation,
             state={
                 "current": self._current_observation,
                 "history": "",
-                "learning_units": self._pending_records,
+                "learning_units": getattr(self, '_enriched_units', self._pending_records),
                 "l1_output_format": _L1_OUTPUT,
                 "l2_output_format": _L2_OUTPUT,
                 "l3_output_format": _L3_OUTPUT,
@@ -306,7 +311,7 @@ class LearningEnv(Environment):
         payload = modification.get("payload", {})
 
         if "/" not in target:
-            raise ValueError(f"Invalid target format: {target}")
+            target = f"{layer}/{target}"
         layer_prefix, key = target.split("/", 1)
         if layer_prefix != layer:
             raise ValueError(f"Target layer '{layer_prefix}' != mod layer '{layer}'")
@@ -524,33 +529,10 @@ class LearningEnv(Environment):
         return units
 
     def _format_observation(self, units: list[dict], domain: str) -> str:
-        lines = [
-            "## Objective",
-            f"从以下 {len(units)} 条 {domain} 执行记录中提取可改进的策略。"
-            f"同时思考你的 learning strategy 是否需要改善。",
-            "",
-            "## Execution Records",
-        ]
-        for unit in units:
-            l1_r = unit.get("l1_reasoning", "")
-            l2_r = unit.get("l2_reasoning", "")
-            l3_r = unit.get("l3_reasoning", "")
-            per_layer = []
-            if l1_r:
-                per_layer.append(f"L1: {l1_r[:80]}")
-            if l2_r:
-                per_layer.append(f"L2: {l2_r[:80]}")
-            if l3_r:
-                per_layer.append(f"L3: {l3_r[:80]}")
-            line = (
-                f"[{unit['index'] + 1}/{len(units)}] "
-                f"action={unit['action']} result={unit['result']} "
-                f"| {unit['reasoning'][:120]}"
-            )
-            if per_layer:
-                line += f"\n  | " + " | ".join(per_layer)
-            lines.append(line)
-        return "\n".join(lines)
+        return (
+            f"从以下 {len(units)} 条 {domain} 执行记录中分析策略缺陷和改进机会。"
+            f"同时反思本次学习策略是否有效。"
+        )
 
     # ── utilities ────────────────────────────────────────────────────────
 

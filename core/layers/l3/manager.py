@@ -57,13 +57,15 @@ class L3Agent(LayerAgent):
     def __init__(self, llm_client):
         super().__init__(llm_client, logger)
 
+    def _build_system_prompt(self, instruction: str, meta: str) -> str:
+        return (
+            f"你是 L3 层的认知 Agent。\n"
+            f"{instruction}\n\n"
+            f"[Meta]\n{meta}"
+        )
+
     def execute(self, meta: str, state: dict,
                 matched_skills: list[dict] | None = None) -> dict:
-        """Analyze matched skills and produce execution result.
-
-        E3: matched_skills passed explicitly, not read from shared mutable state.
-        Detects learning tasks via state.l3_output_format.
-        """
         l3_fmt = state.get("l3_output_format") if state else None
 
         current = state.get("current", "") if state else ""
@@ -74,14 +76,11 @@ class L3Agent(LayerAgent):
             for s in skills
         ) if skills else "（无匹配技能）"
 
-        system = (
-            "你是 L3 层的认知 Agent，负责任务执行。\n"
-            "你的职责：根据 L2 下发的具体操作要求，选择相关的技能并基于技能内容执行任务。\n"
-            "Meta 字段仅为辅助理解局面的上下文。"
+        instruction = (
+            "你的职责：根据 L2 下发的具体操作要求，选择相关的技能并基于技能内容执行任务。"
         )
-
+        system = self._build_system_prompt(instruction, meta)
         user = (
-            f"[Meta]\n{meta}\n\n"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
@@ -174,19 +173,9 @@ class L3Manager(LayerManager):
 
     def notify(self) -> Any:
         if self._result:
-            used_names = self._result.get("skills_used", [])
-            skills_detail = []
-            for name in used_names:
-                for s in self._matched_skills:
-                    if s.get("name") == name:
-                        skills_detail.append({
-                            "name": name,
-                            "content": _strip_frontmatter(s.get("content", ""))[:200],
-                        })
-                        break
             return {
                 "skills_matched": len(self._matched),
-                "skills_used": skills_detail,
+                "skills_used": self._result.get("skills_used", []),
                 "result": self._result.get("result", ""),
                 "reasoning": self._result.get("reasoning", ""),
             }
@@ -194,7 +183,6 @@ class L3Manager(LayerManager):
             "status": "ok",
             "layer": "l3",
             "skills_matched": len(self._matched),
-            "skills_used": self._matched[:5],
         }
 
     def apply_update(self, key: str, value: Any) -> None:

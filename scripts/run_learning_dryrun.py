@@ -87,8 +87,7 @@ def main():
     for noisy in ("httpx", "httpcore", "openai", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     for lg_name, fn in [("l0_5_1", "l0_5_1"), ("l2", "l2"),
-                         ("l3", "l3"), ("core.executor", "executor"),
-                         ("core.env.learning_env", "learning_env")]:
+                         ("l3", "l3"), ("core.executor", "executor")]:
         lg = logging.getLogger(lg_name)
         lg.setLevel(logging.DEBUG)
         lg.propagate = False
