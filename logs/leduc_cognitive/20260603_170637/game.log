@@ -1,4 +1,0 @@
-2026-06-03 17:06:37,164 | Config: episodes=1 temperature=0.1 log=C:\Users\micha\PycharmProjects\cognitive-agent\logs\leduc_cognitive\20260603_170637
-2026-06-03 17:06:38,074 | Seeded: L1 rules=3 L2 cards=5 L3 skills=3
-2026-06-03 17:06:40,155 | === Episode 1 ===
-2026-06-03 17:06:40,156 |   Step 0 | hand=HK public=None legal=['call', 'raise', 'fold'] → call

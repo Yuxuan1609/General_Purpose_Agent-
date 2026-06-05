@@ -12,8 +12,9 @@ class TaskObservation:
                  Populated by comm layer.
         state:   Task-specific state. Keys: "current" (str, current situation),
                  "history" (str, past context). Populated by comm layer.
-        session: Session context {id, domain, step_index, ...}.
+        session: Session context {id, domain, step_index, ..., domains?: list[str]}.
                  Populated by comm layer. Used by learning pipeline.
+                 `domains` (optional) enables multi-domain activation for L2 stage1.
     """
     meta: str = ""
     state: dict = field(default_factory=dict)

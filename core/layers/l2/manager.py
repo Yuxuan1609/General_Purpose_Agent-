@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import logging
 from typing import Any
 from core.task import Domain
@@ -8,15 +9,6 @@ from core.layers.comm import AgentPacket
 from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l2")
-
-
-def _strip_skill_frontmatter(content: str) -> str:
-    """Remove YAML frontmatter (--- ... ---) from skill content text."""
-    if content.startswith("---"):
-        parts = content.split("---", 2)
-        if len(parts) >= 3:
-            return parts[2].lstrip("\n")
-    return content
 
 # Domain nodes — manually seeded. Each node represents a semantic domain
 # with name (matching L2 card domain path) and a ~100-char description.
@@ -36,6 +28,14 @@ L2_DOMAIN_NODES = [
         "description": (
             "斗地主3人卡牌游戏，54张牌含大小王，1地主vs2农民。牌型包括单张、对子、"
             "三张、顺子、连对、飞机、炸弹、火箭。地主先出牌，农民配合顶牌，先出完胜。"
+        ),
+    },
+    {
+        "name": "learning/reflect",
+        "description": (
+            "学习反思域。消费 GameEnv 产出的 ExecutionRecord，分析对局中的策略问题，"
+            "识别失败模式和成功模式，提出 L1 行为准则修改建议和 L2 知识卡片增删改建议。"
+            "子域包括 learning/compile（卡片→技能编译）和 learning/verify（验证学习效果）。"
         ),
     },
 ]
@@ -79,6 +79,20 @@ class L2Agent(LayerAgent):
         "reasoning": "string (综合推理过程)",
     }
 
+    # Learning task extension
+    _L2_MOD_SCHEMA = {
+        "l2_modifications": [
+            {"target": "l2/<card_id> (existing id for update/deprecate; new id for create)",
+             "type": "update | create | deprecate",
+             "payload": {
+                 "content": "string (full card content, matching KnowledgeCard granularity: domain-specific strategy tip)",
+                 "reason": "string (why)",
+                 "domain": "string (for create, e.g. game/leduc)",
+                 "confidence": "float 0.1-1.0 (for create, default 0.5)",
+             }},
+        ],
+    }
+
     def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None):
         super().__init__(llm_client, logger)
         self._knowledge = knowledge
@@ -112,8 +126,8 @@ class L2Agent(LayerAgent):
         current = state.get("current", "")
         system = (
             "你是 L2 层的认知 Agent，负责知识筛选和下层调度。\n"
-            "你需要理解上层查询的任务意图，根据知识卡片筛选最相关的卡片（最多15张），"
-            "并提出需要 L3 层协助的任务。L3 提供的是具体的操作流程和执行建议。\n\n"
+            "你的职责：根据上层拆解的任务，从【知识卡片】中筛选最相关的卡片（最多15张），"
+            "并判断是否需要 L3 层技能执行具体操作。如需 L3，明确下发给 L3 的任务。\n\n"
             f"[Meta]\n{meta}"
         )
         user = (
@@ -122,7 +136,6 @@ class L2Agent(LayerAgent):
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         )
         return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
-        return self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
 
     def stage3(self, query: str, meta: str, state: dict,
                selected_nodes: list[dict], stage2_result: dict,
@@ -130,12 +143,14 @@ class L2Agent(LayerAgent):
         """Final NOTIFY: integrate L3 response + all prior context.
 
         E3: l3_skills passed explicitly, not read from shared mutable state.
+        Detects learning tasks via state.l2_output_format.
         """
+        l2_fmt = state.get("l2_output_format")
+
         cards = self._get_cards_for_nodes(selected_nodes)
         node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
         cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
 
-        current = state.get("current", "")
         skills = l3_skills or []
         skills_text = "\n".join(
             f"[{s.get('name', '')}] {s.get('content', '')}"
@@ -143,21 +158,38 @@ class L2Agent(LayerAgent):
         ) if skills else "（L3 未返回信息）"
 
         system = (
-            "你是 L2 层的认知 Agent，负责最终知识整合与回复。\n"
-            "整合上层查询、知识卡片和 L3 层技能，执行上层查询中下发给你的任务。\n"
-            "以下 Meta 仅为辅助理解当前局面的上下文，不是你的执行任务。\n\n"
+            "你是 L2 层的认知 Agent，负责最终知识整合与任务执行。\n"
+            "你的职责：基于上层拆解的任务和筛选出的知识卡片，整合 L3 返回的执行结果，"
+            "给出最终答复。以下 Meta 仅为辅助上下文。\n\n"
             f"[Meta]\n{meta}"
         )
-        user = (
-            f"[上层查询]\n{query}\n\n"
-            f"[当前局面]\n{current}\n\n"
-            f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
-            f"[L3 技能]\n{skills_text}\n\n"
-            f"[Stage2 分析]\n"
-            f"call_l3: {stage2_result.get('call_l3', False)}\n"
-            f"reasoning: {stage2_result.get('reasoning', '')}"
-        )
-        return self._call_llm(system, user, schema=self.STAGE3_SCHEMA)
+
+        # User context: for learning tasks, skip current (already in meta)
+        if l2_fmt:
+            user = (
+                f"[上层查询]\n{query}\n\n"
+                f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
+                f"[L3 技能]\n{skills_text}\n\n"
+                f"[Stage2 分析]\n"
+                f"call_l3: {stage2_result.get('call_l3', False)}\n"
+                f"reasoning: {stage2_result.get('reasoning', '')}"
+            )
+        else:
+            current = state.get("current", "")
+            user = (
+                f"[上层查询]\n{query}\n\n"
+                f"[当前局面]\n{current}\n\n"
+                f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
+                f"[L3 技能]\n{skills_text}\n\n"
+                f"[Stage2 分析]\n"
+                f"call_l3: {stage2_result.get('call_l3', False)}\n"
+                f"reasoning: {stage2_result.get('reasoning', '')}"
+            )
+
+        schema = self.STAGE3_SCHEMA
+        if l2_fmt:
+            schema = {**schema, **self._L2_MOD_SCHEMA}
+        return self._call_llm(system, user, schema=schema)
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
         all_cards = []
@@ -275,16 +307,9 @@ class L2Manager(LayerManager):
         logger.debug("    reasoning: %s", str(final.get("reasoning", ""))[:200])
         logger.debug("")
 
-        # NOTIFY enrichment: cards_used as summary, L3 skills with content excerpts
+        # NOTIFY enrichment: cards_used as summary
         cards = final.pop("cards", [])  # remove full cards from notify
         final["cards_used"] = [str(c)[:100] for c in cards[:5]]
-        final["l3_received"] = {
-            "skills": [
-                {"name": s.get("name", ""),
-                 "content": _strip_skill_frontmatter(s.get("content", ""))[:200]}
-                for s in l3_skills[:5]
-            ],
-        }
 
         self._result = final
 

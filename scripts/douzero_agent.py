@@ -109,6 +109,27 @@ def _parse_card_tokens(text: str) -> list[int]:
 # DouZeroLLMAgent
 # ═══════════════════════════════════════════════════════════════
 
+DOUDIZHU_GAME_RULES = """牌面大小：3<4<5<6<7<8<9<10<J<Q<K<A<2<小王(X)<大王(D)
+
+牌型（必须严格按类型出牌）：
+- 单张：1张牌
+- 对子：2张相同牌
+- 三张：3张相同牌
+- 三带一：3张相同牌+1张任意牌
+- 三带二：3张相同牌+1个对子
+- 顺子：≥5张连续牌（3-A之间，不含2和大小王）
+- 连对：≥3个连续对子（如334455）
+- 飞机：≥2个连续三张，可带等量单张或对子（如33344456）
+- 炸弹：4张相同牌（可管任何牌型）
+- 火箭：小王+大王（XD），最大牌型，可管一切
+
+出牌规则：
+- 必须出牌型相同且更大的牌（炸弹/火箭除外）
+- 可以选择"不出"（跳过本轮）
+- 新一回合你是先手时可自由出牌
+
+回复要求：只输出"不出"或牌面字符串，不要解释。"""
+
 _SYSTEM_PROMPT_TEMPLATE = """你正在玩斗地主。你的身份是{position_cn}。
 
 牌面大小：3<4<5<6<7<8<9<10<J<Q<K<A<2<小王(X)<大王(D)
@@ -371,7 +392,7 @@ class DouZeroCognitiveAgent:
             return infoset.legal_actions[0]
 
         obs = TaskObservation(
-            meta=_SYSTEM_PROMPT_TEMPLATE.format(position_cn=self._position_cn),
+            meta=DOUDIZHU_GAME_RULES,
             state=self._build_state(infoset),
             session={"domain": "game/doudizhu", "role": self._position_cn},
         )

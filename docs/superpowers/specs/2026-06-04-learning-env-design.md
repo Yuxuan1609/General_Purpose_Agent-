@@ -246,18 +246,81 @@ L3 技能: 3 个 (leduc-preflop-raise, leduc-postflop-pair, leduc-fold)
 }
 ```
 
+## Environment ↔ Agent 职责边界
+
+> 每个 Environment 自带通信层，**输出格式由通信层在 `meta` 字段中注入**。Agent（Executor + Layers）不感知背后是什么环境，只读 `meta` 中的格式约束并按格式输出。
+
+```
+┌─ Environment（含通信层）─────────────────────┐
+│                                              │
+│  ① 构建 TaskObservation                      │
+│     meta = "任务目标 + 输出格式约束"           │
+│     state = {当前观测, 历史, ...}              │
+│     session = {domain, domains, ...}         │
+│                                              │
+│  ② 发送给 Agent ──────────────────────┐       │
+│                                       │       │
+└───────────────────────────────────────┼───────┘
+                                        ▼
+┌─ Agent（Executor + Layers）──────────────┐
+│                                          │
+│  ③ 层链推理（L1→L2→L3）                  │
+│     按 meta 里的格式约束输出               │
+│                                          │
+│  ④ 返回 NOTIFY / action ──────────┐      │
+│                                    │      │
+└────────────────────────────────────┼──────┘
+                                     ▼
+┌─ Environment ──────────────────────────────┐
+│                                            │
+│  ⑤ env.step(Agent输出)                     │
+│     GameEnv: 直接执行结构化 action          │
+│     LearningEnv: 解析 NOTIFY → 执行修改    │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+| 谁 | 做什么 | 决定什么 |
+|----|--------|---------|
+| **Environment + 通信层** | 构建 TaskObservation，在 `meta` 中注入输出格式 | 输出格式 schema、任务目标描述 |
+| **Agent（Executor + Layers）** | 读 `meta` 中的格式约束，层链推理，按格式输出 | 推理结果、策略决策、修改建议内容 |
+| **Environment（step）** | 消费 Agent 输出，执行环境逻辑 | 是否终止、reward 计算 |
+
+**LearningEnv 通信层注入的 meta 格式（示意）**：
+```
+meta: |
+  ## 任务
+  从以下 N 条执行记录中分析可改进的策略。
+
+  ## 输出格式
+  请以 JSON 格式返回，结构如下：
+  {
+    "analysis": "整体分析",
+    "modifications": [
+      {
+        "target": "l1/rule_id | l2/card_id | l3/skill_name",
+        "type": "update | create | deprecate",
+        "payload": {
+          "content": "修改后的内容",
+          "reason": "原因"
+        }
+      }
+    ]
+  }
+```
+
+Agent 不硬编码任何输出 schema——所有格式约束来自 `meta`。
+
 ## 与 Executor + Layers 的集成
 
-**核心流程**：LearningEnv ≠ GameEnv。GameEnv 的 `step()` 拿结构化 action（"加注"/"出牌"）直接执行，LearningEnv 的 `step()` 拿到的是一段自然语言 NOTIFY。
-
-Agent 通过 NOTIFY 返回分析结果（天然包含游戏推理 + 学习建议），LearningEnv 需要先**解析**才能执行修改。这是 LearningEnv 内部的第二个 LLM 调用点。
+**核心流程**：LearningEnv ≠ GameEnv。GameEnv 的 `step()` 拿 Agent 按 `meta` 格式输出的结构化 action（"加注"/"出牌"）直接执行；LearningEnv 的 `step()` 拿到的是 Agent 按 `meta` 格式输出的修改建议 JSON。LearningEnv 解析后执行修改。
 
 ```
 Agent (via Executor + Layers)
         │
-        ▼ NOTIFY（自然语言，包含分析 + 修改建议）
-LearningEnv._parse_NOTIFY(notify_text)
-        │  ↑ 可能需要一次 LLM 调用（LLM₂）
+        ▼ 按 meta 格式输出的 JSON（含 modifications 数组）
+LearningEnv._parse_action(json_text)
+        │
         ▼
 structured modifications [{target, type, payload}, ...]
         │
@@ -270,16 +333,19 @@ knowledge store (L1/L2/L3)
 
 **LearningEnv 内部的两个 LLM 调用点**：
 1. **LLM₁（预处理）**：raw Session → LearningUnit，发给 Agent 之前做数据整理
-2. **LLM₂（解析）**：NOTIFY 文本 → structured modifications，Agent 返回后执行前做结构化提取
+2. **LLM₂（解析）**：NOTIFY 文本 → structured modifications（当 Agent 输出不是纯 JSON 时的 fallback）
 
-Executor 不需要额外处理 RESPONSE 这一路——LearningEnv 直接从 NOTIFY 里解析。
+> Phase 2.1 实现更新：`_parse_action()` 优先尝试 JSON 解析（Agent 按 meta 格式输出），失败时回退到 LLM₂ 解析。`build_task_observation()` 负责在 `meta` 中注入输出格式约束。
+
+Executor 不需要额外处理 RESPONSE 这一路——LearningEnv 直接从 Agent 输出中解析。
 
 | | GameEnv | LearningEnv |
 |---|---|---|
-| Agent 输出 | 结构化 action | 自然语言 NOTIFY |
-| env.step() | 确定性执行 | 先解析（LLM₂）→ 再执行 |
-| 通信层 | 斗地主/简化的通信层 | LearningEnv 自己的通信层 |
-| meta 注入 | "请返回 {action: ...}" | "请返回分析 + 修改建议，格式如下..." |
+| Agent 输出 | 结构化 action（按 meta 格式） | 结构化 JSON（按 meta 格式） |
+| env.step() | 确定性执行 | 解析 → 执行 |
+| 通信层 | 斗地主/简化的通信层 | LearningEnv 内建通信层 |
+| meta 注入 | "请返回 {action: ...}" | "请返回 {modifications: [...]}" |
+| fallback 解析 | 不需要（action 是简单字符串） | LLM₂ 解析非标准格式输出 |
 
 ## 与现有代码的关系
 

@@ -72,7 +72,9 @@ class LeducCognitiveAgent:
             session={
                 "id": self._session_id,
                 "domain": "game/leduc",
+                "domains_hint": ["game/leduc"],
                 "step_index": self._step,
+                "enable_learning": True,
             } if self._session_id else None,
         )
 

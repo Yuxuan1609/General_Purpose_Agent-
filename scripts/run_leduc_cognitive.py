@@ -203,6 +203,61 @@ def _seed_l3_skills(sl):
             pass
 
 
+def _run_learning_cycle(log_dir, llm_client, chain, executor,
+                        pending_dir, phil, fk, sl, pre_win_rate=0.0):
+    """Phase 2.2: run learning env cycle after game batch."""
+    from core.env.learning_env import LearningEnv
+    from core.orchestrator.threshold_scorer import ThresholdScorer
+    import json
+
+    logger.info("")
+    logger.info("=" * 55)
+    logger.info("  Learning cycle triggered")
+    logger.info("=" * 55)
+
+    knowledge = {"l1": phil, "l2": fk, "l3": sl}
+    stats_file = PROJECT_ROOT / "data" / "learning" / "learning_stats.json"
+    lenv = LearningEnv(pending_dir, knowledge,
+                       preprocessing_llm=llm_client,
+                       stats_file=stats_file)
+
+    # Step 1: reset -> build observation
+    state = lenv.reset("learn from recent leduc games")
+    if not state.observation:
+        logger.info("No pending records to learn from")
+        return
+
+    # Step 2: build TaskObservation for Agent
+    obs = lenv.build_task_observation()
+    if obs is None:
+        logger.warning("Failed to build learning task observation")
+        return
+
+    logger.info("Learning task: %d chars meta, %d records pending",
+                len(obs.meta), len(obs.state.get("learning_units", [])))
+
+    # Step 3: Agent processes via Executor + Layers
+    logger.info("Dispatching learning task to Agent...")
+    result = executor.execute(obs)
+    notify_layers = result.get("notify_layers", {})
+
+    # Step 4: LearningEnv applies the modifications
+    action_json = json.dumps(notify_layers, ensure_ascii=False, default=str)
+    step = lenv.step(action_json)
+
+    logger.info("Learning step result: %s", step.state.observation)
+    logger.info("Reward: %.1f, Done: %s", step.reward, step.done)
+
+    # Step 5: Archive consumed pending records
+    moved = lenv.archive_pending()
+    logger.info("Archived %d pending files -> learned/", moved)
+
+    # Step 6: Print knowledge change summary
+    rules = phil.all_rules()
+    logger.info("Post-learn: L1 rules=%d L2 cards=%d L3 skills=%d",
+                len(rules), len(fk.cards), len(sl.list_all()))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Leduc Cognitive Agent")
     parser.add_argument("--episodes", type=int, default=3, help="对局数 (default: 3)")
@@ -254,7 +309,7 @@ def main():
                 legal = raw["legal_actions"]
                 action_idx = action_id if isinstance(action_id, int) else 0
                 action_label = legal[action_idx] if action_idx < len(legal) else "?"
-                logger.info("  Step %d | hand=%s public=%s legal=%s → %s",
+                logger.info("  Step %d | hand=%s public=%s legal=%s -> %s",
                            step, raw.get("hand"), raw.get("public_card"),
                            legal, action_label)
 
@@ -277,7 +332,7 @@ def main():
     summary = [
         "",
         "=" * 55,
-        "  Leduc Hold'em — Cognitive Agent Results",
+        "  Leduc Hold'em -- Cognitive Agent Results",
         "=" * 55,
         f"  Episodes:    {args.episodes}",
         f"  Total Score: {total_reward:+.1f} chips",
@@ -290,6 +345,17 @@ def main():
     for line in summary:
         print(line)
         logger.info(line)
+
+    # ── Phase 2.2: Learning cycle ────────────────────────────────────
+    from core.orchestrator.threshold_scorer import ThresholdScorer
+    pending_dir = PROJECT_ROOT / "data" / "learning" / "pending"
+    scorer = ThresholdScorer(pending_dir)
+    if scorer.should_trigger("game/leduc"):
+        _run_learning_cycle(log_dir, llm_client, chain, executor,
+                            pending_dir, phil, fk, sl,
+                            pre_win_rate=win_rate)
+    else:
+        logger.info("Learning not triggered (below threshold)")
 
 
 if __name__ == "__main__":

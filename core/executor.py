@@ -85,7 +85,7 @@ class Executor:
             "notify_layers": notify_layers,
         }
 
-        if self._learning_dir:
+        if self._learning_dir and session.get("enable_learning", True):
             self._write_pending(obs, notify_layers, result)
 
         return result

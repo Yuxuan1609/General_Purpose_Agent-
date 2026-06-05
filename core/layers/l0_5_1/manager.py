@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import logging
 from typing import Any
 from core.types import TaskObservation
@@ -42,12 +43,24 @@ class L1Agent(LayerAgent):
         "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
     }
 
+    # Learning task extension: schema for l1_modifications field
+    _L1_MOD_SCHEMA = {
+        "l1_modifications": [
+            {"target": "l1/<rule_id> (target for modify/deprecate; new id for create)",
+             "type": "update | create | deprecate",
+             "payload": {
+                 "content": "string (full rule text, ~1-2 sentences matching existing L1 rule granularity)",
+                 "reason": "string (why, citing execution record evidence)",
+             }},
+        ],
+    }
+
     def __init__(self, llm_client, philosophy):
         super().__init__(llm_client, logger)
         self._philosophy = philosophy
 
     def _build_system_prompt(self, instruction: str, meta: str,
-                             static_context: str = "") -> str:
+                              static_context: str = "") -> str:
         """Build system prompt: task meta + behavior rules + optional static context + instruction."""
         rules = self._philosophy.all_rules()
         rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
@@ -62,9 +75,19 @@ class L1Agent(LayerAgent):
         )
 
     def _build_user_context(self, state: dict) -> str:
-        """Build user prompt body: current state + history (dynamic per-step)."""
+        """Build user prompt body: current state + history (dynamic per-step).
+
+        For learning tasks, current state is already in meta/system prompt,
+        so skip to avoid duplication. Learning context comes from learning_units.
+        """
         current = state.get("current", "")
         history = state.get("history", "")
+        is_learning = "l1_output_format" in state
+
+        if is_learning:
+            units = state.get("learning_units", [])
+            unit_count = len(units) if isinstance(units, list) else 0
+            return f"[学习数据] {unit_count} 条记录（详见系统提示词）\n\n[对局历史]\n{history or '（无）'}"
         return (
             f"[当前局面]\n{current}\n\n"
             f"[对局历史]\n{history or '（无）'}"
@@ -82,8 +105,8 @@ class L1Agent(LayerAgent):
             for i, n in enumerate(nodes)
         )
         instruction = (
-            "判断需要从下层获取什么领域知识来做出最优决策。"
-            "从领域节点中选出最相关的 1-5 个节点，并给出语义查询。"
+            "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。"
+            "从领域节点中选出最相关的 1-5 个节点，并给出清晰的语义查询交给 L2 层检索知识卡片。"
             "如果不需要领域知识，返回空的 domain_nodes（[]）。"
         )
         system = self._build_system_prompt(
@@ -100,9 +123,12 @@ class L1Agent(LayerAgent):
         """Stage2: integrate L2 knowledge and produce final decision.
 
         Accepts L2 results as explicit params (E3: no shared mutable state).
+        Detects learning tasks via state.l1_output_format.
         """
+        l1_fmt = state.get("l1_output_format")
+
         instruction = (
-            "整合下层返回的知识信息，基于游戏规则和行为准则做出最终决策。"
+            "你的职责：基于【行为准则】整合下层返回的知识信息，做出最终决策。"
             "在 rules_used 中列出本次推理中实际引用到的行为准则的 id。"
         )
         system = self._build_system_prompt(instruction, meta)
@@ -114,25 +140,15 @@ class L1Agent(LayerAgent):
         ) if cards else "（下层未返回信息）"
 
         user = f"{self._build_user_context(state)}\n\n[下层知识]\n{cards_text}"
-        result = self._call_llm(system, user, schema=self.STAGE2_SCHEMA)
 
-        # NOTIFY enrichment: rules actually used (from LLM), what L2 returned
-        used_ids = result.get("rules_used", [])
-        all_rules = {r.id: r for r in self._philosophy.all_rules()}
-        if used_ids:
-            result["rules_applied"] = [
-                {"id": rid, "summary": all_rules[rid].content[:60]}
-                for rid in used_ids if rid in all_rules
-            ]
-        else:
-            result["rules_applied"] = [
-                {"id": r.id, "summary": r.content[:60]}
-                for r in self._philosophy.all_rules()[:5]
-            ]
+        schema = self.STAGE2_SCHEMA
+        if l1_fmt:
+            schema = {**schema, **self._L1_MOD_SCHEMA}
+        result = self._call_llm(system, user, schema=schema)
+
+        # NOTIFY enrichment: rules actually used (from LLM)
         l2 = l2_result or {}
-        result["l2_received"] = {
-            "reply": str(l2.get("reply", ""))[:300],
-        }
+        result["l2_reply"] = str(l2.get("reply", ""))[:300]
         return result
 
 

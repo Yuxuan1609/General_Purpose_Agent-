@@ -42,6 +42,18 @@ class L3Agent(LayerAgent):
         "reasoning": "string (技能选择和执行的推理过程)",
     }
 
+    _L3_MOD_SCHEMA = {
+        "l3_modifications": [
+            {"target": "l3/<skill_name> (existing name for update/deprecate; new name for create)",
+             "type": "update | create | deprecate",
+             "payload": {
+                 "content": "string (full SKILL.md: YAML frontmatter + markdown body)",
+                 "reason": "string (why)",
+                 "domain": "string (for create)",
+             }},
+        ],
+    }
+
     def __init__(self, llm_client):
         super().__init__(llm_client, logger)
 
@@ -50,8 +62,11 @@ class L3Agent(LayerAgent):
         """Analyze matched skills and produce execution result.
 
         E3: matched_skills passed explicitly, not read from shared mutable state.
+        Detects learning tasks via state.l3_output_format.
         """
-        current = state.get("current", "")
+        l3_fmt = state.get("l3_output_format") if state else None
+
+        current = state.get("current", "") if state else ""
         skills = matched_skills or []
         skills_text = "\n".join(
             f"## {s.get('name', '')}: {s.get('description', '')}"
@@ -60,18 +75,21 @@ class L3Agent(LayerAgent):
         ) if skills else "（无匹配技能）"
 
         system = (
-            "你是 L3 层的认知 Agent，负责使用技能执行任务。\n"
-            "根据当前局面和可用的技能，选择相关的技能并基于技能内容执行任务。\n"
-            "你的任务是 L2 下发给你的具体操作要求，Meta 字段仅为辅助理解局面的上下文。\n\n"
-            "TODO: 未来拆分为两个阶段——Stage1 找相关技能 + Stage2 执行。\n"
-            "TODO: 未来 L4 dispatch——将静态知识查询派发到 L4 层。"
+            "你是 L3 层的认知 Agent，负责任务执行。\n"
+            "你的职责：根据 L2 下发的具体操作要求，选择相关的技能并基于技能内容执行任务。\n"
+            "Meta 字段仅为辅助理解局面的上下文。"
         )
+
         user = (
             f"[Meta]\n{meta}\n\n"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
-        return self._call_llm(system, user, schema=self.EXECUTE_SCHEMA)
+
+        schema = self.EXECUTE_SCHEMA
+        if l3_fmt:
+            schema = {**schema, **self._L3_MOD_SCHEMA}
+        return self._call_llm(system, user, schema=schema)
 
 
 class L3Manager(LayerManager):

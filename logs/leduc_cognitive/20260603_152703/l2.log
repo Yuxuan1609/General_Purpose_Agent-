@@ -1,9 +1,0 @@
-2026-06-03 15:27:06,505 | ── L2 ──
-2026-06-03 15:27:06,505 |   received: domain=game/leduc
-2026-06-03 15:27:06,505 |   response: 3 cards  (nodes: ['game/leduc'])
-2026-06-03 15:27:12,485 | ── L2 ──
-2026-06-03 15:27:12,485 |   received: domain=game/leduc
-2026-06-03 15:27:12,485 |   response: 3 cards  (nodes: ['game/leduc'])
-2026-06-03 15:27:52,240 | ── L2 ──
-2026-06-03 15:27:52,240 |   received: domain=game/leduc
-2026-06-03 15:27:52,240 |   response: 3 cards  (nodes: ['game/leduc'])

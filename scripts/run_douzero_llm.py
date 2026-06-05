@@ -127,6 +127,15 @@ def _make_agent(
         return _load_douzero_model(position, model_dir, objective)
 
 
+_POSITION_CN = {
+    'landlord': '地主', 'landlord_up': '地主上家', 'landlord_down': '地主下家',
+}
+
+
+def _get_position_cn(pos: str) -> str:
+    return _POSITION_CN.get(pos, pos)
+
+
 def _cards_to_str(cards: list[int]) -> str:
     m = {3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',10:'10',11:'J',12:'Q',13:'K',14:'A',17:'2',20:'X',30:'D'}
     return ' '.join(m.get(c, str(c)) for c in cards)
@@ -198,9 +207,9 @@ def main():
                         help="随机种子 (default: 42)")
 
     position_group = parser.add_argument_group("LLM Agent")
-    position_group.add_argument("--llm_position", default="landlord_up",
-                                choices=["landlord", "landlord_up", "landlord_down"],
-                                help="LLM Agent 担任的角色 (default: landlord_up)")
+    position_group.add_argument("--llm_position", default="random",
+                                choices=["landlord", "landlord_up", "landlord_down", "random"],
+                                help="LLM Agent 担任的角色 (default: random=随机农民位置)")
     position_group.add_argument("--opponent", default="douzero_ADP",
                                 help="对手类型: douzero_ADP/douzero_WP/sl/random/rlcard")
 
@@ -219,6 +228,13 @@ def main():
                         help="LLM agent mode: direct (bypass layers) or cognitive (full chain)")
 
     args = parser.parse_args()
+
+    if args.llm_position == "random":
+        farmer_positions = ["landlord_up", "landlord_down"]
+        rng = random.Random(args.seed)
+        args.llm_position = rng.choice(farmer_positions)
+        logger.info("Random position: LLM plays as %s",
+                    _get_position_cn(args.llm_position))
 
     task_label = f"douzero_{args.llm_position}"
     _run_log_dir = _setup_file_logging(task_label)
