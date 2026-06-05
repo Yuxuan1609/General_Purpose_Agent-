@@ -527,6 +527,13 @@ baselines/
   sl/            # 监督学习基线
 ```
 
+### 并行运行与 Scale Up
+
+单个 Session 约 1.5-4 分钟（取决于游戏长度和 LLM 调用次数）。要 Scale Up 需要：
+- **多个 Session 并行运行**，各自产出 pending 记录
+- **并行结束后统一跑 Learning**，批量更新知识库
+- 当前 PowerShell 下并行有限制，推荐 Linux/macOS 下用 `&` 或 `GNU parallel`；或改用 Python `multiprocessing` 统一调度
+
 ## 各层详解（新架构）
 
 ### L0.5 数据模块（旧层内部直接使用）
