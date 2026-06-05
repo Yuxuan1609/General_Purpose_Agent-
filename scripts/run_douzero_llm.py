@@ -45,6 +45,11 @@ def _setup_file_logging(task_label: str):
     log_dir = LOG_DIR / label / stamp
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Per-layer agent log files  (shared with Leduc/Dryrun)
+    from core.layers.logging_setup import setup_layer_logging
+    setup_layer_logging(log_dir)
+
+    # Game summary log
     fh = logging.FileHandler(log_dir / "game.log", encoding="utf-8")
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
@@ -98,10 +103,11 @@ def _make_agent(
             if layers is None:
                 from core.chain_factory import build_default_chain
 
-                chain = build_default_chain(PROJECT_ROOT, auxiliary_llm=None, seed=True)
+                chain = build_default_chain(PROJECT_ROOT, auxiliary_llm=llm_client, seed=True)
             else:
                 chain = layers
-            executor = Executor(layer_root=chain, llm_client=llm_client)
+            executor = Executor(layer_root=chain, llm_client=llm_client,
+                                learning_dir=PROJECT_ROOT / "data" / "learning")
             return DouZeroCognitiveAgent(executor=executor, position=position)
         else:
             from scripts.douzero_agent import DouZeroLLMAgent
@@ -135,6 +141,7 @@ def run_episodes(
     env: GameEnv,
     players: dict,
     episodes: int,
+    max_llm_steps: int = 0,
     seed: int | None = None,
     verbose: bool = True,
     step_verbose: bool = False,
@@ -149,18 +156,27 @@ def run_episodes(
 
         for pos, agent in players.items():
             if hasattr(agent, 'reset_session'):
-                agent.reset_session(f"douzero_{pos}_ep{ep}")
+                agent.reset_session(f'douzero_{pos}_ep{ep}')
+            if max_llm_steps > 0 and hasattr(agent, 'set_max_llm_steps'):
+                agent.set_max_llm_steps(max_llm_steps)
+
+        def _llm_limit_reached():
+            for a in players.values():
+                if hasattr(a, 'llm_steps') and a._max_llm_steps > 0:
+                    if a.llm_steps() >= a._max_llm_steps:
+                        return True
+            return False
 
         step_count = 0
-        while not env.game_over:
+        while not env.game_over and not _llm_limit_reached():
             pos = env.acting_player_position
             env.step()
             step_count += 1
             if step_verbose and step_count % 5 == 0:
                 logger.info("  ep=%d step=%d acting=%s", ep, step_count, pos)
 
-        winner = env.get_winner()
-        bomb_num = env.get_bomb_num()
+        winner = env.get_winner() if hasattr(env, 'winner') else 'unknown'
+        bomb_num = env.get_bomb_num() if hasattr(env, 'bomb_num') else 0
         base_score = 2 if winner == 'landlord' else 1
         score = base_score * (2 ** bomb_num)
 
@@ -220,6 +236,8 @@ def main():
                         help="每5步输出一次进度 (LLM模式推荐开启)")
     parser.add_argument("--mode", default="direct", choices=["direct", "cognitive"],
                         help="LLM agent mode: direct (bypass layers) or cognitive (full chain)")
+    parser.add_argument("--max_steps", type=int, default=0,
+                        help="Max LLM decision steps per episode (0=unlimited)")
 
     args = parser.parse_args()
 
@@ -268,7 +286,8 @@ def main():
     env = GameEnv(players)
 
     t0 = datetime.now()
-    results = run_episodes(env, players, args.episodes, seed=args.seed,
+    results = run_episodes(env, players, args.episodes,
+                           max_llm_steps=args.max_steps, seed=args.seed,
                            verbose=args.verbose, step_verbose=args.step_verbose)
     elapsed = (datetime.now() - t0).total_seconds()
 

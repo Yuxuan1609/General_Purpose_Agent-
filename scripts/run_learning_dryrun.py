@@ -64,18 +64,8 @@ def main():
     print(f"  Agent prompts:    {agent_log.name}")
 
     # ── Layer agent logs to own directory ──────────────────────────
-    fmt = logging.Formatter("%(message)s")
-    for noisy in ("httpx", "httpcore", "openai", "urllib3"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
-    for lg_name, fn in [("l0_5_1", "l0_5_1"), ("l2", "l2"),
-                         ("l3", "l3"), ("core.executor", "executor")]:
-        lg = logging.getLogger(lg_name)
-        lg.setLevel(logging.DEBUG)
-        lg.propagate = False
-        fh = logging.FileHandler(str(log_dir / f"{fn}.log"), encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        lg.addHandler(fh)
+    from core.layers.logging_setup import setup_layer_logging
+    setup_layer_logging(log_dir)
     print(f"  Agent layers:     l0_5_1.log, l2.log, l3.log, executor.log")
 
     # ═══════════════════════════════════════════════════════════════

@@ -375,16 +375,26 @@ class DouZeroCognitiveAgent:
         self._position_cn = POSITION_CN.get(position, position)
         self._step = 0
         self._session_id = ""
+        self._llm_steps = 0
+        self._max_llm_steps = 0
 
     def reset_session(self, session_id: str = ""):
         self._step = 0
         self._session_id = session_id
+        self._llm_steps = 0
+
+    def set_max_llm_steps(self, n: int):
+        self._max_llm_steps = n
+
+    def llm_steps(self) -> int:
+        return self._llm_steps
 
     def act(self, infoset) -> list[int]:
         if len(infoset.legal_actions) == 1:
             return infoset.legal_actions[0]
 
         self._step += 1
+        self._llm_steps += 1
 
         obs = TaskObservation(
             meta=DOUDIZHU_GAME_RULES,

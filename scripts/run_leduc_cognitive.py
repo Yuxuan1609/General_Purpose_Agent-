@@ -30,11 +30,8 @@ def _setup_logging():
 
     fmt = logging.Formatter("%(asctime)s | %(message)s")
 
-    # Suppress http noise
-    for noisy in ("httpx", "httpcore", "openai", "urllib3"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
-
-    # Console: INFO only, no propagation from agent loggers
+    # Suppress http noise (already handled by setup_layer_logging)
+    # Console: INFO only
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     ch = logging.StreamHandler(sys.stdout)
@@ -42,16 +39,9 @@ def _setup_logging():
     ch.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
     root.addHandler(ch)
 
-    # Per-agent file handlers
-    for logger_name, file_name in [("l0_5_1", "l0_5_1"), ("l2", "l2"),
-                                    ("l3", "l3"), ("core.executor", "executor")]:
-        lg = logging.getLogger(logger_name)
-        lg.setLevel(logging.DEBUG)
-        lg.propagate = False
-        fh = logging.FileHandler(str(log_dir / f"{file_name}.log"), encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        lg.addHandler(fh)
+    # Per-agent file handlers via shared utility
+    from core.layers.logging_setup import setup_layer_logging
+    setup_layer_logging(log_dir)
 
     # Game summary log
     game_logger = logging.getLogger("leduc_cognitive")
