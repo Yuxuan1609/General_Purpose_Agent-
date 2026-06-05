@@ -680,7 +680,7 @@ cognitive-agent/
 | Phase 1 — Execute 链路 | `docs/superpowers/plans/...-implementation.md` | ✅ 已完成 |
 | Phase 1.5 — Comm Agent + LayerMessage + V-structure | `docs/superpowers/plans/...-implementation-phase1.5.md` | ✅ 已完成 |
 | Phase 2.1 — LearningEnv 骨架 | `docs/superpowers/plans/2026-06-04-learning-env-implementation.md` | ✅ 已完成 |
-| Phase 2.2 — 接入游戏循环 + 双域激活 | 同上 | 📋 待实施 |
+| Phase 2.2 — 接入游戏循环 + 双域激活 | 同上 | ✅ 已完成 |
 | Phase 2.3 — 清理旧代码 + 元学习轨 | 同上 | 📋 待实施 |
 
 > **TODO**: L2 `create` 修改的 `domain` / `confidence` 字段仅在 `_apply_l2` 的 `create` 分支消费，`update`/`deprecate` 不消费。当前 schema 描述为 `only for create`，后续需确认是否需要为 `update` 也支持修改 domain/confidence。

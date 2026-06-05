@@ -129,3 +129,35 @@
 1. **L2 卡片质量 > 通用 LLM 知识** — 种子内容必须包含反直觉的领域经验才有增量价值
 2. **Reflect 闭环正面反馈** — boost/penalize 要区分"坏策略"和"运气差"
 3. **L2 Domain Graph 跨域泛化** — 斗地主和 Leduc 的策略能互相借鉴多少是关键
+
+---
+
+## 2026-06-05 — LearningEnv 设计落地
+
+### 核心设计决策
+
+1. **Reflection 降级为普通 Environment** — 不再需要独立的 Proposer/Verifier/ReflectCoordinator 堆栈。LearningEnv 实现 `Environment` 接口，与 GameEnv 共享 Executor + Layers + ToolUse。学习走 `domain="learning/*"` 通过现有链式通道。
+
+2. **输出格式由通信层在 meta 中注入** — Agent 不硬编码任何输出 schema。每个 Environment 的通信层在 TaskObservation 的 meta/state 中注入 per-layer 格式约束，Agent 的 LLM 按约束输出。
+
+3. **per-layer NOTIFY 分字段** — 学习任务中每层 Agent 在 NOTIFY 中输出 `*_modifications` 字段，LearningEnv 逐层解析路由到对应 store。上层只看到下层 reply + reasoning，不看到 modifications。每个 Agent 对自己管辖的内容负责（L1 改 rules、L2 改 cards、L3 改 skills）。
+
+4. **去 reward 化** — 学习本身就是任务，Agent 通过学习 domain 知识来提升"如何学习"的能力（自举）。reward 恒为 0，学习效果通过后续任务表现自然反馈。
+
+### 提示词构建规范
+
+- 三层统一 `_build_system_prompt(instruction, meta)` 构建 system prompt
+- `instruction` 包含 `你的职责：...` + 阶段具体任务
+- Stage 1 (拆解)：思考已有信息能完成什么、还差什么、能否由下层提供
+- Stage 2 (整合/执行)：整合下层返回，做出最终决策
+- L2 stage1 引用 L3 职责描述，L1 stage1 引用 L2 职责描述
+
+### 工程经验
+
+1. **层间信息隔离** — 上层不应看到下层 payload 细节。L1 stage2 只收到 L2 reply + reasoning，不收到 L2 的 raw cards 或 modifications。L2 stage2 只收到 L3 result + reasoning。
+
+2. **Mock LLM 加速调试** — 使用 prompt 关键词匹配返回 canned response，支持 `--mock`/`--real` 切换。真实调用单步 2+ 分钟，mock <1 秒。
+
+3. **per-layer 格式发现机制** — 每个 Agent 的 stage 方法检测 `state.l{N}_output_format`，存在时自动合并 learning schema。避免全局开关，每层独立判断。
+
+4. **日志分离** — LearningEnv I/O 和 Agent 内部 prompts 分文件记录，每个 layer agent 独立日志文件。便于定位问题。
