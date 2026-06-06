@@ -537,7 +537,88 @@ Python 端顺序执行，中间结果通过 `$stepN.field` 引用传递。不涉
 | 新的 Tool | 高——可注册 `rm -rf /` | 不允许。工具注册必须在启动时由配置完成 |
 | 修改 Tool allowlist | 极高——绕过所有访问控制 | 绝不允许 |
 
-**建议**：Knowledge 的自我管理优先实现（符合 LearningEnv 的学习闭环模式），Tool 的自我注册不做。Knowledge 的 CRUD 工具 `knowledge_manage`（create/update/deprecate）可作为 `knowledge_capability.py` 的内置工具注册到 ToolRegistry。
+**折中方案 — 工具注册 proposal + 人工审核**：
+
+```
+工具注册流程（非实时，带人工审核）:
+
+  Agent 发现需要新工具
+    │
+    ▼
+  LLM 输出 tool_proposal:
+    {
+      "name": "read_pdf",
+      "schema": {...},           # OpenAI function-calling schema
+      "handler_type": "subprocess",  # subprocess | http | python_callable
+      "handler_config": {"command": "pdftotext {path} -"},
+      "reason": "需要从 PDF 报告中提取策略数据用于学习"
+    }
+    │
+    ▼
+  Python 端: proposal 写入 data/tool_proposals/{name}.json
+    │
+    ▼
+  用户定期检查 proposals/ 目录:
+    - 审核 handler_type 是否安全（subprocess 命令、HTTP URL、Python 函数等）
+    - 决定 allowlist 归属（哪些层可见）
+    - 手动移入 core/tools/ 或拒绝（移到 rejected/）
+    │
+    ▼
+  下次启动时，审核通过的工具自动注册到 ToolRegistry
+```
+
+关键安全措施：
+- Agent 只能**提议**，不能注册——`tool_propose` 工具只写 JSON 文件，不调 `ToolRegistry.register()`
+- proposal 不含 handler 实现代码——只含 handler_type + 配置参数，实际 handler 由人工编写
+- 审核在启动时发生——新工具不会在 Agent 运行期间突然激活
+- proposals/ 目录与代码同级——`data/tool_proposals/`，可加入 gitignore 或版本控制
+
+Phase 3 初期不实现此功能。标记为预留方向，与 `knowledge_manage` 工具一起评估。
+
+### 7.3 Python handler 的定位：安全边界而非能力上限
+
+```
+LLM 输出 ──→ Python handler(args) ──→ 系统能力
+              ┌──────────────────┐
+              │ 1. 输入校验       │  ← 限制 LLM 能做什么
+              │ 2. 能力执行       │  ← Python 几乎无限制（subprocess / http / ctypes / ...）
+              │ 3. 输出过滤       │  ← 限制返回给 LLM 的信息量
+              └──────────────────┘
+```
+
+**Python 不是能力的瓶颈**——通过 `subprocess` 可以调用任何可执行文件、通过 `httpx` 可以访问任何网络 API、通过 `ctypes` 可以调用任何 C 库。不存在"系统能做到但 Python 做不到"的事情。
+
+**Python handler 的真正价值是三层安全**：
+
+| 层 | 作用 | 例子 |
+|----|------|------|
+| 输入校验 | 限制 LLM 的输入范围 | terminal 检查命令白名单；web_search 只取 query 字段，忽略 LLM 可能夹带的内部状态 |
+| 能力执行 | 无限制的系统调用 | `subprocess.run()` / `httpx.post()` / `ctypes.CDLL()` |
+| 输出过滤 | 限制返回给 LLM 的信息量 | terminal 返回 stdout 但截断 >10KB；web_search 只返回 title+snippet，不返回 HTTP headers |
+| 运行时控制 | 防止失控 | terminal 30s 超时；max_calls_per_step 限制 |
+
+**这意味着：设计一个新工具时，核心工作不是"怎么让 Python 做某件事"，而是"怎么安全地让 Python 做某件事"。**
+
+handler 签名规范（所有工具 handler 遵循此模式）：
+
+```python
+def handler(args: dict, context: dict | None = None) -> str:
+    """所有工具的 handler 统一签名。
+
+    Args:
+        args:     LLM 传来的参数（已由 function-calling schema 约束类型）
+        context:  调用上下文 {layer, trace_id, tool_name} —— 用于日志和校验
+
+    Returns:
+        JSON string: {"result": ...} 或 {"error": "..."}
+
+    安全约束：
+        - 必须自行处理超时（长时间操作）
+        - 必须捕获所有异常，返回结构化 error 而非 raise
+        - 输出必须截断（避免 LLM 上下文爆炸）
+        - 涉及文件/网络的，必须校验路径/URL 在允许范围内
+    """
+```
 
 ## 完整示例：L2 Agent 如何调用工具和知识
 
