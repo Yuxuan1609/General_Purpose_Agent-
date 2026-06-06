@@ -135,10 +135,13 @@ class L2Agent(LayerAgent):
         current = state.get("current", "")
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
-            "你的局部任务是思考：核心任务怎么完成、还差什么要素、"
-            "缺失要素能否由 L3 提供。需要 L3 则输出具体 l3_task，"
-            "不需要则 call_l3=false。\n"
-            "注意你负责任务的部分执行和拆解下发，不做最终决策。"
+            "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
+            "L3 层职责：根据具体任务执行标准化流程操作，管理一组 SKILL.md 技能。\n"
+            "需要 L3 时输出 l3_task（一句话任务描述），L3 会匹配技能并执行。\n"
+            "如果当前问题适合被固定流程解决，call_l3=true 并给出任务；否则 call_l3=false。\n\n"
+            "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
+            "(技能 leduc-preflop-raise 可处理此任务：持有K时强制加注)\n"
+            "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
         )
         system = self._build_system_prompt(instruction, meta)
         user = (
@@ -296,6 +299,8 @@ class L2Manager(LayerManager):
         self._cards = self._build_cards(selected_nodes)
 
         # Propagate to L3 only when needed
+        # TODO: When L2→L3 multi-round is enabled, loop here to refine l3_task
+        # based on L3's output (similar to L1 MAX_LOOPS). Currently single-shot.
         call_l3 = stage1_result.get("call_l3", False)
         if call_l3:
             l3_task = stage1_result.get("l3_task", "")

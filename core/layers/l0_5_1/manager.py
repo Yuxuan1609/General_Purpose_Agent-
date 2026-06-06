@@ -27,6 +27,10 @@ class L1Agent(LayerAgent):
     """
 
     MAX_LOOPS = 1
+    # TODO: Increase MAX_LOOPS to enable multi-round L1→L2 and L2→L3 queries.
+    # The architecture supports iterative refinement: L1 can re-query L2 with
+    # adjusted questions, and L2 can re-query L3 with refined tasks.
+    # Currently disabled — single-shot only.
 
     STAGE1_SCHEMA = {
         "query": "string (需要下层根据领域知识完成的任务。可附上基于【行为准则】的完成建议，给出可直接使用的相关准则整合。注意下层看不到完整的【行为准则】)",
@@ -249,8 +253,10 @@ class L0_5_1Manager(LayerManager):
                 self._final_result = result
                 return
 
-        logger.warning("L1 max loops (%d) reached, force done", L1Agent.MAX_LOOPS)
-        self._final_result = {"done": True, "result": "", "reasoning": "max loops exceeded"}
+        # TODO: When MAX_LOOPS > 1, loop allows multi-round refinement.
+        # Use the last stage2 result (even if incomplete) rather than empty.
+        self._final_result = result.copy()
+        self._final_result["done"] = True
 
     def notify(self) -> Any:
         if self._final_result:

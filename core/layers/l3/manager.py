@@ -177,6 +177,8 @@ class L3Manager(LayerManager):
             self._result = result
 
         # Propagate downstream (L4, reserved)
+        # TODO: When L3→L4 multi-round is enabled, loop here for iterative
+        # query-refinement (same pattern as L1 MAX_LOOPS). Currently single-shot.
         if self._downstream:
             q_msg = self._downward.wrap_query(
                 payload={"obs": obs}, source=self.name,
