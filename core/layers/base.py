@@ -130,7 +130,11 @@ class LayerAgent(ABC):
             self._log.debug("  response (turn %d):\n%s", turn, _indent(text, 4))
 
             try:
-                return json.loads(text)
+                parsed = json.loads(text)
+                if not isinstance(parsed, dict):
+                    self._log.warning("Expected JSON object, got %s", type(parsed).__name__)
+                    return {"_raw": text, "_type": type(parsed).__name__}
+                return parsed
             except json.JSONDecodeError:
                 self._log.warning("JSON parse failed, raw text returned")
                 return {"_raw": text}

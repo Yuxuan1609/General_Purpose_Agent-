@@ -296,6 +296,10 @@ class L2Manager(LayerManager):
         # ═══ Stage 1: Card Filter + L3 Decision (Decompose) ═══
         logger.debug("  ═══ L2 Stage 1 — Card Filter ═══")
         stage1_result = self._agent.stage1(query, meta, obs.state, selected_nodes)
+        if not isinstance(stage1_result, dict):
+            logger.warning("L2 stage1 returned non-dict: %s", type(stage1_result))
+            stage1_result = {"cards": [], "call_l3": False, "l3_task": "",
+                             "reasoning": "invalid response format"}
         logger.debug("  ── Stage 1 结果 ──")
         logger.debug("    call_l3: %s", stage1_result.get("call_l3"))
         logger.debug("    cards: %d 张", len(stage1_result.get("cards", [])))
