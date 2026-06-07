@@ -1,5 +1,10 @@
 """Consolidation test — real LLM call with rich structured logging.
 
+Loads test fixture data from standardized MD files in tests/fixtures/:
+  - consolidation_test_leduc.md      → L2 cards (game/leduc, 15 cards)
+  - consolidation_test_doudizhu.md    → L2 cards (game/doudizhu, 9 cards)
+  - consolidation_test_skills.md      → L3 skills (7 skills)
+
 Reuses the _write_log pattern from run_learning_dryrun.py.
 Produces:
   - consolidation_env_io.log   — Knowledge state, consolidation analysis, LLM summary
@@ -14,6 +19,7 @@ Usage:
 """
 from __future__ import annotations
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -33,64 +39,145 @@ def _write_log(path: Path, title: str, content: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Mock data
+# Fixture loader — reads standardized MD files, populates FlexibleKnowledge
 # ═══════════════════════════════════════════════════════════════════════════
 
-class _MockDomain:
-    def __init__(self, p): self.path = p
+def _parse_cards_from_md(path: Path) -> list[dict]:
+    """Parse knowledge cards from a standard MD file.
 
+    Expected format:
+        ## card_id
+        - confidence: 0.75
+        Content text here...
 
-class MockCard:
-    def __init__(self, id, content, confidence, domain_path, activation=0.5):
-        self.id = id; self.content = content; self.confidence = confidence
-        self.activation = activation; self.domain = _MockDomain(domain_path)
-
-
-class MockSkill:
-    def __init__(self, name, description, domain_path):
-        self.name = name; self.description = description
-        self.domain = _MockDomain(domain_path)
-
-
-def _make_cards() -> list[MockCard]:
+    Returns list of {id, content, confidence, domain}.
+    """
     cards = []
-    for i in range(5):
-        cards.append(MockCard(f"card_good_{i:03d}",
-            f"Leduc pre-flop strategy variant {i}: With King always raise. "
-            f"With Queen evaluate, with Jack consider folding.", 0.7 + i * 0.03, "game/leduc"))
-    for i in range(8):
-        cards.append(MockCard(f"card_dup_{i:03d}",
-            f"Pre-flop: when holding King raise aggressively. Variant {i}.", 0.5, "game/leduc"))
-    for i in range(10):
-        cards.append(MockCard(f"card_low_{i:03d}",
-            f"Experimental {i}: unconventional play. Not well tested.", 0.2, "game/leduc"))
-    for i in range(10):
-        cards.append(MockCard(f"card_dz_{i:03d}",
-            f"DouDizhu strategy {i}: top-card with singles >= 10.", 0.6 + i * 0.02, "game/doudizhu"))
-    for i in range(5):
-        cards.append(MockCard(f"card_cons_{i:03d}",
-            f"Consolidation rule {i}: merge similar entries, archive unused ones.", 0.8, "learning/consolidate"))
+    text = path.read_text(encoding="utf-8")
+    # Split by ## sections
+    sections = re.split(r'\n(?=## )', text)
+    for sec in sections:
+        sec = sec.strip()
+        if not sec or not sec.startswith("## "):
+            continue
+        lines = sec.split("\n")
+        header = lines[0].replace("## ", "").strip()
+        # The header may be a comment or a card_id
+        if header.startswith("#") or header.lower() in ("leduc hold'em", "dou dizhu",
+                                                          "conslidation test skills"):
+            continue
+        card_id = header
+        confidence = 0.5
+        content_lines = []
+        in_meta = True
+        for line in lines[1:]:
+            match = re.match(r'- confidence:\s*([\d.]+)', line)
+            if match:
+                confidence = float(match.group(1))
+                continue
+            stripped = line.strip()
+            if stripped and in_meta and (stripped.startswith("-") or stripped.startswith("domain:")):
+                continue
+            if stripped:
+                in_meta = False
+                content_lines.append(stripped)
+        if content_lines:
+            cards.append({
+                "id": card_id,
+                "content": " ".join(content_lines),
+                "confidence": confidence,
+            })
     return cards
 
 
-def _make_skills() -> list[MockSkill]:
+def _parse_skills_from_md(path: Path) -> list[dict]:
+    """Parse skill templates from MD file.
+
+    Expected format:
+        ## skill-name
+        - confidence: 0.75
+        Skill description content...
+    """
     skills = []
-    for i in range(10):
-        skills.append(MockSkill(f"leduc-skill-{i:02d}", f"Leduc skill variant {i}", "game/leduc"))
-    for i in range(8):
-        skills.append(MockSkill(f"doudizhu-skill-{i:02d}", f"DouDizhu skill variant {i}", "game/doudizhu"))
-    for i in range(7):
-        skills.append(MockSkill(f"generic-skill-{i:02d}", f"Generic strategy pattern {i}", "game"))
+    text = path.read_text(encoding="utf-8")
+    sections = re.split(r'\n(?=## )', text)
+    for sec in sections:
+        sec = sec.strip()
+        if not sec or not sec.startswith("## "):
+            continue
+        lines = sec.split("\n")
+        header = lines[0].replace("## ", "").strip()
+        if header.startswith("#"):
+            continue
+        skill_name = header
+        confidence = 0.5
+        content_lines = []
+        for line in lines[1:]:
+            match = re.match(r'- confidence:\s*([\d.]+)', line)
+            if match:
+                confidence = float(match.group(1))
+                continue
+            stripped = line.strip()
+            if stripped:
+                content_lines.append(stripped)
+        if content_lines:
+            skills.append({
+                "name": skill_name,
+                "content": " ".join(content_lines),
+                "confidence": confidence,
+            })
     return skills
 
 
-class MockL2:
-    def __init__(self): self.cards = _make_cards()
+def _load_fixtures_into_knowledge(fk, sl, fixtures_dir: Path):
+    """Load consolidation test fixtures into FlexibleKnowledge + SkillLayer.
 
+    Reads standardized MD files and calls fk.add_card() / sl.create_skill().
+    Returns dict with {l2_count, l3_count}.
+    """
+    from core.task import Domain
 
-class MockL3:
-    def __init__(self): self._s = _make_skills()
-    def list_all(self): return self._s
+    l2_count = 0
+    l3_count = 0
+
+    # L2: Leduc cards
+    leduc_path = fixtures_dir / "consolidation_test_leduc.md"
+    if leduc_path.exists():
+        for card in _parse_cards_from_md(leduc_path):
+            fk.add_card(
+                content=card["content"],
+                domain=Domain("game/leduc", "specific"),
+                confidence=card["confidence"],
+                source="test_fixture",
+            )
+            l2_count += 1
+
+    # L2: DouDizhu cards
+    dz_path = fixtures_dir / "consolidation_test_doudizhu.md"
+    if dz_path.exists():
+        for card in _parse_cards_from_md(dz_path):
+            fk.add_card(
+                content=card["content"],
+                domain=Domain("game/doudizhu", "specific"),
+                confidence=card["confidence"],
+                source="test_fixture",
+            )
+            l2_count += 1
+
+    # L3: test skills
+    if sl is not None:
+        skills_path = fixtures_dir / "consolidation_test_skills.md"
+        if skills_path.exists():
+            for skill in _parse_skills_from_md(skills_path):
+                sl.create_skill(
+                    name=skill["name"],
+                    content=skill["content"],
+                    domain=Domain("game/leduc", "specific"),
+                    created_by="test_fixture",
+                )
+                l3_count += 1
+
+    return {"l2_count": l2_count, "l3_count": l3_count}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -129,18 +216,31 @@ def main():
                f"model: {llm.model}\n"
                f"temperature: 0.1")
 
-    # ── Build mock knowledge stores ──
-    l2 = MockL2()
-    l3 = MockL3()
-    knowledge = {"l2": l2, "l3": l3}
+    # ── Build knowledge stores from real classes + fixture files ──
+    from core.flexible_knowledge import FlexibleKnowledge
+    from core.skill_layer import SkillLayer
+    from core.tools.registry import ToolRegistry
+
+    fk = FlexibleKnowledge(
+        PROJECT_ROOT / "data" / "layers" / "knowledge",
+        PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json",
+    )
+    sl = SkillLayer(
+        PROJECT_ROOT / "data" / "layers" / "skills",
+        ToolRegistry(),
+    )
+
+    fixtures_dir = PROJECT_ROOT / "tests" / "fixtures"
+    loaded = _load_fixtures_into_knowledge(fk, sl, fixtures_dir)
+    knowledge = {"l2": fk, "l3": sl}
 
     _write_log(env_log, "Knowledge state (pre-consolidation)",
-               f"L2 cards: {len(l2.cards)} (limit=30)\n" +
+               f"L2 cards: {len(fk.cards)} (limit=30)\n" +
                "\n".join(f"  [{c.id}] [{c.domain.path}] conf={c.confidence:.2f} {c.content[:100]}"
-                         for c in l2.cards) +
-               f"\n\nL3 skills: {len(l3.list_all())} (limit=20)\n" +
+                         for c in fk.cards) +
+               f"\n\nL3 skills: {len(sl.list_all())} (limit=20)\n" +
                "\n".join(f"  [{s.name}] [{s.domain.path}] {s.description[:100]}"
-                         for s in l3.list_all()))
+                         for s in sl.list_all()))
 
     # ── Build spec + check consolidation ──
     spec = load_consolidation_spec()
@@ -153,8 +253,8 @@ def main():
         Path(tempfile.mkdtemp()),
         knowledge,
         dry_run=True,
-        l2_card_limit=30,
-        l3_skill_limit=20,
+        l2_card_limit=15,      # 24 cards → trigger consolidation
+        l3_skill_limit=5,       # 7 skills → trigger consolidation
         consolidation_spec=spec,
     )
 
