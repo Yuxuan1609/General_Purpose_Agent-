@@ -203,10 +203,8 @@ def main():
     print(f"  Prompt:      {prompt_log.name}")
     print(f"  Response:    {response_log.name}")
 
-    # ── Layer agent logs ──────────────────────────────────────────
-    from core.layers.logging_setup import setup_layer_logging
-    setup_layer_logging(log_dir)
-    print(f"  Agent layers: l0_5_1.log, l2.log, l3.log, executor.log")
+    # Note: consolidation test calls LLM directly (no Executor + LayerChain),
+    # so per-layer agent logs (l0_5_1.log etc.) are not produced.
 
     # ── Load env + LLM ──
     load_env(PROJECT_ROOT)
