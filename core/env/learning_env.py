@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -395,6 +396,12 @@ class LearningEnv(Environment):
 
     def _parse_notify_layers(self, action: str) -> dict:
         action = action.strip()
+
+        # 1. Try @modify markup format (no json_mode required)
+        if "@modify" in action:
+            return self._parse_markup_modifications(action)
+
+        # 2. Try JSON
         if not (action.startswith("{") or action.startswith("[")):
             if self._pre_llm:
                 return self._parse_notify_llm(action)
@@ -436,6 +443,69 @@ class LearningEnv(Environment):
         if isinstance(raw, list):
             return raw
         return []
+
+    @staticmethod
+    def _parse_markup_modifications(text: str) -> dict:
+        """Parse @modify markup format into per-layer modifications.
+
+        Format:
+            @modify layer=l1 type=create target=rule_id content="rule text" reason="why"
+            @modify layer=l2 type=deprecate target=card_id reason="why"
+            @modify layer=l3 type=update target=skill_name content="new content" reason="why"
+
+        Fields:
+            layer:  l1 | l2 | l3 (required)
+            type:   create | update | deprecate (required)
+            target: ID string (required)
+            content: "quoted string" (required for create/update)
+            reason:  "quoted string" (required)
+
+        Returns dict with l1_modifications / l2_modifications / l3_modifications lists.
+        """
+        result: dict = {"l1_modifications": [], "l2_modifications": [],
+                        "l3_modifications": []}
+        seen = set()
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("@modify"):
+                continue
+
+            # Parse key=value pairs, handling "quoted values" with spaces
+            fields = {}
+            pattern = r'(\w+)=(?:"([^"]*)"|(\S+))'
+            for match in re.finditer(pattern, line):
+                key = match.group(1)
+                val = match.group(2) if match.group(2) is not None else match.group(3)
+                fields[key] = val
+
+            layer = fields.get("layer", "")
+            mod_type = fields.get("type", "")
+            target = fields.get("target", "")
+            if not layer or not mod_type or not target:
+                logger.debug("Skipping incomplete @modify: %s", line[:80])
+                continue
+            if mod_type not in ("create", "update", "deprecate"):
+                continue
+
+            dedup_key = f"{layer}/{target}/{mod_type}"
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            mod = {
+                "target": target,
+                "type": mod_type,
+                "payload": {
+                    "content": fields.get("content", ""),
+                    "reason": fields.get("reason", ""),
+                },
+            }
+            key_map = {"l1": "l1_modifications", "l2": "l2_modifications",
+                       "l3": "l3_modifications"}
+            result[key_map[layer]].append(mod)
+
+        return result
 
     def _parse_notify_llm(self, text: str) -> dict:
         prompt = (

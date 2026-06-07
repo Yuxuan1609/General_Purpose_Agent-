@@ -277,61 +277,67 @@ def main():
                f"session: {json.dumps(task.session, ensure_ascii=False)}\n\n"
                f"--- META PREVIEW (first 500 chars) ---\n{task.meta[:500]}\n...")
 
-    # ── System prompt ──
+    # ── System prompt (markup format — no json_mode needed) ──
     system_prompt = (
         "你是一个知识库维护 Agent。分析当前知识库状况并给出整理建议。\n\n"
         "规则：\n"
         "1. 识别可合并的相似条目（同一 domain 下内容高度重叠的卡片合并为一条）\n"
-        "2. 标记低激活度、从未使用、confidence<0.3 的条目为待删除\n"
-        "3. 每个 modification 必须包含 target（精确的卡片/技能 ID）和 reason\n"
-        "4. 使用 deprecate 而非 delete（保持可回滚）\n"
-        "5. 如果创建合并后的新条目，使用 create 并填写完整的 content\n"
-        "6. 不同 domain 的条目不要跨域合并\n\n"
-        "输出格式：返回 JSON，各层 modifications 以 l1_modifications / l2_modifications / "
-        "l3_modifications 为 key。每条 modification 包含 type（create/update/deprecate）、"
-        "target（ID）、reason、payload（含 content）。"
+        "2. 标记低 confidence、内容冗余的条目为待删除\n"
+        "3. 不同 domain 的条目不要跨域合并\n"
+        "4. 使用 deprecate 而非 delete（保持可回滚）\n\n"
+        "输出格式：每条修改一行，使用 @modify 标记。格式如下：\n\n"
+        "  @modify layer=l2 type=deprecate target=card_id reason=\"merged into xxx\"\n"
+        "  @modify layer=l2 type=create target=new_card_id content=\"merged strategy text\" reason=\"merge of a,b,c\"\n"
+        "  @modify layer=l3 type=deprecate target=skill_name reason=\"duplicate of yyy\"\n\n"
+        "注意：\n"
+        "- layer 必须是 l1 / l2 / l3\n"
+        "- type 必须是 create / update / deprecate\n"
+        "- target 使用原始卡片/技能 ID\n"
+        "- content 和 reason 用双引号包裹（如包含内部双引号用单引号替代）\n"
+        "- 每条 @modify 独占一行\n"
+        "- 不要输出 JSON，不要输出 markdown 代码块，直接输出 @modify 行"
     )
 
     # ── Log full prompt ──
     _write_log(prompt_log, "SYSTEM PROMPT", system_prompt)
     _write_log(prompt_log, "USER PROMPT (consolidation task meta)", task.meta)
 
-    # ── Call LLM ──
+    # ── Call LLM (NO json_mode — markup format output) ──
     _write_log(env_log, "Dispatching to LLM",
                f"system: {len(system_prompt)} chars\n"
                f"user meta: {len(task.meta)} chars\n"
                f"total: {len(system_prompt) + len(task.meta)} chars\n"
-               f"json_mode: True")
+               f"format: @modify markup (json_mode=False)")
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task.meta},
     ]
-    resp = llm.chat(messages=messages, json_mode=True)
+    resp = llm.chat(messages=messages)  # no json_mode!
     raw_text = resp.text if hasattr(resp, 'text') else str(resp)
 
     # ── Log response ──
-    _write_log(response_log, "RAW LLM RESPONSE", raw_text)
+    _write_log(response_log, "RAW LLM RESPONSE (@modify markup)", raw_text)
 
-    try:
-        parsed = json.loads(raw_text)
-        _write_log(response_log, "PARSED JSON", json.dumps(parsed, ensure_ascii=False, indent=2))
+    # ── Parse @modify markup ──
+    from core.env.learning_env import LearningEnv
+    parsed = LearningEnv._parse_markup_modifications(raw_text)
+    _write_log(response_log, "PARSED MODIFICATIONS",
+               json.dumps(parsed, ensure_ascii=False, indent=2))
 
-        # Per-layer summary
-        summary_lines = []
-        for mod_key in ("l1_modifications", "l2_modifications", "l3_modifications"):
-            mods = parsed.get(mod_key, [])
-            if not isinstance(mods, list) or not mods:
-                summary_lines.append(f"{mod_key}: 0 modifications")
-                continue
-            types = {}
-            for m in mods:
-                t = m.get("type", "?")
-                types[t] = types.get(t, 0) + 1
-            summary_lines.append(f"{mod_key}: {len(mods)} modifications {types}")
-        _write_log(env_log, "LLM response summary", "\n".join(summary_lines))
-    except json.JSONDecodeError:
-        _write_log(env_log, "LLM response (invalid JSON)", raw_text[:2000])
+    # Per-layer summary
+    summary_lines = []
+    for mod_key in ("l1_modifications", "l2_modifications", "l3_modifications"):
+        mods = parsed.get(mod_key, [])
+        if not mods:
+            summary_lines.append(f"{mod_key}: 0 modifications")
+            continue
+        types = {}
+        for m in mods:
+            t = m.get("type", "?")
+            types[t] = types.get(t, 0) + 1
+        summary_lines.append(f"{mod_key}: {len(mods)} modifications {types}")
+    _write_log(env_log, "LLM response summary", "\n".join(summary_lines))
 
     _write_log(env_log, "Done", f"dry_run=True — no modifications applied")
     print(f"\nDone. Log: {log_dir}")
