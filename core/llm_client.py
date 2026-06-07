@@ -10,6 +10,7 @@ class FunctionCall:
 
 @dataclass
 class ToolCall:
+    id: str
     function: FunctionCall
 
 
@@ -44,10 +45,13 @@ class LLMClient:
         msg = resp.choices[0].message
         raw_calls = msg.tool_calls or []
         tool_calls = [
-            ToolCall(function=FunctionCall(
-                name=tc.function.name,
-                arguments=getattr(tc.function, "arguments", "{}"),
-            ))
+            ToolCall(
+                id=getattr(tc, "id", ""),
+                function=FunctionCall(
+                    name=tc.function.name,
+                    arguments=getattr(tc.function, "arguments", "{}"),
+                ),
+            )
             for tc in raw_calls
         ]
         return LLMResponse(

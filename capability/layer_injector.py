@@ -56,49 +56,51 @@ class LayerInjector:
             call_kwargs["tools"] = tools
         return call_kwargs
 
-    # ── tool call handling ──────────────────────────────────────────────
+    # ── single tool call execution (for _call_llm multi-turn loop) ───
+
+    def execute_tool_call(self, layer: str, name: str,
+                          raw_args: str | dict) -> CapabilityResult:
+        """Execute a single tool call during _call_llm's multi-turn loop.
+
+        Args:
+            layer: Calling layer.
+            name: Function name from LLM tool_call.
+            raw_args: JSON string or dict of function arguments.
+
+        Returns:
+            CapabilityResult ready for role:"tool" message content.
+        """
+        if isinstance(raw_args, str):
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                return CapabilityResult(
+                    capability_name=name, layer=layer, success=False,
+                    error=f"Invalid JSON arguments: {raw_args[:100]}",
+                )
+        else:
+            args = raw_args
+
+        cap_name = _resolve_capability_name(name)
+        if cap_name == "tool":
+            payload = {"name": name, "args": args}
+        else:
+            payload = args
+        return self._registry.invoke(cap_name, layer, payload)
 
     def handle_tool_calls(self, layer: str,
                           tool_calls: list[dict]) -> list[CapabilityResult]:
         """Execute tool_calls returned by LLM.
 
-        Args:
-            layer: Calling layer identifier.
-            tool_calls: Raw tool_calls from LLM response
-                        (list of {function: {name, arguments}}).
-
-        Returns:
-            List of CapabilityResult — one per tool call.
-            Caller injects these into the next stage's user prompt.
+        Delegates to execute_tool_call() for each call.
         """
         results: list[CapabilityResult] = []
         for tc in tool_calls:
             func = tc.get("function", {})
             name = func.get("name", "")
             raw_args = func.get("arguments", "{}")
-
-            if isinstance(raw_args, str):
-                try:
-                    args = json.loads(raw_args)
-                except json.JSONDecodeError:
-                    results.append(CapabilityResult(
-                        capability_name=name, layer=layer, success=False,
-                        error=f"Invalid JSON arguments: {raw_args[:100]}",
-                    ))
-                    continue
-            else:
-                args = raw_args
-
-            # Route: tool capability uses meta-dispatch format {name, args}.
-            # knowledge_query passes its args directly.
-            cap_name = _resolve_capability_name(name)
-            if cap_name == "tool":
-                payload = {"name": name, "args": args}
-            else:
-                payload = args
-            result = self._registry.invoke(cap_name, layer, payload)
+            result = self.execute_tool_call(layer, name, raw_args)
             results.append(result)
-
         return results
 
     def format_results_for_prompt(self, results: list[CapabilityResult]) -> str:

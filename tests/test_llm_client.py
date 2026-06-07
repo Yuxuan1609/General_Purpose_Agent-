@@ -10,7 +10,7 @@ class TestLLMResponse:
         assert resp.text == "Hello"
 
     def test_response_with_tool_calls(self):
-        tc = ToolCall(function=FunctionCall(name="search", arguments='{"q":"test"}'))
+        tc = ToolCall(id="call_001", function=FunctionCall(name="search", arguments='{"q":"test"}'))
         resp = LLMResponse(text="", tool_calls=[tc])
         assert resp.has_tool_calls is True
         assert len(resp.tool_calls) == 1
@@ -18,7 +18,7 @@ class TestLLMResponse:
         assert resp.tool_calls[0].function.arguments == '{"q":"test"}'
 
     def test_response_text_and_tool_calls(self):
-        tc = ToolCall(function=FunctionCall(name="search", arguments="{}"))
+        tc = ToolCall(id="call_002", function=FunctionCall(name="search", arguments="{}"))
         resp = LLMResponse(text="Let me search", tool_calls=[tc])
         assert resp.has_tool_calls is True
         assert resp.text == "Let me search"

@@ -206,6 +206,7 @@ cognitive-agent/
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — 完整架构设计：A1-A4 设计原则、E1-E8 工程原则、通信协议、各层详解、评估策略
 - **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)** — Phase 3+ 升级路线图：Tool Use 挂载、并行 Agent、Hermes 循环编排、整理模式
+- **[config/layers/consolidation.yaml](config/layers/consolidation.yaml)** — 各层内容规格与整理策略：条目格式、容量限制、anti-patterns、三级整理策略
 - **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表
 - **[MAINTAIN.md](MAINTAIN.md)** — 函数级维护文档
 - **[LEARNING_JOURNAL.md](LEARNING_JOURNAL.md)** — 可迁移工程技巧记录
