@@ -17,6 +17,10 @@ def seed_knowledge(fk, phil, sl=None):
     if _count_domain(fk, "game/doudizhu") == 0:
         _seed_doudizhu_cards(fk)
 
+    # L2 knowledge cards — Consolidation
+    if _count_domain(fk, "learning/consolidate") == 0:
+        _seed_consolidation_cards(fk)
+
     # L3 skills
     if sl is not None:
         _seed_l3_skills(sl)
@@ -154,3 +158,26 @@ landlord's small cards using larger singles or pairs.
 - Bomb (4 of a kind): beats any non-bomb hand
 - Rocket (X+D): the ultimate hand
 """
+
+
+def _seed_consolidation_cards(fk):
+    cards = [
+        ("Consolidation 是知识库维护的核心操作。策略：1) 优先删除从未被使用的条目 "
+         "2) 合并语义相似度 > 80% 的条目 3) 标记过时为 deprecated 而非直接删除 "
+         "4) activation < 0.1 且 30 天未使用的条目优先清理 5) failure_count 过高且 confidence 低的淘汰。",
+         "learning/consolidate", 0.8),
+        ("L2 KnowledgeCard 整理要点：同一 domain 下高度相似卡片合并为一条概括性更强的；"
+         "跨 domain 可泛化的策略提升 domain 层级；内容 > 300 字压缩为关键要点；"
+         "soft limit 25，hard limit 30。",
+         "learning/consolidate", 0.7),
+        ("L3 Skill 整理要点：功能重叠技能合并保留完整版；与 L2 卡片无关联的技能检查是否过时；"
+         "SKILL.md 内容 > 5000 字拆分或精炼；soft limit 15，hard limit 20。",
+         "learning/consolidate", 0.7),
+        ("整理任务输出格式：返回 per-layer modifications 数组，使用 deprecate 删除、"
+         "update 修改/压缩、create 创建合并项。每个 modification 含 target（ID）和 reason。"
+         "优先 deprecate 而非硬删除确保可回滚。",
+         "learning/consolidate", 0.9),
+    ]
+    for content, domain, conf in cards:
+        fk.add_card(content=content, domain=Domain(domain, "specific"),
+                    confidence=conf, source="seed")

@@ -38,6 +38,14 @@ L2_DOMAIN_NODES = [
             "子域包括 learning/compile 和 learning/verify。"
         ),
     },
+    {
+        "name": "learning/consolidate",
+        "description": (
+            "知识整理域。管理知识库容量的维护操作：检测超限、合并相似条目、"
+            "归档低活跃内容、标记过时条目。L2 cards 软上限 25/硬上限 30，"
+            "L3 skills 软上限 15/硬上限 20。使用 deprecate > delete 策略保证可回滚。"
+        ),
+    },
 ]
 
 

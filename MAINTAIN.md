@@ -9,7 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-07 | **Phase 3 规划**：新增 `capability/` 模块（Capability ABC + ToolCapability + KnowledgeCapability + LayerInjector）。改动范围 `LayerAgent._call_llm()` + `LLMClient.chat()`（加 tools 参数）+ `LearningEnv`（加 needs_consolidation）。详见 `docs/superpowers/specs/2026-06-06-capability-system-design.md`。 |
+| 2026-06-07 | **Phase 3 实现**：新增 `capability/` 模块（Capability ABC + ToolCapability + KnowledgeCapability + LayerInjector）。`LayerAgent._call_llm()` 支持多轮 tool call 循环（role:"tool" 消息）。`LLMClient.chat()` 支持 tools 参数 + ToolCall.id。`LearningEnv` 新增 needs_consolidation/get_consolidation_level + consolidation.yaml spec。 |
 | 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统 + `MetaDriver` 旧触发器。迁移 `ThresholdScorer`。 |
 
 ---
@@ -243,3 +243,79 @@
 | `DouZeroCognitiveAgent.act` | `(infoset) → list[int]` | TaskObservation → Executor → action | DouZero GameEnv.step() | Executor.execute(), parse_action() |
 | `DouZeroCognitiveAgent._build_state` | `(infoset) → dict` | InfoSet → TaskObservation.state | act() | — |
 | `cards_to_str` | `(cards:list[int]) → str` | DouZero 卡牌编码 → 人类可读字符串 | 各处 | — |
+
+## capability/ — Phase 3 能力系统
+
+### capability/__init__.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `CapabilityResult` | `@dataclass(frozen=True, capability_name, layer, success, data, error, metadata)` | 能力调用结果统一格式 | ToolCapability, KnowledgeCapability | LayerInjector |
+| `Capability` | `ABC(name, get_schema, is_visible_to, invoke)` | 可被认知层调用的能力抽象 | ToolCapability, KnowledgeCapability | — |
+| `CapabilityRegistry` | `register(cap) / get(name) / get_schemas_for_layer(layer) / invoke(name, layer, args) / list_for_layer(layer)` | 统一能力注册与分发中心 | LayerInjector, setup scripts | — |
+
+### capability/tool_capability.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `ToolCapability` | `__init__(registry, allowlist)` | 包装 ToolRegistry，加层可见性控制 | setup scripts | ToolRegistry.dispatch() |
+| `ToolCapability.is_visible_to` | `(layer) → bool` | 该层是否至少有一个工具可见 | CapabilityRegistry | — |
+| `ToolCapability.invoke` | `(layer, args{name, args}) → CapabilityResult` | 校验权限 → dispatch → 返回结果 | LayerInjector.execute_tool_call() | ToolRegistry.dispatch() |
+| `ToolCapability.get_schemas_by_layer` | `(layer) → list[dict]` | 返回该层可见工具的 OpenAI schema 列表 | LayerInjector.get_tools_for_layer() | ToolRegistry.get_definitions() |
+| `DEFAULT_TOOL_ALLOWLIST` | `dict[str, set[str]]` | L1={todo}, L2={todo,terminal,read_file,grep}, L3=full | ToolCapability.__init__ | — |
+
+### capability/knowledge_capability.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `BaseKnowledgeStore` | `ABC(search, get, add, remove, list_ids)` | 静态知识存储抽象（可替换为 vector DB） | — | InMemoryKnowledgeStore |
+| `InMemoryKnowledgeStore` | `__init__()` | 内存 dict 实现 + 简单关键词匹配 | setup, tests | — |
+| `KnowledgeCapability` | `__init__(stores: dict[name, (store, visible_layers)])` | 将 KnowledgeStore 包装为 Capability | setup scripts | store.search() |
+| `KnowledgeCapability.invoke` | `(layer, args{store, query, top_k}) → CapabilityResult` | 校验 store 权限 → 搜索 → 返回结果 | LayerInjector.execute_tool_call() | store.search() |
+| `seed_knowledge_stores` | `() → dict[str, InMemoryKnowledgeStore]` | 开发/测试用种子数据 | smoke tests | — |
+
+### capability/layer_injector.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `LayerInjector` | `__init__(registry)` | 将 CapabilityRegistry 的能力注入各层 Agent | setup scripts, LayerAgent | CapabilityRegistry |
+| `LayerInjector.get_tools_for_layer` | `(layer) → list[dict]` | 聚合 ToolCapability + KnowledgeCapability 的可见 schema | LayerAgent._call_llm() | ToolCapability.get_schemas_by_layer(), KnowledgeCapability.get_schema() |
+| `LayerInjector.inject_to_agent` | `(layer, call_kwargs) → dict` | 注入 tools 字段到 call_kwargs | LayerAgent stage methods | — |
+| `LayerInjector.execute_tool_call` | `(layer, name, raw_args) → CapabilityResult` | 执行单个 tool_call（供 _call_llm 多轮循环） | LayerAgent._call_llm() | CapabilityRegistry.invoke() |
+| `LayerInjector.handle_tool_calls` | `(layer, tool_calls) → list[CapabilityResult]` | 批量执行 tool_calls | smoke tests | execute_tool_call() |
+| `LayerInjector.format_results_for_prompt` | `(results) → str` | 格式化 CapabilityResult 列表为 prompt 文本 | smoke tests | — |
+
+## core/llm_client.py — Phase 3 更新
+
+| 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `ToolCall` | `@dataclass(id:str, function:FunctionCall)` | **新增** `id` 字段，用于 DeepSeek role:"tool" 消息的 tool_call_id | LLMClient.chat() | LayerAgent._call_llm() |
+| `LLMClient.chat` | `(messages, tools=None, json_mode=False) → LLMResponse` | **新增** `tools` 参数，透传 OpenAI function-calling 格式到 API | LayerAgent._call_llm() | OpenAI API |
+
+## core/layers/base.py — Phase 3 更新
+
+| 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `LayerAgent.set_injector` | `(injector) → None` | **新增** 方法，注入 LayerInjector 以开启工具调用 | setup scripts | — |
+| `LayerAgent._call_llm` | `(system, user, schema, tools, layer) → dict` | **新增** `tools`/`layer` 参数；内置多轮 tool call 循环（role:"tool" 消息 + MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode | L1Agent/L2Agent stage 方法 | LLMClient.chat(), LayerInjector.execute_tool_call() |
+| `_call_llm` 多轮循环 | while turn ≤ MAX_TOOL_TURNS | LLM 返回 tool_calls → 追加 assistant(tool_calls) + role:"tool" → 继续 → 无 tool_calls 时解析 JSON 返回 | — | — |
+
+## core/env/learning_env.py — Phase 3 更新
+
+| 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `load_consolidation_spec` | `(spec_path) → dict` | **新增** 函数，从 consolidation.yaml 加载内容规格 | LearningEnv.__init__ | yaml.safe_load |
+| `LearningEnv.__init__` | 新增 `consolidation_spec` 参数 | 加载 consolidation spec，用于 build_consolidation_task 的增强 prompt | scripts | — |
+| `LearningEnv.needs_consolidation` | `() → bool` | **新增** 方法，L2/L3 超限检测 | run scripts | — |
+| `LearningEnv.get_consolidation_level` | `() → int` | **新增** 方法，0=无, 1=例行, 2=深度 | run scripts | — |
+| `LearningEnv.build_consolidation_task` | `() → TaskObservation` | **增强**：从 spec 注入条目格式规范、anti-patterns、整理策略等级 | run scripts | — |
+
+## config/layers/consolidation.yaml — Phase 3 新增
+
+| 功能 | 描述 |
+|------|------|
+| 各层条目规格 | L1 Rule / L2 KnowledgeCard / L3 Skill 的字段定义（名称、类型、长度、ID 格式、required） |
+| 容量限制 | soft/hard 两级，per-domain 细分 |
+| Anti-patterns | 各层应避免的内容模式（重复、过于泛化、低置信度等） |
+| 自动衰减规则 | activation < 0.1 + 30天 → deprecated；90天 → archive |
+| 三级整理策略 | Level 0（无）/ Level 1（例行归并，可回滚）/ Level 2（深度压缩，需审核） |
