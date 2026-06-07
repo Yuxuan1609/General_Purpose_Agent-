@@ -459,7 +459,8 @@ if lenv.needs_consolidation():
 | 现有模块 | 改什么 | 不改什么 |
 |---------|--------|---------|
 | `core/tools/registry.py` | 无 | 完全不动 |
-| `core/layers/base.py` → `LayerAgent._call_llm()` | 加可选参数 `tools` 和 `injector` | 不改函数签名（通过 `**kwargs` 或新增可选参数） |
+| `core/layers/base.py` → `LayerAgent._call_llm()` | 加可选参数 `tools: list[dict] \| None = None`。injector 在外部通过 `inject_to_agent()` 修改 call_kwargs 后传入 | 不改已有调用处（默认值 None 保持向后兼容） |
+| `core/llm_client.py` → `LLMClient.chat()` | 加可选参数 `tools: list[dict] \| None = None`，透传到 OpenAI API | 不改已有调用处 |
 | `core/env/learning_env.py` | 加 `needs_consolidation()` 方法 | 不改已有方法签名 |
 | `core/skill_layer.py` | 无 | 完全不动 |
 | `core/flexible_knowledge.py` | 无 | 完全不动 |

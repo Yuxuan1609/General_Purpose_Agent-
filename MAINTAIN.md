@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-07 | **Phase 3 规划**：新增 `capability/` 模块（Capability ABC + ToolCapability + KnowledgeCapability + LayerInjector）。改动范围 `LayerAgent._call_llm()` + `LLMClient.chat()`（加 tools 参数）+ `LearningEnv`（加 needs_consolidation）。详见 `docs/superpowers/specs/2026-06-06-capability-system-design.md`。 |
 | 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统 + `MetaDriver` 旧触发器。迁移 `ThresholdScorer`。 |
 
 ---
