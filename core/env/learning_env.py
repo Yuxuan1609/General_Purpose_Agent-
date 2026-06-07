@@ -224,6 +224,44 @@ class LearningEnv(Environment):
             },
         )
 
+    # ── consolidation monitoring ────────────────────────────────────────
+
+    def needs_consolidation(self) -> bool:
+        """Check if any layer exceeds its capacity limit.
+
+        Triggers when L2 cards or L3 skills exceed configured thresholds.
+        """
+        l2 = self._knowledge.get("l2")
+        if l2 and len(l2.cards) > self._l2_limit:
+            logger.info("Consolidation needed: L2 cards=%d > limit=%d",
+                        len(l2.cards), self._l2_limit)
+            return True
+
+        l3 = self._knowledge.get("l3")
+        if l3 and len(l3.list_all()) > self._l3_limit:
+            logger.info("Consolidation needed: L3 skills=%d > limit=%d",
+                        len(l3.list_all()), self._l3_limit)
+            return True
+
+        return False
+
+    def get_consolidation_level(self) -> int:
+        """Return consolidation intensity based on overflow severity.
+
+        1 = mild (routine cleanup) — 1-5 items over limit
+        2 = deep (aggressive merge/prune) — >5 items over limit
+        """
+        level = 0
+        l2 = self._knowledge.get("l2")
+        if l2:
+            over = len(l2.cards) - self._l2_limit
+            level = max(level, 2 if over > 5 else (1 if over > 0 else 0))
+        l3 = self._knowledge.get("l3")
+        if l3:
+            over = len(l3.list_all()) - self._l3_limit
+            level = max(level, 2 if over > 5 else (1 if over > 0 else 0))
+        return level
+
     def archive_pending(self) -> int:
         import shutil
         domain_dir = self._pending_dir / self._base_domain.replace("/", "_")
