@@ -344,7 +344,7 @@ class TestConsolidationTask:
         ]
         task = learning_env.build_consolidation_task()
         assert task is not None
-        assert "L2 Cards" in task.meta
+        assert "L2 Knowledge Cards" in task.meta or "L2 Cards" in task.meta
         assert "Consolidation" in task.meta or "deprecate" in task.meta
 
     def test_triggers_when_l3_over_limit(self, learning_env, knowledge_stores):

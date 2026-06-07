@@ -4,11 +4,46 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from core.env.base import Environment, EnvState, EnvStep
 from core.env.threshold_scorer import ThresholdScorer
 from core.types import TaskObservation
 
 logger = logging.getLogger(__name__)
+
+# ── Consolidation spec loader ──────────────────────────────────────────
+
+def load_consolidation_spec(spec_path: Path | str | None = None) -> dict:
+    """Load consolidation spec from YAML config.
+
+    Args:
+        spec_path: Path to consolidation.yaml. If None, uses the default
+                   config/layers/consolidation.yaml relative to project root.
+
+    Returns:
+        dict with per-layer entry specs, limits, and consolidation strategies.
+        Returns {} if file not found (graceful degradation).
+    """
+    if spec_path is None:
+        # Try project-root-relative default path
+        candidate = Path(__file__).resolve().parent.parent.parent / "config" / "layers" / "consolidation.yaml"
+    else:
+        candidate = Path(spec_path)
+
+    if not candidate.exists():
+        logger.debug("Consolidation spec not found at %s, using defaults", candidate)
+        return {}
+
+    try:
+        with open(candidate, "r", encoding="utf-8") as f:
+            spec = yaml.safe_load(f) or {}
+        logger.debug("Loaded consolidation spec from %s: %s",
+                     candidate, list(spec.keys()))
+        return spec
+    except Exception as e:
+        logger.warning("Failed to load consolidation spec: %s", e)
+        return {}
 
 # Per-layer output format — each layer checks its key in state and merges
 # the field schema into its JSON output. Field descriptions reference
@@ -78,7 +113,8 @@ class LearningEnv(Environment):
     def __init__(self, pending_dir: Path, knowledge_stores: dict,
                  preprocessing_llm=None, stats_file: Path | None = None,
                  l2_card_limit: int = 30, l3_skill_limit: int = 20,
-                 dry_run: bool = False):
+                 dry_run: bool = False,
+                 consolidation_spec: dict | None = None):
         self._pending_dir = Path(pending_dir)
         self._knowledge = knowledge_stores
         self._pre_llm = preprocessing_llm
@@ -88,6 +124,9 @@ class LearningEnv(Environment):
         self._l2_limit = l2_card_limit
         self._l3_limit = l3_skill_limit
         self._dry_run = dry_run
+
+        # Consolidation spec — loaded from YAML or passed directly
+        self._consolidation_spec = consolidation_spec or load_consolidation_spec()
 
         self._pending_records: list[dict] = []
         self._enriched_units: list[dict] = []
@@ -187,19 +226,75 @@ class LearningEnv(Environment):
         if not needs_l2 and not needs_l3:
             return None
 
+        level = self.get_consolidation_level()
+        spec = self._consolidation_spec
+
         lines = ["## Knowledge Consolidation Task", ""]
+
+        # ── Level info from spec ──
+        if spec:
+            level_info = spec.get("consolidation_levels", {}).get(level, {})
+            lines.append(f"**Consolidation Level: {level} — {level_info.get('label', '')}**")
+            lines.append(f"Strategy: {level_info.get('strategy', '')}")
+            lines.append("")
+
+        # ── L2 section ──
         if needs_l2:
-            lines.append(f"### L2 Cards (current {len(l2.cards)}, limit {self._l2_limit})")
+            l2_spec = spec.get("l2", {})
+            l2_limits = l2_spec.get("limits", {})
+            lines.append(
+                f"### L2 Knowledge Cards "
+                f"(current {len(l2.cards)}, soft={l2_limits.get('soft', '?')}, "
+                f"hard={l2_limits.get('hard', '?')})"
+            )
+            # Entry format spec
+            if l2_spec:
+                entry = l2_spec.get("entry_spec", {})
+                lines.append("**Entry format:**")
+                for fld in entry.get("fields", []):
+                    lines.append(
+                        f"  - `{fld['name']}` ({fld.get('type', 'string')}): "
+                        f"{fld.get('description', '')}"
+                    )
+                anti = entry.get("anti_patterns", [])
+                if anti:
+                    lines.append("**Avoid:**")
+                    for ap in anti:
+                        lines.append(f"  - {ap}")
+            lines.append("")
             for c in l2.cards:
                 st = self._stats.get("l2", {}).get(c.id, {})
                 lines.append(
                     f"- [{c.id}] domain={c.domain.path} conf={c.confidence:.1f} "
+                    f"activation={c.activation:.1f} "
                     f"used={st.get('use_count', 0)} "
                     f"last={st.get('last_used', '-')[:10]} "
                     f"| {c.content[:80]}"
                 )
+
+        # ── L3 section ──
         if needs_l3:
-            lines.append(f"\n### L3 Skills (current {len(l3.list_all())}, limit {self._l3_limit})")
+            l3_spec = spec.get("l3", {})
+            l3_limits = l3_spec.get("limits", {})
+            lines.append(
+                f"\n### L3 Skills "
+                f"(current {len(l3.list_all())}, soft={l3_limits.get('soft', '?')}, "
+                f"hard={l3_limits.get('hard', '?')})"
+            )
+            if l3_spec:
+                entry = l3_spec.get("entry_spec", {})
+                lines.append("**Entry format:**")
+                for fld in entry.get("fields", []):
+                    lines.append(
+                        f"  - `{fld['name']}` ({fld.get('type', 'string')}): "
+                        f"{fld.get('description', '')}"
+                    )
+                anti = entry.get("anti_patterns", [])
+                if anti:
+                    lines.append("**Avoid:**")
+                    for ap in anti:
+                        lines.append(f"  - {ap}")
+            lines.append("")
             for s in l3.list_all():
                 st = self._stats.get("l3", {}).get(s.name, {})
                 lines.append(
@@ -211,6 +306,24 @@ class LearningEnv(Environment):
 
         lines.append("")
         lines.append(_CONSOLIDATION_FORMAT)
+
+        # ── Append per-layer output format from spec ──
+        if spec:
+            lines.append("")
+            lines.append("## Per-layer entry format reference")
+            for layer_key in ("l1", "l2", "l3"):
+                layer_spec = spec.get(layer_key, {})
+                entry_spec = layer_spec.get("entry_spec", {})
+                if not entry_spec:
+                    continue
+                lines.append(f"\n### {layer_key.upper()} Entry Format")
+                for fld in entry_spec.get("fields", []):
+                    req = " (required)" if fld.get("required") else ""
+                    gen = f" [generated by {fld.get('generated_by', 'system')}]"
+                    lines.append(
+                        f"- `{fld['name']}`: {fld.get('type', 'string')}"
+                        f"{req}{gen} — {fld.get('description', '')}"
+                    )
 
         return TaskObservation(
             meta="\n".join(lines),

@@ -1,0 +1,212 @@
+# Consolidation Spec — 各层内容规格与整理策略
+#
+# 定义每层的：
+#   - 内容格式规格（单个条目的字段、长度、ID 格式）
+#   - 容量限制（软上限 + 硬上限）
+#   - 整理触发条件与策略等级
+#
+# LearningEnv.build_consolidation_task() 读取此配置构建提示词。
+# Agent 收到整理任务后，输出内容必须符合此规格的字段约束。
+
+# ── L1 Rule 规格 ──
+# Rule = 一条可演化的行为准则，来自经验学习
+l1:
+  # 容量
+  limits:
+    soft: 15           # 软上限（达到时 Level 1 整理）
+    hard: 20           # 硬上限（达到时 Level 2 整理，拒绝新增）
+  # 条目规格
+  entry_spec:
+    fields:
+      - name: id
+        type: string
+        format: "l1_XXXXXX"     # 6 位 hex
+        description: "唯一标识符，创建后不可变"
+        required: true
+        generated_by: system    # system | agent
+      - name: content
+        type: string
+        min_length: 10
+        max_length: 300
+        description: "1-2 句行为准则，清晰可执行，不含模糊词"
+        required: true
+        generated_by: agent
+      - name: source
+        type: enum
+        values: ["l0_5", "l1"]
+        description: "l0_5=不可变宪法，l1=可演化规则"
+        required: true
+        generated_by: system
+      - name: version
+        type: integer
+        min: 1
+        description: "修改次数，每次 modify 递增"
+        generated_by: system
+      - name: created_by
+        type: string
+        values: ["seed", "learning_env", "manual"]
+        description: "创建来源"
+        generated_by: system
+    anti_patterns:
+      - "与现有规则语义重复（not_duplicate 检查）"
+      - "与现有规则逻辑矛盾（no_contradiction 检查）"
+      - "过于泛化的描述（如'做出好的决策'）"
+      - "包含具体数值范围但无依据"
+
+# ── L2 KnowledgeCard 规格 ──
+# Card = 一条领域相关的策略经验，来自游戏/任务执行
+l2:
+  # 容量
+  limits:
+    soft: 25           # 软上限（Level 1 整理：归并相似卡片）
+    hard: 30           # 硬上限（Level 2 整理：激进去重 + 压缩）
+    per_domain_soft: 20
+    per_domain_hard: 25
+  # 条目规格
+  entry_spec:
+    fields:
+      - name: id
+        type: string
+        format: UUID（8 位 hex）
+        description: "唯一标识符"
+        required: true
+        generated_by: system
+      - name: content
+        type: string
+        min_length: 20
+        max_length: 500
+        description: "单条领域策略提示，具体可执行。格式：[场景] → [行动] + [理由]"
+        required: true
+        generated_by: agent
+      - name: domain
+        type: string
+        format: "分层路径，如 game/leduc, learning/reflect"
+        description: "所属领域，决定检索时的激活计算"
+        required: true
+        generated_by: agent
+      - name: confidence
+        type: float
+        range: [0.1, 1.0]
+        default: 0.5
+        description: "卡片可信度，来自成功/失败统计"
+        generated_by: system
+      - name: activation
+        type: float
+        range: [0.0, 1.0]
+        default: 0.5
+        description: "当前活跃度 = confidence × (domain_match × 0.6 + recency × 0.4)"
+        generated_by: system
+      - name: success_count
+        type: integer
+        min: 0
+        description: "此策略被采用且任务成功的次数"
+        generated_by: system
+      - name: failure_count
+        type: integer
+        min: 0
+        description: "此策略被采用但任务失败的次数"
+        generated_by: system
+      - name: last_used
+        type: datetime
+        description: "最近一次被检索到的时间"
+        generated_by: system
+      - name: source
+        type: string
+        values: ["observation", "learning_env", "seed", "manual"]
+        generated_by: system
+    anti_patterns:
+      - "与同 domain 下已有卡片高度重复（>80% 语义相似）"
+      - "内容过于宽泛（如'根据情况做出合理决策'）"
+      - "confidence < 0.2 且 30 天未使用（应自动 deprecated）"
+      - "failure_count > success_count × 3（信号极度负面）"
+  # 衰减与清理
+  decay:
+    automatic:
+      - condition: "activation < 0.1 AND days_since(last_used) > 30"
+        action: "标记为 deprecated"
+      - condition: "days_since(last_used) > 90"
+        action: "移至 archive"
+    consolidation:
+      merge_threshold: 0.8    # 语义相似度 > 0.8 时建议合并
+
+# ── L3 Skill 规格 ──
+# Skill = 一个标准化的操作流程模板（SKILL.md）
+l3:
+  # 容量
+  limits:
+    soft: 15
+    hard: 20
+  # 条目规格
+  entry_spec:
+    fields:
+      - name: name
+        type: string
+        format: "kebab-case，如 leduc-preflop-raise"
+        max_length: 64
+        pattern: "^[\\w][\\w._-]*$"
+        description: "语义化的技能标识名"
+        required: true
+        generated_by: agent
+      - name: content
+        type: string
+        format: "YAML frontmatter + Markdown body"
+        min_length: 50
+        max_length: 5000
+        description: "完整的 SKILL.md 内容，包含 description / domain / steps"
+        required: true
+        generated_by: agent
+      - name: domain
+        type: string
+        format: "分层路径"
+        description: "技能适用领域"
+        required: true
+        generated_by: agent
+      - name: description
+        type: string
+        max_length: 200
+        description: "一句话技能概述，用于匹配时展示"
+        required: true
+        generated_by: agent
+      - name: created_by
+        type: string
+        values: ["seed", "learning_env", "l2_compilation", "manual"]
+        generated_by: system
+      - name: source_card_ids
+        type: list[string]
+        description: "触发 L2→L3 编译的源卡片 ID 列表"
+        generated_by: system
+    anti_patterns:
+      - "与已有技能功能高度重叠"
+      - "内容包含具体的一次性案例而非通用流程"
+      - "描述中包含未验证的假设"
+
+# ── 整理策略等级 ──
+# Level 由 get_consolidation_level() 计算： overflow > 5 → Level 2, else Level 1
+consolidation_levels:
+  0:
+    label: "无需整理"
+    description: "所有层在软上限以下"
+    action: none
+
+  1:
+    label: "例行整理"
+    trigger: "任一层超过软上限，或 overflow ≤ 5"
+    description: "轻量归并：合并相似条目、归档过时内容、标记低激活条目"
+    strategy: |
+      1. 识别语义相似度 > 80% 的条目，合并为一条（保留高 confidence 的）
+      2. activation < 0.1 且 30 天未使用的条目标记为 deprecated
+      3. 删除满足 anti_patterns 条件的条目
+      4. 输出 per-layer modifications（deprecate 为主，update 为辅）
+    reversible: true     # 整理结果可回滚
+
+  2:
+    label: "深度整理"
+    trigger: "任一层 overflow > 5"
+    description: "激进去重：大幅压缩条目数、跨域模式提取、过时规则归档"
+    strategy: |
+      1. 执行 Level 1 所有策略
+      2. 跨 domain 抽象：多条同类卡片 → 一条泛化卡片
+      3. L2→L3 编译：高激活同域卡片 → SKILL.md
+      4. 删除连续 N 次任务中未被检索到的条目
+      5. L1 规则评估：标记从未被引用的规则为待删除
+    reversible: false    # 深度整理不可自动回滚，建议人工审核
