@@ -16,7 +16,8 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 | **L(0.5+1)** | 不可变宪法 + 可演化行为规则；含 L1Agent（两阶段 V-structure） |
 | **L2** | 概率性知识卡片；含 L2Agent（三阶段 V-structure） |
 | **L3** | SKILL.md 技能执行；domain 确定性匹配 + L3Agent（LLM 选择+执行） |
-| **L4**（预留） | 静态知识存储，L3 dispatch 目标 |
+
+> **L4 已取消**。原计划作为静态知识存储层（L3 dispatch 目标），现已转化为两个共享机制：**KnowledgeCapability**（静态知识查询，所有层可调用）和 **ToolCapability**（工具系统，层可见 allowlist）。两者通过 `CapabilityRegistry` 统一注册，`LayerInjector` 注入各层 Agent 的多轮 tool call 循环。详见 [capability/](capability/)。
 
 每层 Manager 驱动 V-structure 循环：**Agent（LLM 决策）↔ Manager（编排/状态管理）↔ Comm Agent（确定性协议）**。
 
@@ -137,24 +138,40 @@ python scripts/run_douzero_llm.py --llm_position landlord_up --episodes 10 --mod
 # 学习 dry-run
 python scripts/run_learning_dryrun.py       # mock LLM (fast)
 python scripts/run_learning_dryrun.py --real  # real DeepSeek API
+
+# 知识整理（真实 LLM）
+python scripts/test_consolidation_real.py
+
+# 能力系统测试
+python scripts/smoke_test_injector.py
+python scripts/integration_test_capability.py
 ```
 
 ---
 
 ## 工具系统
 
-基于单例 `ToolRegistry`，线程安全，支持 `check_fn` 条件过滤和 `toolset` 分组。
+基于 `CapabilityRegistry` 统一管理，通过 `LayerInjector` 注入各层 Agent 的多轮 tool call 循环（DeepSeek API 兼容，`role:"tool"` 消息格式）。原 `ToolRegistry` 通过 `ToolCapability` 包装接入。
 
 | 工具 | 功能 | 注册位置 |
 |------|------|----------|
 | `todo` | 子任务跟踪 | `core/tools/todo_tool.py` |
 | `terminal` | 命令行执行（30s 超时） | `core/tools/terminal_tool.py` |
 | `web_search` | DuckDuckGo 网络搜索 | `core/tools/web_search_tool.py` |
-| `skills_list` | 列出已注册技能 | `core/skill_layer.py` |
-| `skill_view` | 查看技能详细内容 | `core/skill_layer.py` |
-| `skill_manage` | 创建/编辑/删除技能 | `core/skill_layer.py` |
+| `read_file` | 读取文件（offset/limit） | `capability/example_tools.py` |
+| `grep` | 正则搜索文件内容 | `capability/example_tools.py` |
+| `knowledge_query` | 静态知识库语义搜索 | `capability/knowledge_capability.py` |
+| `skills_list/view/manage` | 技能管理 | `core/skill_layer.py` |
 
-> 当前工具系统仅在旧 `main.py` 路径中使用，新 Executor + Layers 链尚未挂载。这是 [Phase 3 升级方向一](UPGRADE_ROADMAP.md#方向一tool-use--knowledge-挂载)。
+**层可见性（ToolPolicy）**：
+
+| 层 | 可见工具 |
+|----|---------|
+| L1 | `todo`, `knowledge_query` |
+| L2 | `todo`, `terminal`, `read_file`, `grep`, `knowledge_query` |
+| L3 | 全部（含 `web_search`, `skills_*`） |
+
+> 当 `tools` 注入时自动禁用 `json_mode`（DeepSeek 不兼容）。输出改用 `@modify` markup 格式或 tool call 原生格式。
 
 ---
 
@@ -165,7 +182,13 @@ cognitive-agent/
   _archive/              # 已归档旧架构代码
   config.yaml            # 用户配置
   pyproject.toml         # 项目元数据与依赖
-  config/layers/         # 分层配置 (l1.yaml, l2.yaml, l3.yaml, learning.yaml)
+  config/layers/         # 分层配置 (l1.yaml, l2.yaml, l3.yaml, consolidation.yaml)
+  capability/            # Phase 3 能力系统
+    __init__.py          # Capability ABC + CapabilityRegistry
+    tool_capability.py   # ToolCapability（层可见 allowlist）
+    knowledge_capability.py  # KnowledgeCapability + InMemoryKnowledgeStore
+    layer_injector.py    # LayerInjector（schema 注入 + 多轮 tool loop）
+    example_tools.py     # read_file / grep 示例工具
   core/                  # 核心源代码
     types.py             # TaskObservation, ExecutionRecord
     executor.py          # Executor — 独立决策者
@@ -184,9 +207,18 @@ cognitive-agent/
       l2/                # L2Manager + L2Agent
       l3/                # L3Manager + L3Agent
     tools/               # ToolRegistry + 工具实现
-  scripts/               # 运行脚本（run_leduc_cognitive.py, run_douzero_llm.py 等）
-  data/                  # 运行时数据 (layers/, learning/pending/, learning/learned/)
-  tests/                 # pytest (~18 test files)
+  scripts/               # 运行脚本
+    run_leduc_cognitive.py    # Leduc 对局 — seed + chain 日志
+    run_douzero_llm.py        # DouZero 对局 (--mode direct|cognitive)
+    run_learning_dryrun.py    # 学习 dry-run (--mock|--real)
+    run_parallel_test.py      # 并行 Leduc 测试
+    test_consolidation_real.py# 知识整理 — Executor+Chain 真实 LLM 测试
+    smoke_test_injector.py    # Injector 烟雾测试
+    smoke_test_consolidation.py# Consolidation 烟雾测试
+    integration_test_capability.py  # Capability 集成测试
+  data/                  # 运行时数据
+  tests/                 # pytest (159 tests, 16 files)
+    fixtures/              #   Consolidation 测试数据
   docs/                  # 设计文档
 ```
 
@@ -201,6 +233,41 @@ cognitive-agent/
 | Phase 2.1 — LearningEnv 骨架 | ✅ 已完成 |
 | Phase 2.2 — 接入游戏循环 + 双域激活 | ✅ 已完成 |
 | Phase 2.3 — 清理旧代码 + 元学习轨 | ✅ 已完成 |
+| Phase 3.1 — Capability 系统（ABC + Tool + Knowledge + Injector） | ✅ 已完成 |
+| Phase 3.2 — Consolidation（spec + 自动触发 + @modify 格式） | ✅ 已完成 |
+| Phase 3.3 — Agent 层接入（真实 LLM 整理测试通过） | ✅ 已完成 |
+
+## Consolidation — 知识整理
+
+LearningEnv 作为特殊的外部环境，在检测到知识库超限时自动下发整理任务。任务通过 Executor + LayerChain 走完整的 Agent 链路：
+
+```
+容量监测（needs_consolidation）
+       │ L2 cards > 25 or L3 skills > 15
+       ▼
+LearningEnv.build_consolidation_task()
+       │ 读取 consolidation.yaml spec → 构建 TaskObservation
+       ▼
+Executor.execute(obs)
+       │ L1 分解 → L2 分析卡/技能 → L3 匹配技能 → NOTIFY 链返回
+       ▼
+各层 NOTIFY（L2 reply 含 @modify markup）
+       │ _parse_markup_modifications()
+       ▼
+per-layer modifications (create/update/deprecate)
+       │ LearningEnv.step() → dry_run 或 正式应用
+       ▼
+知识库变更（合并冗余 → 归档低质 → 标记过期）
+```
+
+**整理等级**：
+| Level | 触发条件 | 策略 |
+|-------|---------|------|
+| 0 | 所有层在软上限以下 | 无动作 |
+| 1 | 超软上限 ≤5 条 | 例行归并（合并相似、标记 deprecated，可回滚）|
+| 2 | 超软上限 >5 条 | 深度压缩（跨域抽象、L2→L3 编译、归档过时，需审核）|
+
+配置规格见 `config/layers/consolidation.yaml`。测试脚本：`python scripts/test_consolidation_real.py`。
 
 ## 文档
 
