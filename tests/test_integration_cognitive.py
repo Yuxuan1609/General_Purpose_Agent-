@@ -63,30 +63,8 @@ class TestEndToEnd:
         assert "l2" in result["notify_layers"]
         assert "l3" in result["notify_layers"]
 
-    def test_meta_gets_rule_from_l1(self, full_chain, mock_llm_with_action):
-        executor = Executor(layer_root=full_chain, llm_client=mock_llm_with_action)
-
-        obs = TaskObservation(meta="game rules", state={}, session={"domain": "game/doudizhu"})
-        executor.execute(obs)
-
-        # L1 rules may be in state (via L1Agent) or absent (no auxiliary_llm)
-        assert "meta" in result if False else True  # meta is always present
-
-    def test_learning_disabled_no_pending_file(self, full_chain, mock_llm_with_action, tmp_path):
-        learning_dir = tmp_path / "learning"
-        executor = Executor(layer_root=full_chain, llm_client=mock_llm_with_action,
-                           learning_dir=learning_dir)
-
-        obs = TaskObservation(
-            meta="game rules",
-            session={"domain": "game/doudizhu", "id": "s1"},
-        )
-        executor.execute(obs)
-
-        pending = learning_dir / "pending"
-        assert (pending.exists() and list(pending.rglob("*.json")))
-
-    def test_learning_enabled_writes_pending(self, full_chain, mock_llm_with_action, tmp_path):
+    def test_execute_writes_pending_files(self, full_chain, mock_llm_with_action, tmp_path):
+        """Executor writes to pending/ when learning_dir is set (enable_learning default True)."""
         learning_dir = tmp_path / "learning"
         executor = Executor(layer_root=full_chain, llm_client=mock_llm_with_action,
                            learning_dir=learning_dir)

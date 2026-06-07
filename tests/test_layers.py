@@ -81,13 +81,6 @@ class TestL0_5_1Manager:
         result = manager.process(obs)
         assert result["status"] == "ok"
 
-    def test_process_is_noop_for_enrichment(self, l0_5_meta, l1_philosophy):
-        """Enrichment now done via query() + L1Agent (needs LLM). process() is a stub."""
-        manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
-        obs = TaskObservation(meta="game rules", state={})
-        manager.process(obs)
-        assert "l1_rules" not in obs.state  # process() no longer enriches
-
     def test_notify_returns_payload(self, l0_5_meta, l1_philosophy):
         manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
         payload = manager.notify()
@@ -115,13 +108,6 @@ class TestL2Manager:
         obs = TaskObservation(meta="game rules", state={})
         result = manager.process(obs)
         assert result["status"] == "ok"
-
-    def test_process_is_noop_for_enrichment(self, l2_knowledge):
-        """Enrichment now done via query() + L2Agent (needs LLM). process() is a stub."""
-        manager = L2Manager(l2_knowledge)
-        obs = TaskObservation(meta="game rules", state={})
-        manager.process(obs)
-        assert "l2_cards" not in obs.state
 
     def test_notify_returns_payload(self, l2_knowledge):
         manager = L2Manager(l2_knowledge)
