@@ -1,17 +1,19 @@
-"""Real LLM consolidation task test.
+"""Consolidation test — real LLM call with rich structured logging.
 
-Creates mock knowledge stores with cards/skills BEYOND limits,
-builds a consolidation TaskObservation using the consolidation.yaml spec,
-sends it to DeepSeek API, and logs the full prompt + response.
+Reuses the _write_log pattern from run_learning_dryrun.py.
+Produces:
+  - consolidation_env_io.log   — Knowledge state, consolidation analysis, LLM summary
+  - consolidation_prompt.log   — Full system + user prompt
+  - consolidation_response.log — Raw + parsed LLM response
+  - l0_5_1.log / l2.log / l3.log — Per-layer agent logs (setup_layer_logging)
 
-LearningEnv runs in dry_run=True — NO actual knowledge modifications.
+LearningEnv runs dry_run=True — NO knowledge modifications applied.
 
 Usage:
     python scripts/test_consolidation_real.py
 """
 from __future__ import annotations
 import json
-import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,130 +23,74 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _setup_logging():
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = PROJECT_ROOT / "logs" / "consolidation_real" / stamp
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("consolidation_real")
-    logger.setLevel(logging.DEBUG)
-    fh = logging.FileHandler(log_dir / "test.log", encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s"))
-    logger.addHandler(fh)
-    return logger, log_dir
-
-
-logger, LOG_DIR = _setup_logging()
+def _write_log(path: Path, title: str, content: str):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"\n{'=' * 60}\n")
+        f.write(f"  {title}\n")
+        f.write(f"{'=' * 60}\n\n")
+        f.write(content)
+        f.write("\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Setup: mock knowledge stores with items BEYOND limits
+# Mock data
 # ═══════════════════════════════════════════════════════════════════════════
+
+class _MockDomain:
+    def __init__(self, p): self.path = p
+
 
 class MockCard:
-    def __init__(self, id: str, content: str, confidence: float, domain_path: str,
-                 activation: float = 0.5):
-        self.id = id
-        self.content = content
-        self.confidence = confidence
-        self.activation = activation
-        self.domain = _MockDomain(domain_path)
+    def __init__(self, id, content, confidence, domain_path, activation=0.5):
+        self.id = id; self.content = content; self.confidence = confidence
+        self.activation = activation; self.domain = _MockDomain(domain_path)
 
 
 class MockSkill:
-    def __init__(self, name: str, description: str, domain_path: str):
-        self.name = name
-        self.description = description
+    def __init__(self, name, description, domain_path):
+        self.name = name; self.description = description
         self.domain = _MockDomain(domain_path)
 
 
-class _MockDomain:
-    def __init__(self, path: str):
-        self.path = path
-
-
-def _build_mock_cards() -> list[MockCard]:
-    """Generate 38 L2 cards (8 over hard limit of 30) with various overlap and quality."""
+def _make_cards() -> list[MockCard]:
     cards = []
-    # Good cards — high confidence, domain-specific
     for i in range(5):
-        cards.append(MockCard(
-            f"card_good_{i:03d}",
-            f"Leduc pre-flop strategy variant {i}: With King always raise, "
-            f"with Queen evaluate, with Jack consider folding. "
-            f"Adjust based on opponent's previous betting patterns.",
-            0.7 + i * 0.03, "game/leduc",
-        ))
-    # Nearly-duplicate cards (should be merged)
+        cards.append(MockCard(f"card_good_{i:03d}",
+            f"Leduc pre-flop strategy variant {i}: With King always raise. "
+            f"With Queen evaluate, with Jack consider folding.", 0.7 + i * 0.03, "game/leduc"))
     for i in range(8):
-        cards.append(MockCard(
-            f"card_dup_{i:03d}",
-            f"Pre-flop strategy: when holding King raise aggressively. "
-            f"Variant {i}: consider opponent position and stack size.",
-            0.5, "game/leduc",
-        ))
-    # Low-confidence, never-used cards
+        cards.append(MockCard(f"card_dup_{i:03d}",
+            f"Pre-flop: when holding King raise aggressively. Variant {i}.", 0.5, "game/leduc"))
     for i in range(10):
-        cards.append(MockCard(
-            f"card_low_{i:03d}",
-            f"Experimental strategy {i}: try unconventional play patterns. "
-            f"May work against aggressive opponents. Not well tested.",
-            0.2 + i * 0.01, "game/leduc",
-        ))
-    # DouDizhu cards (different domain, should be kept)
+        cards.append(MockCard(f"card_low_{i:03d}",
+            f"Experimental {i}: unconventional play. Not well tested.", 0.2, "game/leduc"))
     for i in range(10):
-        cards.append(MockCard(
-            f"card_dz_{i:03d}",
-            f"DouDizhu strategy {i}: As landlord_up player, top-card with "
-            f"singles >= 10. Control bomb usage timing.",
-            0.6 + i * 0.02, "game/doudizhu",
-        ))
-    # Consolidation domain cards (keep these)
+        cards.append(MockCard(f"card_dz_{i:03d}",
+            f"DouDizhu strategy {i}: top-card with singles >= 10.", 0.6 + i * 0.02, "game/doudizhu"))
     for i in range(5):
-        cards.append(MockCard(
-            f"card_cons_{i:03d}",
-            f"Consolidation rule {i}: When knowledge base overflows, "
-            f"merge similar entries and archive unused ones.",
-            0.8, "learning/consolidate",
-        ))
+        cards.append(MockCard(f"card_cons_{i:03d}",
+            f"Consolidation rule {i}: merge similar entries, archive unused ones.", 0.8, "learning/consolidate"))
     return cards
 
 
-def _build_mock_skills() -> list[MockSkill]:
-    """Generate 25 L3 skills (5 over hard limit of 20)."""
+def _make_skills() -> list[MockSkill]:
     skills = []
     for i in range(10):
-        skills.append(MockSkill(
-            f"leduc-skill-{i:02d}",
-            f"Leduc strategy skill variant {i}: handling pre-flop and post-flop situations",
-            "game/leduc",
-        ))
+        skills.append(MockSkill(f"leduc-skill-{i:02d}", f"Leduc skill variant {i}", "game/leduc"))
     for i in range(8):
-        skills.append(MockSkill(
-            f"doudizhu-skill-{i:02d}",
-            f"DouDizhu advanced play pattern {i}",
-            "game/doudizhu",
-        ))
+        skills.append(MockSkill(f"doudizhu-skill-{i:02d}", f"DouDizhu skill variant {i}", "game/doudizhu"))
     for i in range(7):
-        skills.append(MockSkill(
-            f"generic-skill-{i:02d}",
-            f"Generic game strategy pattern {i}: abstract decision framework",
-            "game",
-        ))
+        skills.append(MockSkill(f"generic-skill-{i:02d}", f"Generic strategy pattern {i}", "game"))
     return skills
 
 
 class MockL2:
-    def __init__(self):
-        self.cards = _build_mock_cards()
+    def __init__(self): self.cards = _make_cards()
 
 
 class MockL3:
-    def __init__(self):
-        self._skills = _build_mock_skills()
-
-    def list_all(self):
-        return self._skills
+    def __init__(self): self._s = _make_skills()
+    def list_all(self): return self._s
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -155,27 +101,53 @@ def main():
     import tempfile
     from core.env.learning_env import LearningEnv, load_consolidation_spec
     from core.llm_factory import build_llm_client
-
-    logger.info("=" * 60)
-    logger.info("  Real LLM Consolidation Task Test")
-    logger.info("=" * 60)
-
-    # ── Load env + LLM client ──
     from core.env_loader import load_env
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = PROJECT_ROOT / "logs" / "consolidation_real" / stamp
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    env_log = log_dir / "consolidation_env_io.log"
+    prompt_log = log_dir / "consolidation_prompt.log"
+    response_log = log_dir / "consolidation_response.log"
+
+    print(f"Log dir: {log_dir}")
+    print(f"  Env I/O:     {env_log.name}")
+    print(f"  Prompt:      {prompt_log.name}")
+    print(f"  Response:    {response_log.name}")
+
+    # ── Layer agent logs ──────────────────────────────────────────
+    from core.layers.logging_setup import setup_layer_logging
+    setup_layer_logging(log_dir)
+    print(f"  Agent layers: l0_5_1.log, l2.log, l3.log, executor.log")
+
+    # ── Load env + LLM ──
     load_env(PROJECT_ROOT)
     llm = build_llm_client(PROJECT_ROOT / "config.yaml", temperature=0.1)
-    logger.info("LLM client: model=%s", llm.model)
+
+    _write_log(env_log, "LLM Client",
+               f"model: {llm.model}\n"
+               f"temperature: 0.1")
 
     # ── Build mock knowledge stores ──
     l2 = MockL2()
     l3 = MockL3()
     knowledge = {"l2": l2, "l3": l3}
-    logger.info("Mock stores: L2 cards=%d (limit=30), L3 skills=%d (limit=20)",
-                len(l2.cards), len(l3.list_all()))
 
-    # ── Build LearningEnv with consolidation spec ──
+    _write_log(env_log, "Knowledge state (pre-consolidation)",
+               f"L2 cards: {len(l2.cards)} (limit=30)\n" +
+               "\n".join(f"  [{c.id}] [{c.domain.path}] conf={c.confidence:.2f} {c.content[:100]}"
+                         for c in l2.cards) +
+               f"\n\nL3 skills: {len(l3.list_all())} (limit=20)\n" +
+               "\n".join(f"  [{s.name}] [{s.domain.path}] {s.description[:100]}"
+                         for s in l3.list_all()))
+
+    # ── Build spec + check consolidation ──
     spec = load_consolidation_spec()
-    logger.info("Consolidation spec loaded: %s", list(spec.keys()))
+    _write_log(env_log, "Consolidation spec loaded",
+               f"keys: {list(spec.keys())}\n"
+               f"L2 limits: soft={spec['l2']['limits']['soft']}, hard={spec['l2']['limits']['hard']}\n"
+               f"L3 limits: soft={spec['l3']['limits']['soft']}, hard={spec['l3']['limits']['hard']}")
 
     lenv = LearningEnv(
         Path(tempfile.mkdtemp()),
@@ -186,74 +158,83 @@ def main():
         consolidation_spec=spec,
     )
 
-    assert lenv.needs_consolidation(), "Should trigger consolidation!"
+    needs = lenv.needs_consolidation()
     level = lenv.get_consolidation_level()
-    logger.info("Consolidation triggered: level=%d (L2=%d/30, L3=%d/20)",
-                level, len(l2.cards), len(l3.list_all()))
+    _write_log(env_log, "Consolidation analysis",
+               f"needs_consolidation: {needs}\n"
+               f"level: {level} ({spec['consolidation_levels'][level]['label']})\n"
+               f"trigger: {spec['consolidation_levels'][level].get('trigger', '-')}\n"
+               f"strategy:\n{spec['consolidation_levels'][level].get('strategy', '-')}\n"
+               f"reversible: {spec['consolidation_levels'][level].get('reversible', '-')}")
+
+    assert needs
+    assert level == 2
 
     # ── Build consolidation task ──
     task = lenv.build_consolidation_task()
-    logger.info("TaskObservation: meta=%d chars, domain=%s",
-                len(task.meta), task.session["domain"])
+    _write_log(env_log, "TaskObservation built",
+               f"meta: {len(task.meta)} chars\n"
+               f"session: {json.dumps(task.session, ensure_ascii=False)}\n\n"
+               f"--- META PREVIEW (first 500 chars) ---\n{task.meta[:500]}\n...")
 
-    # ── Log full meta to separate file ──
-    meta_path = LOG_DIR / "consolidation_prompt.md"
-    meta_path.write_text(task.meta, encoding="utf-8")
-    logger.info("Full prompt saved to: %s", meta_path)
-
-    # ── Send to LLM ──
-    logger.info("Sending to LLM...")
-
+    # ── System prompt ──
     system_prompt = (
-        "你是一个知识库维护 Agent。你的任务是分析当前知识库的状况，"
-        "并给出整理建议。请严格按要求的 JSON 格式输出 modifications。\n\n"
+        "你是一个知识库维护 Agent。分析当前知识库状况并给出整理建议。\n\n"
         "规则：\n"
-        "1. 识别可以合并的相似条目（内容高度重叠的卡片）\n"
-        "2. 标记低激活度、从未使用、confidence 低且 failure_count 高的条目为待删除\n"
+        "1. 识别可合并的相似条目（同一 domain 下内容高度重叠的卡片合并为一条）\n"
+        "2. 标记低激活度、从未使用、confidence<0.3 的条目为待删除\n"
         "3. 每个 modification 必须包含 target（精确的卡片/技能 ID）和 reason\n"
         "4. 使用 deprecate 而非 delete（保持可回滚）\n"
-        "5. 如果创建合并后的新条目，使用 create，并在 reason 中列出合并的源 ID"
+        "5. 如果创建合并后的新条目，使用 create 并填写完整的 content\n"
+        "6. 不同 domain 的条目不要跨域合并\n\n"
+        "输出格式：返回 JSON，各层 modifications 以 l1_modifications / l2_modifications / "
+        "l3_modifications 为 key。每条 modification 包含 type（create/update/deprecate）、"
+        "target（ID）、reason、payload（含 content）。"
     )
+
+    # ── Log full prompt ──
+    _write_log(prompt_log, "SYSTEM PROMPT", system_prompt)
+    _write_log(prompt_log, "USER PROMPT (consolidation task meta)", task.meta)
+
+    # ── Call LLM ──
+    _write_log(env_log, "Dispatching to LLM",
+               f"system: {len(system_prompt)} chars\n"
+               f"user meta: {len(task.meta)} chars\n"
+               f"total: {len(system_prompt) + len(task.meta)} chars\n"
+               f"json_mode: True")
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": task.meta},
     ]
-
-    logger.info("Calling LLM with %d chars system + %d chars user prompt...",
-                len(system_prompt), len(task.meta))
-
     resp = llm.chat(messages=messages, json_mode=True)
-    response_text = resp.text if hasattr(resp, 'text') else str(resp)
+    raw_text = resp.text if hasattr(resp, 'text') else str(resp)
 
     # ── Log response ──
-    resp_path = LOG_DIR / "consolidation_response.json"
-    try:
-        parsed = json.loads(response_text)
-        resp_path.write_text(
-            json.dumps(parsed, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        logger.info("Response parsed as JSON, saved to: %s", resp_path)
+    _write_log(response_log, "RAW LLM RESPONSE", raw_text)
 
-        # Summary stats
+    try:
+        parsed = json.loads(raw_text)
+        _write_log(response_log, "PARSED JSON", json.dumps(parsed, ensure_ascii=False, indent=2))
+
+        # Per-layer summary
+        summary_lines = []
         for mod_key in ("l1_modifications", "l2_modifications", "l3_modifications"):
             mods = parsed.get(mod_key, [])
-            if isinstance(mods, list) and mods:
-                types = {}
-                for m in mods:
-                    t = m.get("type", "?")
-                    types[t] = types.get(t, 0) + 1
-                logger.info("  %s: %d modifications %s", mod_key, len(mods), types)
+            if not isinstance(mods, list) or not mods:
+                summary_lines.append(f"{mod_key}: 0 modifications")
+                continue
+            types = {}
+            for m in mods:
+                t = m.get("type", "?")
+                types[t] = types.get(t, 0) + 1
+            summary_lines.append(f"{mod_key}: {len(mods)} modifications {types}")
+        _write_log(env_log, "LLM response summary", "\n".join(summary_lines))
     except json.JSONDecodeError:
-        resp_path.write_text(response_text, encoding="utf-8")
-        logger.warning("Response is not valid JSON, raw text saved")
+        _write_log(env_log, "LLM response (invalid JSON)", raw_text[:2000])
 
-    logger.info("=" * 60)
-    logger.info("  Done. Logs: %s", LOG_DIR)
-    logger.info("  Prompt: %s", meta_path.name)
-    logger.info("  Response: %s", resp_path.name)
-    logger.info("=" * 60)
+    _write_log(env_log, "Done", f"dry_run=True — no modifications applied")
+    print(f"\nDone. Log: {log_dir}")
 
 
 if __name__ == "__main__":
