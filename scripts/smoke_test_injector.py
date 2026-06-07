@@ -2,16 +2,38 @@
 
 Simulates a simple LLM agent loop with tool injection and tool_call handling.
 Uses mock LLM responses that include tool_calls — no real API required.
+Logs to logs/smoke_test_injector/ timestamped directory.
 
 Usage:
     python scripts/smoke_test_injector.py
 """
 from __future__ import annotations
 import json
+import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _setup_logging():
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = PROJECT_ROOT / "logs" / "smoke_test_injector" / stamp
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("smoke_injector")
+    logger.setLevel(logging.DEBUG)
+
+    fh = logging.FileHandler(log_dir / "test.log", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s"))
+    logger.addHandler(fh)
+    return logger, log_dir
+
+
+logger, LOG_DIR = _setup_logging()
 
 from core.tools.registry import ToolRegistry
 from core.llm_client import LLMClient, LLMResponse
@@ -90,21 +112,22 @@ def setup():
 
 def test_tool_injection(injector):
     """Verify tools are injected into LLM call kwargs."""
-    print("\n─── 1. Tool injection ───")
+    logger.info("─── 1. Tool injection ───")
     call_kwargs = {
         "system": "You are an L2 agent. Decide what to do.",
-        "user": "翻牌前持有K，对手加注，我应该怎么办？",
+        "user": "How should I play with King pre-flop?",
     }
     result = injector.inject_to_agent("l2", call_kwargs)
     assert "tools" in result, "tools NOT injected!"
     tool_names = [t["function"]["name"] for t in result["tools"]]
-    print(f"  Injected tools: {tool_names}")
-    print("  PASS")
+    logger.info("  Injected tools: %s", tool_names)
+    logger.debug("  Tool schemas:\n%s", json.dumps(result["tools"], indent=2, ensure_ascii=False))
+    logger.info("  PASS")
 
 
 def test_knowledge_query(injector):
     """Simulate an LLM that calls knowledge_query and handle the result."""
-    print("\n─── 2. Knowledge query via tool_call ───")
+    logger.info("─── 2. Knowledge query via tool_call ───")
     llm = ToolCallMockLLM(canned_text="", tool_calls=[{
         "function": {
             "name": "knowledge_query",
@@ -134,26 +157,26 @@ def test_knowledge_query(injector):
     results = injector.handle_tool_calls("l2", resp.tool_calls)
     assert len(results) == 1
     assert results[0].success, f"knowledge query failed: {results[0].error}"
-    print(f"  Query returned {len(results[0].data)} docs")
+    logger.info("  Query returned %d docs", len(results[0].data))
     for doc in results[0].data:
-        print(f"    [{doc['id']}] score={doc['score']} {doc['content'][:60]}...")
+        logger.debug("    [%s] score=%s %s...", doc["id"], doc["score"], doc["content"][:60])
 
     # Step 3: format for next stage's user prompt
     formatted = injector.format_results_for_prompt(results)
-    print(f"  Formatted for prompt:\n{formatted}")
-    print("  PASS")
+    logger.info("  Formatted for prompt:\n%s", formatted)
+    logger.info("  PASS")
 
 
 def test_tool_dispatch(injector):
     """Simulate LLM calling a real tool (todo) and handle the result."""
-    print("\n─── 3. Tool dispatch via tool_call ───")
+    logger.info("─── 3. Tool dispatch via tool_call ───")
     llm = ToolCallMockLLM(canned_text="", tool_calls=[{
         "function": {
             "name": "todo",
             "arguments": json.dumps({
                 "todos": [
-                    {"id": "1", "content": "分析手牌", "status": "in_progress"},
-                    {"id": "2", "content": "检索策略", "status": "pending"},
+                    {"id": "1", "content": "analyze hand", "status": "in_progress"},
+                    {"id": "2", "content": "search strategy", "status": "pending"},
                 ],
             }),
         },
@@ -175,15 +198,15 @@ def test_tool_dispatch(injector):
     results = injector.handle_tool_calls("l2", resp.tool_calls)
     assert results[0].success
     data = results[0].data
-    print(f"  Todo result: {data}")
+    logger.info("  Todo result: %s", json.dumps(data, ensure_ascii=False))
     assert data.get("success")
     assert len(data["todos"]) == 2
-    print("  PASS")
+    logger.info("  PASS")
 
 
 def test_tool_denied(injector):
     """Verify a forbidden tool is rejected."""
-    print("\n─── 4. Tool access denied ───")
+    logger.info("─── 4. Tool access denied ───")
     llm = ToolCallMockLLM(canned_text="", tool_calls=[{
         "function": {
             "name": "terminal",
@@ -203,14 +226,14 @@ def test_tool_denied(injector):
 
     results = injector.handle_tool_calls("l1", resp.tool_calls)
     assert not results[0].success
-    print(f"  Error: {results[0].error}")
+    logger.info("  Error: %s", results[0].error)
     assert "not allowed" in results[0].error.lower()
-    print("  PASS")
+    logger.info("  PASS")
 
 
 def test_full_agent_loop(injector):
-    """Simulate a complete agent stage: inject → LLM → handle → format → next stage."""
-    print("\n─── 5. Full agent loop ───")
+    """Simulate a complete agent stage: inject -> LLM -> handle -> format -> next stage."""
+    logger.info("─── 5. Full agent loop ───")
 
     # Stage 1: Agent asks for knowledge
     llm_stage1 = ToolCallMockLLM(canned_text="", tool_calls=[{
@@ -229,7 +252,7 @@ def test_full_agent_loop(injector):
     }
     injector.inject_to_agent("l1", call_kwargs)
 
-    print("  Stage 1: LLM calls knowledge_query...")
+    logger.info("  Stage 1: LLM calls knowledge_query...")
     resp1 = llm_stage1.chat(
         messages=[
             {"role": "system", "content": call_kwargs["system"]},
@@ -242,13 +265,13 @@ def test_full_agent_loop(injector):
     assert results[0].success
 
     knowledge_text = injector.format_results_for_prompt(results)
-    print(f"  Knowledge result: {knowledge_text}")
+    logger.debug("  Knowledge result:\n%s", knowledge_text)
 
     # Stage 2: Agent decides based on knowledge + original query
-    print("\n  Stage 2: LLM decides (with knowledge in prompt)...")
+    logger.info("  Stage 2: LLM decides (with knowledge in prompt)...")
     llm_stage2 = ToolCallMockLLM(
         canned_text=json.dumps({"done": True, "result": "raise",
-                                "reasoning": "K是最强手牌，应加注"}),
+                                "reasoning": "King is strongest, should raise"}),
     )
 
     stage2_kwargs = {
@@ -265,10 +288,10 @@ def test_full_agent_loop(injector):
     )
 
     decision = json.loads(resp2.text)
-    print(f"  Final decision: raise (done={decision['done']})")
-    print(f"  Reasoning: King is strongest, should raise")
+    logger.info("  Final decision: raise (done=%s)", decision["done"])
+    logger.info("  Reasoning: King is strongest, should raise")
     assert decision["result"] == "raise"
-    print("  PASS")
+    logger.info("  PASS")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -276,18 +299,15 @@ def test_full_agent_loop(injector):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
-    # Fix Windows cp932 console encoding for Chinese output
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
-                                   errors="replace", line_buffering=True)
-
-    print("=" * 55)
-    print("  Capability + LayerInjector Smoke Test")
-    print("=" * 55)
+    logger.info("=" * 55)
+    logger.info("  Capability + LayerInjector Smoke Test")
+    logger.info("=" * 55)
 
     injector, tool_reg, registry = setup()
-    print(f"Setup: {len(tool_reg.get_definitions())} tools, "
-          f"{len(registry.list_for_layer('l1'))} capabilities visible to L1")
+    logger.info("Setup: %d tools, %d capabilities visible to L1",
+                len(tool_reg.get_definitions()),
+                len(registry.list_for_layer("l1")))
+    logger.info("Log dir: %s", LOG_DIR)
 
     tests = [
         test_tool_injection,
@@ -303,13 +323,13 @@ def main():
             test_fn(injector)
             passed += 1
         except Exception as e:
-            print(f"\n  FAIL: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("  FAIL: %s", e)
+            logger.debug("Traceback:", exc_info=True)
 
-    print(f"\n{'=' * 55}")
-    print(f"  Results: {passed}/{len(tests)} passed")
-    print(f"{'=' * 55}")
+    logger.info("=" * 55)
+    logger.info("  Results: %d/%d passed", passed, len(tests))
+    logger.info("  Log: %s", LOG_DIR / "test.log")
+    logger.info("=" * 55)
     return 0 if passed == len(tests) else 1
 
 
