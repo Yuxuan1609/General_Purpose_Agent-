@@ -9,6 +9,7 @@
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -28,15 +29,20 @@ def _parse_args():
     return parser.parse_args()
 
 
+def _setup_logging(log_dir: Path):
+    from core.layers.logging_setup import setup_layer_logging
+    setup_layer_logging(log_dir)
+
+
 def _setup_executor():
     from core.env_loader import load_env
     load_env(PROJECT_ROOT)
 
-    from core.chain_factory import build_default_chain
-    chain = build_default_chain(PROJECT_ROOT, seed=False)
-
     from core.llm_factory import build_llm_client
     llm = build_llm_client(PROJECT_ROOT / "config.yaml")
+
+    from core.chain_factory import build_default_chain
+    chain = build_default_chain(PROJECT_ROOT, auxiliary_llm=llm, seed=False)
 
     from core.executor import Executor
     executor = Executor(
@@ -62,12 +68,18 @@ def _show_notifies(notify_layers: dict):
 
 def main():
     args = _parse_args()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = PROJECT_ROOT / "logs" / "interaction" / stamp
+    log_dir.mkdir(parents=True, exist_ok=True)
+    _setup_logging(log_dir)
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(message)s",
         handlers=[logging.StreamHandler()],
     )
+    for noisy in ("httpx", "httpcore", "urllib3", "openai", "requests"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
         executor = _setup_executor()
@@ -84,7 +96,7 @@ def main():
 
     state = env.reset("interaction")
     print(state.observation)
-    print("(Commands: /new=新会话, /info=会话信息, exit/quit=退出)\n")
+    print("(Commands: /new=新会话, /info=会话信息, /quit=存档退出, exit/quit=退出)\n")
 
     while True:
         try:
@@ -93,7 +105,15 @@ def main():
             print()
             break
 
-        if user_input.lower() in ("exit", "quit"):
+        if user_input == "/quit":
+            data_dir = PROJECT_ROOT / "data" / "interaction"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            saved = env.save_history(
+                data_dir / f"{env.session_info()['id']}_{stamp}.json"
+            )
+            print(f"Session saved to {saved}")
+            break
+        elif user_input.lower() in ("exit", "quit"):
             break
         elif user_input == "/new":
             state = env.reset("interaction")
@@ -124,7 +144,7 @@ def main():
             continue
 
         reply = result.get("action_text", "").strip()
-        step = env.step(reply)
+        env.step(reply)
 
         if args.debug:
             _show_notifies(result.get("notify_layers", {}))

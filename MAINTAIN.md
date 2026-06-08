@@ -256,6 +256,7 @@
 | `InteractionEnv.build_task_observation` | `() → TaskObservation \| None` | 对齐 LearningEnv 模式：从 pending_input + history 构造 TaskObservation | interactive_agent.py | _format_history_for_prompt() |
 | `InteractionEnv.step` | `(action: str) → EnvStep` | 记录本轮 (user, assistant) 到 history，清空 pending_input | interactive_agent.py | — |
 | `InteractionEnv.get_history` | `() → list[dict]` | 返回 history 的深层副本 | interactive_agent.py | — |
+| `InteractionEnv.save_history` | `(filepath: Path) → Path` | 将完整会话 JSON 序列化到文件（/quit 触发） | interactive_agent.py | — |
 | `InteractionEnv.session_info` | `() → dict` | 返回当前会话元信息 {id, turns, started_at, enable_learning} | interactive_agent.py | — |
 | `InteractionEnv._format_history_for_prompt` | `() → str` | 将 history 格式化为 `[用户]: ...\n[助手]: ...` 文本 | build_task_observation() | — |
 

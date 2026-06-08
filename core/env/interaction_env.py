@@ -1,6 +1,8 @@
 from __future__ import annotations
+import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from core.env.base import Environment, EnvState, EnvStep
 from core.types import TaskObservation
@@ -48,9 +50,6 @@ class InteractionEnv(Environment):
             state={
                 "current": self._pending_input,
                 "history": self._format_history_for_prompt(),
-                # conversation_history 供各层 Agent 结构化解构；
-                # history 供 Executor._build_user_prompt() 拼入文本。
-                "conversation_history": list(self._history),
             },
             session={
                 "id": self._session_id,
@@ -74,6 +73,19 @@ class InteractionEnv(Environment):
 
     def get_history(self) -> list[dict]:
         return [dict(h) for h in self._history]
+
+    def save_history(self, filepath: Path) -> Path:
+        data = {
+            "session_id": self._session_id,
+            "started_at": self._session_started_at,
+            "system_prompt": self._system_prompt,
+            "turns": len(self._history) // 2,
+            "history": self.get_history(),
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return filepath
 
     def session_info(self) -> dict:
         return {

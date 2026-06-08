@@ -51,10 +51,21 @@ class TestInteractionEnvReceiveBuild:
         env.receive_input("how are you")
         obs = env.build_task_observation()
         assert obs is not None
-        assert len(obs.state["conversation_history"]) == 2
-        assert obs.state["conversation_history"][0] == {"role": "user", "content": "hello"}
+        assert obs.state["current"] == "how are you"
         assert "[用户]: hello" in obs.state["history"]
         assert "[助手]: hi" in obs.state["history"]
+        assert "hello" not in obs.session  # history is in state, not session
+
+    def test_build_task_observation_state_is_lean(self):
+        env = InteractionEnv(system_prompt="You are helpful")
+        env.reset("start")
+        env.receive_input("hello")
+        env.build_task_observation()
+        env.step("hi")
+        env.receive_input("how are you")
+        obs = env.build_task_observation()
+        assert obs is not None
+        assert "conversation_history" not in obs.state  # not persisted
 
     def test_build_task_observation_empty_history_string(self):
         env = InteractionEnv(system_prompt="You are helpful")
@@ -164,3 +175,34 @@ class TestInteractionEnvHistory:
         obs = env.build_task_observation()
         expected = "[用户]: hello\n[助手]: hi"
         assert obs.state["history"] == expected
+
+
+class TestInteractionEnvSaveHistory:
+    def test_save_history_writes_file(self, tmp_path):
+        env = InteractionEnv(system_prompt="You are helpful")
+        env.reset("start")
+        env.receive_input("hello")
+        env.build_task_observation()
+        env.step("hi")
+
+        filepath = tmp_path / "session.json"
+        result = env.save_history(filepath)
+        assert result == filepath
+        assert filepath.exists()
+
+        import json
+        data = json.loads(filepath.read_text(encoding="utf-8"))
+        assert data["session_id"] == env.session_info()["id"]
+        assert data["turns"] == 1
+        assert len(data["history"]) == 2
+        assert data["system_prompt"] == "You are helpful"
+        assert "started_at" in data
+        assert "saved_at" in data
+
+    def test_save_history_creates_parent_dir(self, tmp_path):
+        env = InteractionEnv(system_prompt="You are helpful")
+        env.reset("start")
+
+        filepath = tmp_path / "sub" / "session.json"
+        result = env.save_history(filepath)
+        assert filepath.exists()
