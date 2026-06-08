@@ -246,6 +246,19 @@
 | `LearningEnv.build_consolidation_task` | `() → TaskObservation\|None` | L2/L3 超限时构建整理任务 | orchestrator | — |
 | `LearningEnv.archive_pending` | `() → int` | 移动已处理 records 到 learned/ | run_leduc_cognitive.py | — |
 
+## core/env/interaction_env.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `InteractionEnv` | `__init__(system_prompt: str, debug: bool, enable_learning: bool)` | 通用对话交互环境，管理会话和对话历史，构造 Executor 预期的 TaskObservation | interactive_agent.py | — |
+| `InteractionEnv.reset` | `(task_description: str) → EnvState` | 创建新会话（UUID + UTC 时间戳），清空历史 | interactive_agent.py | — |
+| `InteractionEnv.receive_input` | `(user_input: str) → None` | 接收用户输入存入 _pending_input | interactive_agent.py | — |
+| `InteractionEnv.build_task_observation` | `() → TaskObservation \| None` | 对齐 LearningEnv 模式：从 pending_input + history 构造 TaskObservation | interactive_agent.py | _format_history_for_prompt() |
+| `InteractionEnv.step` | `(action: str) → EnvStep` | 记录本轮 (user, assistant) 到 history，清空 pending_input | interactive_agent.py | — |
+| `InteractionEnv.get_history` | `() → list[dict]` | 返回 history 的深层副本 | interactive_agent.py | — |
+| `InteractionEnv.session_info` | `() → dict` | 返回当前会话元信息 {id, turns, started_at, enable_learning} | interactive_agent.py | — |
+| `InteractionEnv._format_history_for_prompt` | `() → str` | 将 history 格式化为 `[用户]: ...\n[助手]: ...` 文本 | build_task_observation() | — |
+
 ## core/env/threshold_scorer.py (Phase 2.3 — 从 core/orchestrator/ 迁移)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |

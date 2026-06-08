@@ -11,18 +11,22 @@ class InteractionEnv(Environment):
 
     Follows Environment ABC and LearningEnv communication pattern:
       reset -> receive_input -> build_task_observation -> step
+
+    Note: task_description 在 InteractionEnv 中不使用（不像 LearningEnv 需提取 domain）。
+    InteractionEnv 的 domain 固定为 "interaction"。
     """
 
-    def __init__(self, system_prompt: str, debug: bool = False, enable_learning: bool = True):
-        self._system_prompt = system_prompt
-        self.debug = debug
-        self._enable_learning = enable_learning
-        self._session_id = ""
-        self._session_started_at = ""
+    def __init__(self, system_prompt: str, debug: bool = False,
+                 enable_learning: bool = True):
+        self._system_prompt: str = system_prompt
+        self.debug: bool = debug
+        self._enable_learning: bool = enable_learning
+        self._session_id: str = ""
+        self._session_started_at: str = ""
         self._history: list[dict] = []
-        self._pending_input = ""
+        self._pending_input: str = ""
 
-    def reset(self, task_description: str) -> EnvState:
+    def reset(self, task_description: str = "") -> EnvState:
         self._session_id = uuid.uuid4().hex
         self._session_started_at = datetime.now(timezone.utc).isoformat()
         self._history.clear()
@@ -44,6 +48,8 @@ class InteractionEnv(Environment):
             state={
                 "current": self._pending_input,
                 "history": self._format_history_for_prompt(),
+                # conversation_history 供各层 Agent 结构化解构；
+                # history 供 Executor._build_user_prompt() 拼入文本。
                 "conversation_history": list(self._history),
             },
             session={
@@ -87,3 +93,4 @@ class InteractionEnv(Environment):
             elif entry["role"] == "assistant":
                 lines.append(f"[助手]: {entry['content']}")
         return "\n".join(lines)
+
