@@ -104,9 +104,15 @@ def _parse_skills_from_md(path: Path) -> list[dict]:
 def _load_fixtures(fk, phil, sl, fixtures_dir: Path) -> dict:
     from core.task import Domain
     l1_count = l2_count = l3_count = 0
-    # L1 rules
+    # L1 rules — clean old fixture rules first, then add fresh ones
     fp = fixtures_dir / "consolidation_test_l1.md"
     if fp.exists():
+        for r in phil.all_rules():
+            if r.created_by == "test_fixture":
+                try:
+                    phil.remove_rule(r.id)
+                except Exception:
+                    pass
         for line in fp.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line.startswith("#") or not line or line.startswith("-"):
@@ -127,21 +133,23 @@ def _load_fixtures(fk, phil, sl, fixtures_dir: Path) -> dict:
                             confidence=card["confidence"], source="test_fixture")
                 l2_count += 1
     if sl is not None:
-        fp = fixtures_dir / "consolidation_test_skills.md"
-        if fp.exists():
-            for skill in _parse_skills_from_md(fp):
-                content = (
-                    f"---\n"
-                    f"name: {skill['name']}\n"
-                    f"description: {skill['content'][:80]}\n"
-                    f"domain: game/leduc\n"
-                    f"---\n"
-                    f"{skill['content']}"
-                )
-                sl.create_skill(name=skill["name"], content=content,
-                                domain=Domain("game/leduc", "specific"),
-                                created_by="test_fixture")
-                l3_count += 1
+        for fixture_name, domain_path in [("consolidation_test_skills", "game/leduc"),
+                                           ("consolidation_test_skills_compile", "learning/compile")]:
+            fp = fixtures_dir / f"{fixture_name}.md"
+            if fp.exists():
+                for skill in _parse_skills_from_md(fp):
+                    content = (
+                        f"---\n"
+                        f"name: {skill['name']}\n"
+                        f"description: {skill['content'][:80]}\n"
+                        f"domain: {domain_path}\n"
+                        f"---\n"
+                        f"{skill['content']}"
+                    )
+                    sl.create_skill(name=skill["name"], content=content,
+                                    domain=Domain(domain_path, "specific"),
+                                    created_by="test_fixture")
+                    l3_count += 1
     return {"l1_count": l1_count, "l2_count": l2_count, "l3_count": l3_count}
 
 

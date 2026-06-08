@@ -356,6 +356,45 @@ class LearningEnv(Environment):
         lines.append("")
         lines.append(_CONSOLIDATION_FORMAT)
 
+        # ── Few-shot examples: good vs bad entries ──
+        lines.append("")
+        lines.append("## Few-shot examples")
+        l1_rules = self._knowledge.get("l1")
+        if l1_rules and hasattr(l1_rules, 'all_rules'):
+            all_r = [r for r in l1_rules.all_rules() if r.source == "l1"]
+            good = [r for r in all_r if len(r.content) > 30 and getattr(r, 'version', 1) == 1]
+            bad = [r for r in all_r if len(r.content) < 20 or "模糊" in r.content]
+            lines.append("### L1 Rules")
+            if good:
+                r = good[0]
+                lines.append(f"🟢 GOOD (keep): [{r.id}] {r.content[:120]}")
+            if bad:
+                r = bad[0]
+                lines.append(f"🔴 BAD  (remove): [{r.id}] {r.content[:120]}")
+        if needs_l2:
+            good_cards = [c for c in l2.cards if c.confidence > 0.7 and len(c.content) > 30]
+            bad_cards = [c for c in l2.cards if c.confidence < 0.2]
+            lines.append("### L2 Cards")
+            if good_cards:
+                lines.append(f"🟢 GOOD (keep): [{good_cards[0].id}] conf={good_cards[0].confidence:.1f} {good_cards[0].content[:120]}")
+            if bad_cards:
+                lines.append(f"🔴 BAD  (remove): [{bad_cards[0].id}] conf={bad_cards[0].confidence:.2f} {bad_cards[0].content[:120]}")
+        if needs_l3:
+            good_skills = []
+            bad_skills = []
+            for s in l3.list_all():
+                conf = getattr(s, 'confidence', None)
+                if isinstance(conf, (int, float)):
+                    if conf > 0.5:
+                        good_skills.append(s)
+                    elif conf < 0.2:
+                        bad_skills.append(s)
+            lines.append("### L3 Skills")
+            if good_skills:
+                lines.append(f"🟢 GOOD (keep): [{good_skills[0].name}] {good_skills[0].description[:120]}")
+            if bad_skills:
+                lines.append(f"🔴 BAD  (remove): [{bad_skills[0].name}] {bad_skills[0].description[:120]}")
+
         # ── Append per-layer output format from spec ──
         if spec:
             lines.append("")
