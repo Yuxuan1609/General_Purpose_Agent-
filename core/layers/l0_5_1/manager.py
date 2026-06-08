@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 from core.types import TaskObservation
-from core.layers.base import LayerManager, LayerAgent, _indent
+from core.layers.base import LayerManager, LayerAgent, _indent, DictInjector
 from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l0_5_1")
@@ -48,17 +48,48 @@ class L1Agent(LayerAgent):
         "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
     }
 
-    # Learning/consolidation output format — injected into prompt, NOT JSON schema
-    _L1_MOD_FORMAT = (
-        "## 输出格式\n"
-        "使用 @modify 标记格式输出 L1 行为准则的修改，每行一条：\n"
-        "  @modify layer=l1 type=deprecate target=l1/<rule_id> reason=\"合并到 xxx\"\n"
-        "  @modify layer=l1 type=create target=l1_new_id content=\"新规则文本\" reason=\"基于 evidence\"\n"
-        "  @modify layer=l1 type=update target=l1/<rule_id> content=\"修改后的规则\" reason=\"理由\"\n"
-        "注意：只修改 L1 行为准则。不要修改 L2 知识卡片或 L3 技能。\n"
-        "content 和 reason 使用双引号，内部使用单引号。每条 @modify 独占一行。\n"
-        "优先使用 deprecate（可回滚），非必要不 create。不要输出任何 JSON。"
-    )
+    # Learning/consolidation — tool call instead of @modify text
+    _L1_CONSOLIDATION_TOOLS: list[dict] = [
+        {"type": "function", "function": {
+            "name": "deprecate_l1_rule",
+            "description": "删除一条 L1 行为准则",
+            "parameters": {"type": "object", "properties": {
+                "rule_id": {"type": "string", "description": "要删除的规则 id，如 l1_001"},
+                "reason": {"type": "string", "description": "删除理由"},
+            }, "required": ["rule_id", "reason"]},
+        }},
+        {"type": "function", "function": {
+            "name": "create_l1_rule",
+            "description": "创建一条 L1 行为准则",
+            "parameters": {"type": "object", "properties": {
+                "content": {"type": "string", "description": "完整规则文本"},
+                "reason": {"type": "string", "description": "创建理由"},
+            }, "required": ["content", "reason"]},
+        }},
+    ]
+
+    def _setup_l1_consolidation(self):
+        """Wire DictInjector for L1 consolidation tools."""
+        agent = self
+
+        def deprecate_l1_rule(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "deprecate", "target": args["rule_id"],
+                "reason": args["reason"], "layer": "l1",
+            })
+            return f"已记录: 删除 {args['rule_id']}"
+
+        def create_l1_rule(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "create", "target": "", "layer": "l1",
+                "content": args["content"], "reason": args["reason"],
+            })
+            return f"已记录: 创建新规则"
+
+        self._injector = DictInjector({
+            "deprecate_l1_rule": deprecate_l1_rule,
+            "create_l1_rule": create_l1_rule,
+        })
 
     def __init__(self, llm_client, philosophy):
         super().__init__(llm_client, logger)
@@ -142,8 +173,7 @@ class L1Agent(LayerAgent):
     def stage2(self, meta: str, state: dict,
                l2_result: dict | None = None) -> dict:
         """Stage2: integrate L2 knowledge and produce final decision.
-        Only sees L2's reply + reasoning, not L2's modifications.
-        For learning tasks: outputs @modify markup instead of JSON.
+        For consolidation: uses tool calls to record modifications.
         """
         l1_fmt = state.get("l1_output_format")
 
@@ -155,7 +185,7 @@ class L1Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
                 "不要修改 L2 知识卡片或 L3 技能。"
-                "根据下层（L2）的建议和自身判断，决定哪些 L1 规则需要增删改。"
+                "使用工具 deprecate_l1_rule / create_l1_rule 记录修改。"
             )
         system = self._build_system_prompt(instruction, meta)
 
@@ -171,11 +201,13 @@ class L1Agent(LayerAgent):
         user = f"{self._build_user_context(state)}\n\n[下层任务返回]\n{response_text}"
 
         if l1_fmt:
-            user += f"\n\n{self._L1_MOD_FORMAT}"
+            self._setup_l1_consolidation()
+            tools = self._L1_CONSOLIDATION_TOOLS
             schema = None
         else:
+            tools = None
             schema = self.STAGE2_SCHEMA
-        result = self._call_llm(system, user, schema=schema)
+        result = self._call_llm(system, user, schema=schema, tools=tools, layer="l1")
 
         return result
 
@@ -269,5 +301,10 @@ class L0_5_1Manager(LayerManager):
 
     def notify(self) -> Any:
         if self._final_result:
-            return self._final_result
+            result = dict(self._final_result)
+            if self._agent:
+                mods = self._agent.get_pending_mods()
+                if mods:
+                    result["l1_modifications"] = mods
+            return result
         return {"status": "ok", "layer": self.name}

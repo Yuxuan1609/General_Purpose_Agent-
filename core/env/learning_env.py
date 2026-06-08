@@ -183,6 +183,20 @@ class LearningEnv(Environment):
             return EnvStep(
                 state=EnvState(observation="(no modifications parsed)"),
                 reward=0.0, done=True)
+        return self._apply_parsed_mods(parsed)
+
+    def apply_modifications(self, notify_layers: dict) -> EnvStep:
+        """Apply structured modifications from tool calls (consolidation).
+        notify_layers: {"l0_5_1": {...l1_modifications: [...]}, "l2": {...}, "l3": {...}}
+        """
+        parsed: dict = {
+            "l1_modifications": notify_layers.get("l0_5_1", {}).get("l1_modifications", []),
+            "l2_modifications": notify_layers.get("l2", {}).get("l2_modifications", []),
+            "l3_modifications": notify_layers.get("l3", {}).get("l3_modifications", []),
+        }
+        return self._apply_parsed_mods(parsed)
+
+    def _apply_parsed_mods(self, parsed: dict) -> EnvStep:
 
         if not self._dry_run:
             self._update_usage_stats(parsed)

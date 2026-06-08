@@ -251,24 +251,10 @@ def main():
                    json.dumps(notify_layers.get(layer_key, {}),
                               ensure_ascii=False, default=str, indent=2))
 
-    # ── Parse @modify from ALL layer NOTIFY (not just L1's result) ──
-    # L2's reply contains @modify lines; L1's result is a summary.
-    all_text = result.get("action_text", "")
-    for layer_key in ("l2", "l3", "l0_5_1"):
-        layer_notify = notify_layers.get(layer_key, {})
-        reply = layer_notify.get("reply", "")
-        if reply:
-            all_text += "\n" + reply
-
-    _write_log(env_log, "Combined text for @modify parsing",
-               f"L1 result: {len(result.get('action_text', ''))} chars\n"
-               f"Total text: {len(all_text)} chars")
-    _write_log(env_log, "Full combined text", all_text[:5000])
-
-    parsed = lenv._parse_markup_modifications(all_text)
+    # ── Collect tool call modifications from notify layers ──
     summary_lines = []
-    for mod_key in ("l1_modifications", "l2_modifications", "l3_modifications"):
-        mods = parsed.get(mod_key, [])
+    for mod_key, layer_label in [("l1_modifications", "L1"), ("l2_modifications", "L2"), ("l3_modifications", "L3")]:
+        mods = notify_layers.get({"l1_modifications": "l0_5_1", "l2_modifications": "l2", "l3_modifications": "l3"}[mod_key], {}).get(mod_key, [])
         if not mods:
             summary_lines.append(f"{mod_key}: 0 modifications")
             continue
@@ -277,14 +263,19 @@ def main():
             t = m.get("type", "?")
             types[t] = types.get(t, 0) + 1
         summary_lines.append(f"{mod_key}: {len(mods)} modifications {types}")
+        types = {}
+        for m in mods:
+            t = m.get("type", "?")
+            types[t] = types.get(t, 0) + 1
+        summary_lines.append(f"{mod_key}: {len(mods)} modifications {types}")
 
-    _write_log(env_log, "Parsed @modify summary", "\n".join(summary_lines))
-    _write_log(env_log, "Full parsed modifications",
-               json.dumps(parsed, ensure_ascii=False, indent=2))
+    _write_log(env_log, "Tool call modifications summary", "\n".join(summary_lines))
+    _write_log(env_log, "Full notify_layers",
+               json.dumps(notify_layers, ensure_ascii=False, indent=2, default=str))
 
     # ── LearningEnv applies (dry_run — no actual changes) ──
-    step = lenv.step(all_text)
-    _write_log(env_log, "LearningEnv.step()",
+    step = lenv.apply_modifications(notify_layers)
+    _write_log(env_log, "LearningEnv.apply_modifications()",
                f"state: {step.state.observation}\nreward: {step.reward}\ndone: {step.done}")
 
     _write_log(env_log, "Done", "dry_run=True — no modifications applied. "

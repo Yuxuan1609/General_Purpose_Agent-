@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from core.task import Domain
 from core.types import TaskObservation
-from core.layers.base import LayerManager, LayerAgent, _indent
+from core.layers.base import LayerManager, LayerAgent, _indent, DictInjector
 from core.layers.comm import AgentPacket
 from core.layer_message import LayerMessage
 
@@ -83,17 +83,49 @@ class L2Agent(LayerAgent):
         "reasoning": "string (综合推理过程)",
     }
 
-    # Learning/consolidation output format — injected into prompt, NOT JSON schema
-    _L2_MOD_FORMAT = (
-        "## 输出格式\n"
-        "使用 @modify 标记格式输出 L2 知识卡片的修改，每行一条：\n"
-        "  @modify layer=l2 type=deprecate target=<card_id> reason=\"理由\"\n"
-        "  @modify layer=l2 type=create target=new_id content=\"卡片内容\" domain=\"game/leduc\" reason=\"理由\"\n"
-        "  @modify layer=l2 type=update target=<card_id> content=\"修改后内容\" reason=\"理由\"\n"
-        "注意：只修改 L2 知识卡片。不要修改 L1 行为准则或 L3 技能。\n"
-        "content 和 reason 使用双引号，内部使用单引号。每条 @modify 独占一行。\n"
-        "优先使用 deprecate（可回滚），非必要不 create。不要输出任何 JSON。"
-    )
+    # Learning/consolidation — tool call instead of @modify text
+    _L2_CONSOLIDATION_TOOLS: list[dict] = [
+        {"type": "function", "function": {
+            "name": "deprecate_l2_card",
+            "description": "删除一张 L2 知识卡片",
+            "parameters": {"type": "object", "properties": {
+                "card_id": {"type": "string", "description": "卡片 id"},
+                "reason": {"type": "string", "description": "删除理由"},
+            }, "required": ["card_id", "reason"]},
+        }},
+        {"type": "function", "function": {
+            "name": "create_l2_card",
+            "description": "创建一张 L2 知识卡片",
+            "parameters": {"type": "object", "properties": {
+                "content": {"type": "string", "description": "完整卡片内容"},
+                "domain": {"type": "string", "description": "所属 domain，如 game/leduc"},
+                "reason": {"type": "string", "description": "创建理由"},
+            }, "required": ["content", "domain", "reason"]},
+        }},
+    ]
+
+    def _setup_l2_consolidation(self):
+        agent = self
+
+        def deprecate_l2_card(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "deprecate", "target": args["card_id"],
+                "reason": args["reason"], "layer": "l2",
+            })
+            return f"已记录: 删除 {args['card_id']}"
+
+        def create_l2_card(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "create", "target": "", "layer": "l2",
+                "content": args["content"], "domain": args["domain"],
+                "reason": args["reason"],
+            })
+            return f"已记录: 创建新卡片"
+
+        self._injector = DictInjector({
+            "deprecate_l2_card": deprecate_l2_card,
+            "create_l2_card": create_l2_card,
+        })
 
     def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None):
         super().__init__(llm_client, logger)
@@ -195,7 +227,7 @@ class L2Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L2 知识卡片（KnowledgeCard）的修改。"
                 "不要修改 L1 行为准则或 L3 技能。"
-                "根据知识卡片列表和 usage stats，判断哪些卡片需要合并、删除或创建。"
+                "使用工具 deprecate_l2_card / create_l2_card 记录修改。"
             )
         system = self._build_system_prompt(instruction, meta)
 
@@ -209,7 +241,8 @@ class L2Agent(LayerAgent):
                 f"call_l3: {stage1_result.get('call_l3', False)}\n"
                 f"l3_task: {stage1_result.get('l3_task', '')}"
             )
-            user += f"\n\n{self._L2_MOD_FORMAT}"
+            self._setup_l2_consolidation()
+            tools = self._L2_CONSOLIDATION_TOOLS
             schema = None
         else:
             current = state.get("current", "")
@@ -220,7 +253,9 @@ class L2Agent(LayerAgent):
                 f"[L3 返回]\n{l3_text}"
             )
 
-        return self._call_llm(system, user, schema=None if l2_fmt else self.STAGE2_SCHEMA)
+        return self._call_llm(system, user,
+                              schema=None if l2_fmt else self.STAGE2_SCHEMA,
+                              tools=tools if l2_fmt else None, layer="l2")
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
         all_cards = []
@@ -404,7 +439,12 @@ class L2Manager(LayerManager):
 
     def notify(self) -> Any:
         if self._result:
-            return self._result
+            result = dict(self._result)
+            if self._agent:
+                mods = self._agent.get_pending_mods()
+                if mods:
+                    result["l2_modifications"] = mods
+            return result
         return {"status": "ok", "layer": self.name}
 
 

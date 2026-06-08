@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from core.task import Domain
 from core.types import TaskObservation
-from core.layers.base import LayerManager, LayerAgent
+from core.layers.base import LayerManager, LayerAgent, DictInjector
 from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l3")
@@ -42,17 +42,50 @@ class L3Agent(LayerAgent):
         "reasoning": "string (技能选择和执行的推理过程)",
     }
 
-    # Learning/consolidation output format — injected into prompt, NOT JSON schema
-    _L3_MOD_FORMAT = (
-        "## 输出格式\n"
-        "使用 @modify 标记格式输出 L3 技能的修改，每行一条：\n"
-        "  @modify layer=l3 type=deprecate target=<skill_name> reason=\"理由\"\n"
-        "  @modify layer=l3 type=create target=new_name content=\"SKILL.md内容\" domain=\"game/leduc\" reason=\"理由\"\n"
-        "  @modify layer=l3 type=update target=<skill_name> content=\"修改后内容\" reason=\"理由\"\n"
-        "注意：只修改 L3 技能。不要修改 L1 行为准则或 L2 知识卡片。\n"
-        "content 和 reason 使用双引号，内部使用单引号。每条 @modify 独占一行。\n"
-        "优先使用 deprecate（可回滚），非必要不 create。不要输出任何 JSON。"
-    )
+    # Learning/consolidation — tool call instead of @modify text
+    _L3_CONSOLIDATION_TOOLS: list[dict] = [
+        {"type": "function", "function": {
+            "name": "deprecate_l3_skill",
+            "description": "删除一个 L3 技能",
+            "parameters": {"type": "object", "properties": {
+                "skill_name": {"type": "string", "description": "技能名称"},
+                "reason": {"type": "string", "description": "删除理由"},
+            }, "required": ["skill_name", "reason"]},
+        }},
+        {"type": "function", "function": {
+            "name": "create_l3_skill",
+            "description": "创建一个 L3 技能",
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "技能名称"},
+                "content": {"type": "string", "description": "完整 SKILL.md 内容"},
+                "domain": {"type": "string", "description": "所属 domain"},
+                "reason": {"type": "string", "description": "创建理由"},
+            }, "required": ["name", "content", "domain", "reason"]},
+        }},
+    ]
+
+    def _setup_l3_consolidation(self):
+        agent = self
+
+        def deprecate_l3_skill(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "deprecate", "target": args["skill_name"],
+                "reason": args["reason"], "layer": "l3",
+            })
+            return f"已记录: 删除 {args['skill_name']}"
+
+        def create_l3_skill(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "create", "target": args["name"], "layer": "l3",
+                "content": args["content"], "domain": args["domain"],
+                "reason": args["reason"],
+            })
+            return f"已记录: 创建 {args['name']}"
+
+        self._injector = DictInjector({
+            "deprecate_l3_skill": deprecate_l3_skill,
+            "create_l3_skill": create_l3_skill,
+        })
 
     def __init__(self, llm_client):
         super().__init__(llm_client, logger)
@@ -101,7 +134,7 @@ class L3Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L3 技能（Skill）的修改。"
                 "不要修改 L1 行为准则或 L2 知识卡片。"
-                "根据可用技能列表和 usage stats，判断哪些技能需要合并、删除或创建。"
+                "使用工具 deprecate_l3_skill / create_l3_skill 记录修改。"
             )
         system = self._build_system_prompt(instruction, meta)
         user = (
@@ -112,11 +145,13 @@ class L3Agent(LayerAgent):
         )
 
         if l3_fmt:
-            user += f"\n\n{self._L3_MOD_FORMAT}"
+            self._setup_l3_consolidation()
+            tools = self._L3_CONSOLIDATION_TOOLS
             schema = None
         else:
+            tools = None
             schema = self.EXECUTE_SCHEMA
-        return self._call_llm(system, user, schema=schema)
+        return self._call_llm(system, user, schema=schema, tools=tools, layer="l3")
 
 
 class L3Manager(LayerManager):
@@ -214,15 +249,15 @@ class L3Manager(LayerManager):
             self._downstream.query(q_msg, trace_id)
 
     def notify(self) -> Any:
+        result: dict = {"status": "ok", "layer": "l3", "skills_matched": len(self._matched)}
         if self._result:
-            return {
-                "skills_matched": len(self._matched),
+            result.update({
                 "skills_used": self._result.get("skills_used", []),
                 "result": self._result.get("result", ""),
                 "reasoning": self._result.get("reasoning", ""),
-            }
-        return {
-            "status": "ok",
-            "layer": "l3",
-            "skills_matched": len(self._matched),
-        }
+            })
+        if self._agent:
+            mods = self._agent.get_pending_mods()
+            if mods:
+                result["l3_modifications"] = mods
+        return result

@@ -8,6 +8,32 @@ from core.layer_message import LayerMessage
 from core.layers.comm import UpwardComm, DownwardComm
 
 
+class DictInjector:
+    """Lightweight tool injector — maps function names to handler callables."""
+
+    def __init__(self, handlers: dict[str, callable]):
+        self._handlers = handlers
+
+    def execute_tool_call(self, layer: str, name: str, arguments_json: str):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _TR:
+            success: bool
+            data: dict
+            error: str = ""
+
+        handler = self._handlers.get(name)
+        if handler is None:
+            return _TR(success=False, data={}, error=f"Unknown: {name}")
+        try:
+            args = json.loads(arguments_json) if arguments_json else {}
+            result = handler(args)
+            return _TR(success=True, data={"result": result})
+        except Exception as e:
+            return _TR(success=False, data={}, error=str(e))
+
+
 def _indent(text: str, spaces: int) -> str:
     prefix = " " * spaces
     return prefix + text.replace("\n", "\n" + prefix)
@@ -28,6 +54,12 @@ class LayerAgent(ABC):
         self._llm = llm_client
         self._log = log
         self._injector = None  # set externally after construction
+        self._pending_mods: list[dict] = []
+
+    def get_pending_mods(self) -> list[dict]:
+        mods = self._pending_mods.copy()
+        self._pending_mods.clear()
+        return mods
 
     def set_injector(self, injector):
         """Attach a LayerInjector for tool calling capability."""
