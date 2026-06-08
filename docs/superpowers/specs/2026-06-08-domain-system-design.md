@@ -256,6 +256,8 @@ def get_tools_for_domain(domain: str) -> list[ToolDefinition]:
 
 以上为 design skeleton。Greedy-explore balance 和 Expand 决策阈值细节后续在 implementation plan 中细化。
 
+> **与 Agent while 循环的合并**：当前 L1 已有 `MAX_LOOPS` 机制（line 29, `l0_5_1/manager.py`），Expand 循环不是新增独立循环，而是在现有 V-structure 循环内扩展：L1 的某次 loop 中如果 REFLECT 判定信息不足，下一轮 stage1 传入更广的 domain 列表（primary → primary + explore），L2/L3 自然也获得更多 items。循环退出条件不变（L1 判定 done 或达到 MAX_LOOPS）。
+
 ---
 
 ## 自优化：跨域归属学习
@@ -278,23 +280,19 @@ LearningEnv 调用 `registry.update_item_domains("tool", "poker_odds_calculator"
 
 ## 迁移计划
 
-### Phase 1: DomainRegistry 核心（本次实现）
+### Phase 1: DomainRegistry 核心 + 层间接入（本次实现）
 
 1. 新建 `data/layers/domain_registry.json`（初始节点同当前硬编码值）
 2. 新建 `core/domain_registry.py`（DomainRegistry 类 + DomainNode dataclass）
 3. 废弃 `core/task.py` 中 Domain 的 `level` 字段（保留 path 兼容过渡）
 4. 修改 `core/seed_knowledge.py`：初始化 registry 节点 + 索引 seed items
-5. 给 KnowledgeCard / SkillMeta / ToolDefinition 加 `available_domains` 字段
-6. 同步维护 `reverse_index`
+5. 给 KnowledgeCard / SkillMeta / ToolDefinition 加 `available_domains` 字段，同步维护 `reverse_index`
+6. L1: `L2_DOMAIN_NODES` → `registry.list_all()`
+7. L2: 双路召回（primary + explore）
+8. L3: 技能匹配改为 registry 反向索引
+9. Tool: 新增 domain 过滤
 
-### Phase 2: 层间接入
-
-1. L1: `L2_DOMAIN_NODES` → `registry.list_all()`
-2. L2: 双路召回（primary + explore）
-3. L3: 技能匹配改为 registry 反向索引
-4. Tool: 新增 domain 过滤
-
-### Phase 3: 自优化与 Expand 循环
+### Phase 2: 自优化与 Expand 循环
 
 1. LearningEnv consolidation 支持 domain 节点增改
 2. Execute-Reflect-Expand 循环实现
