@@ -135,3 +135,54 @@ class TestDomainRegistry:
         reg = self._setup_registry_with_index()
         items = reg.get_items_for_domains("l2", ["game/leduc", "game/doudizhu"])
         assert sorted(items) == ["card_1", "card_2", "card_3"]
+
+    def test_index_and_unindex(self):
+        reg = DomainRegistry()
+        reg.index_item("l2", "game/leduc", "card_1")
+        assert reg.get_primary_items("l2", "game/leduc") == ["card_1"]
+        reg.index_item("l2", "game/leduc", "card_2")
+        assert reg.get_primary_items("l2", "game/leduc") == ["card_1", "card_2"]
+        reg.index_item("l2", "game/leduc", "card_1")  # no dupe
+        assert reg.get_primary_items("l2", "game/leduc") == ["card_1", "card_2"]
+        reg.unindex_item("l2", "game/leduc", "card_1")
+        assert reg.get_primary_items("l2", "game/leduc") == ["card_2"]
+
+    def test_update_item_domains(self):
+        reg = DomainRegistry()
+        reg.index_item("l2", "game/leduc", "card_x")
+        reg.index_item("l2", "game/doudizhu", "card_x")
+        reg.update_item_domains("l2", "card_x", ["game/leduc", "coding"])
+        assert reg.get_primary_items("l2", "game/leduc") == ["card_x"]
+        assert reg.get_primary_items("l2", "game/doudizhu") == []
+        assert reg.get_primary_items("l2", "coding") == ["card_x"]
+
+    def test_add_node(self):
+        reg = DomainRegistry()
+        node = reg.add_node("coding/python", parent="coding",
+                            description="Python stuff",
+                            correlations={"coding": 0.9},
+                            relations="sub of coding")
+        retrieved = reg.get_node("coding/python")
+        assert retrieved is node
+        assert retrieved.description == "Python stuff"
+        assert len(reg) == 1
+
+    def test_update_correlation(self):
+        reg = DomainRegistry()
+        reg.add_node("a", None, "A")
+        reg.add_node("b", None, "B", correlations={"a": 0.3})
+        reg.update_correlation("a", "b", 0.7)
+        assert reg.get_node("a").correlations == {"b": 0.7}
+        assert reg.get_node("b").correlations == {"a": 0.7}
+
+    def test_update_node(self):
+        reg = DomainRegistry()
+        reg.add_node("x", None, "old desc")
+        result = reg.update_node("x", description="new desc", relations="hi")
+        assert result is not None
+        assert reg.get_node("x").description == "new desc"
+        assert reg.get_node("x").relations == "hi"
+
+    def test_update_node_nonexistent(self):
+        reg = DomainRegistry()
+        assert reg.update_node("nope", description="x") is None

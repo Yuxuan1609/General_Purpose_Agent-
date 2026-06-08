@@ -28,6 +28,59 @@ class DomainRegistry:
     def children_of(self, path: str) -> list[DomainNode]:
         return [n for n in self._nodes.values() if n.parent == path]
 
+    # ── index management ──
+
+    def index_item(self, layer: str, domain: str, item_id: str) -> None:
+        idx = self._reverse_index.setdefault(layer, {})
+        lst = idx.setdefault(domain, [])
+        if item_id not in lst:
+            lst.append(item_id)
+
+    def unindex_item(self, layer: str, domain: str, item_id: str) -> None:
+        idx = self._reverse_index.get(layer, {})
+        lst = idx.get(domain, [])
+        if item_id in lst:
+            lst.remove(item_id)
+
+    def update_item_domains(self, layer: str, item_id: str,
+                            domains: list[str]) -> None:
+        idx = self._reverse_index.get(layer, {})
+        for d, lst in idx.items():
+            if item_id in lst:
+                lst.remove(item_id)
+        for d in domains:
+            self.index_item(layer, d, item_id)
+
+    # ── graph management ──
+
+    def add_node(self, path: str, parent: str | None,
+                 description: str = "",
+                 correlations: dict[str, float] | None = None,
+                 relations: str = "") -> DomainNode:
+        node = DomainNode(
+            path=path, parent=parent, description=description,
+            correlations=correlations or {}, relations=relations,
+        )
+        self._nodes[path] = node
+        return node
+
+    def update_correlation(self, a: str, b: str, weight: float) -> None:
+        node_a = self._nodes.get(a)
+        if node_a:
+            node_a.correlations[b] = weight
+        node_b = self._nodes.get(b)
+        if node_b:
+            node_b.correlations[a] = weight
+
+    def update_node(self, path: str, **fields) -> DomainNode | None:
+        node = self._nodes.get(path)
+        if node is None:
+            return None
+        for key, val in fields.items():
+            if hasattr(node, key):
+                object.__setattr__(node, key, val)
+        return node
+
     def get_primary_items(self, layer: str, domain: str) -> list[str]:
         idx = self._reverse_index.get(layer, {})
         items = idx.get(domain, [])
