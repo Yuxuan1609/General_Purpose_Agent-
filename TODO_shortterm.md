@@ -24,3 +24,13 @@
 - **File**: `core/env/learning_env.py` → `_apply_parsed_mods()`
 - **Issue**: `apply_modifications()` summary shows "L2 cards: card_1, card_2, ..." which is unreadable with 20+ items
 - **Idea**: Summarize as "L2: 22 deprecate'd, 1 created" instead of listing all targets
+
+## 6. DeepSeek strict mode + prompt optimization
+- **File**: `core/layers/base.py`, `core/layers/l*/manager.py`
+- **Issue**: Tool definitions lack `strict: true`; consolidation prompts don't guide tool usage strategy
+- **Idea**: Enable strict mode (requires `/beta` endpoint + `additionalProperties: false` on all params + all properties in required). Add few-shot tool call examples to system prompts.
+
+## 7. Full ToolRegistry mounting
+- **File**: `core/layers/base.py`, `core/tools/registry.py`, `capability/`
+- **Issue**: Only consolidation tools (6 functions) are mounted; registered tools (web_search, terminal, etc.) never injected
+- **Idea**: Wire `ToolRegistry.get_tools_for_domain()` into all layer `_call_llm()` calls, filtered by current task domain. Decide whether to use existing `LayerInjector`/`CapabilityRegistry` or a simpler approach.
