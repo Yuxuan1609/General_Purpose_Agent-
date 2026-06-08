@@ -46,21 +46,21 @@ class L3Agent(LayerAgent):
     _L3_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "deprecate_l3_skill",
-            "description": "删除一个 L3 技能",
+            "description": "废弃（删除）一个 L3 技能。用于移除低质量、从未使用或功能重叠的技能。",
             "parameters": {"type": "object", "properties": {
-                "skill_name": {"type": "string", "description": "技能名称"},
-                "reason": {"type": "string", "description": "删除理由"},
-            }, "required": ["skill_name", "reason"]},
+                "skill_name": {"type": "string", "description": "技能名称，如 leduc-bad-1"},
+                "reason": {"type": "string", "description": "删除理由，如'低质量从未被匹配'或'与另一技能功能重叠'"},
+            }, "required": ["skill_name", "reason"], "additionalProperties": False},
         }},
         {"type": "function", "function": {
             "name": "create_l3_skill",
-            "description": "创建一个 L3 技能",
+            "description": "创建一个新的 L3 技能。用于将高激活同域卡片编译为可复用的标准化技能。",
             "parameters": {"type": "object", "properties": {
-                "name": {"type": "string", "description": "技能名称"},
-                "content": {"type": "string", "description": "完整 SKILL.md 内容"},
-                "domain": {"type": "string", "description": "所属 domain"},
-                "reason": {"type": "string", "description": "创建理由"},
-            }, "required": ["name", "content", "domain", "reason"]},
+                "name": {"type": "string", "description": "技能名称，kebab-case 格式如 leduc-preflop-strategy"},
+                "content": {"type": "string", "description": "完整 SKILL.md 内容（YAML frontmatter + Markdown body）"},
+                "domain": {"type": "string", "description": "所属 domain，如 game/leduc"},
+                "reason": {"type": "string", "description": "创建理由，如'编译自3张高激活配对加注卡片'"},
+            }, "required": ["name", "content", "domain", "reason"], "additionalProperties": False},
         }},
     ]
 

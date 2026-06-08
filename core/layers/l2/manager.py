@@ -87,20 +87,20 @@ class L2Agent(LayerAgent):
     _L2_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "deprecate_l2_card",
-            "description": "删除一张 L2 知识卡片",
+            "description": "废弃（删除）一张 L2 知识卡片。用于移除低置信度、从未使用或高度冗余的策略卡片。",
             "parameters": {"type": "object", "properties": {
-                "card_id": {"type": "string", "description": "卡片 id"},
-                "reason": {"type": "string", "description": "删除理由"},
-            }, "required": ["card_id", "reason"]},
+                "card_id": {"type": "string", "description": "卡片 id，如 card_xxxxxxxx"},
+                "reason": {"type": "string", "description": "删除理由，如'合并到 leduc_K_preflop'或'低置信度从未使用'"},
+            }, "required": ["card_id", "reason"], "additionalProperties": False},
         }},
         {"type": "function", "function": {
             "name": "create_l2_card",
-            "description": "创建一张 L2 知识卡片",
+            "description": "创建一张新的 L2 知识卡片。用于合并多张相似卡片为一条精炼策略。",
             "parameters": {"type": "object", "properties": {
-                "content": {"type": "string", "description": "完整卡片内容"},
-                "domain": {"type": "string", "description": "所属 domain，如 game/leduc"},
-                "reason": {"type": "string", "description": "创建理由"},
-            }, "required": ["content", "domain", "reason"]},
+                "content": {"type": "string", "description": "完整卡片内容，格式：[场景] → [行动] + [理由]"},
+                "domain": {"type": "string", "description": "所属 domain，如 game/leduc 或 game/doudizhu"},
+                "reason": {"type": "string", "description": "创建理由，如'合并了3张K翻牌前加注策略卡片'"},
+            }, "required": ["content", "domain", "reason"], "additionalProperties": False},
         }},
     ]
 

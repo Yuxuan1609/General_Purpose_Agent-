@@ -52,19 +52,19 @@ class L1Agent(LayerAgent):
     _L1_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "deprecate_l1_rule",
-            "description": "删除一条 L1 行为准则",
+            "description": "废弃（删除）一条 L1 行为准则。用于移除重复、低质量或违反跨领域原则的规则。",
             "parameters": {"type": "object", "properties": {
                 "rule_id": {"type": "string", "description": "要删除的规则 id，如 l1_001"},
-                "reason": {"type": "string", "description": "删除理由"},
-            }, "required": ["rule_id", "reason"]},
+                "reason": {"type": "string", "description": "删除理由，如'与另一条重复'或'内容模糊'"},
+            }, "required": ["rule_id", "reason"], "additionalProperties": False},
         }},
         {"type": "function", "function": {
             "name": "create_l1_rule",
-            "description": "创建一条 L1 行为准则",
+            "description": "创建一条新的 L1 行为准则。用于合并重复规则或添加新的通用原则。",
             "parameters": {"type": "object", "properties": {
-                "content": {"type": "string", "description": "完整规则文本"},
-                "reason": {"type": "string", "description": "创建理由"},
-            }, "required": ["content", "reason"]},
+                "content": {"type": "string", "description": "完整规则文本，1-2句清晰可执行的行为准则"},
+                "reason": {"type": "string", "description": "创建理由，如'合并了3条概率决策规则'"},
+            }, "required": ["content", "reason"], "additionalProperties": False},
         }},
     ]
 
