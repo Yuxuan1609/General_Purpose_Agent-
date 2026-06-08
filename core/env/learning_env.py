@@ -147,6 +147,12 @@ class LearningEnv(Environment):
         self._base_domain: str = "general"
         self._stats: dict = self._load_stats()
 
+        # Per-layer reverse-notify feedback — populated by step(),
+        # consumed by build_task_observation() / build_consolidation_task().
+        # feedback (shared, read by all layers) + lX_feedback (per-layer).
+        self._shared_feedback: str = ""
+        self._layer_feedback: dict[str, str] = {}
+
     # ── public API ──────────────────────────────────────────────────────
 
     def reset(self, task_description: str) -> EnvState:
@@ -182,17 +188,35 @@ class LearningEnv(Environment):
             self._update_usage_stats(parsed)
 
         summary = {"l1": [], "l2": [], "l3": [], "errors": []}
+        feedback: dict[str, list[str]] = {"l1": [], "l2": [], "l3": []}
         for layer_key in ("l1", "l2", "l3"):
             mods = parsed.get(f"{layer_key}_modifications", [])
             for mod in mods:
+                target = mod.get("target", "?")
+                mod_type = mod.get("type", "?")
                 try:
                     if not self._dry_run:
                         self._apply_layer_mod(layer_key, mod)
-                    summary[layer_key].append(mod.get("target", "?"))
+                    summary[layer_key].append(target)
+                    feedback[layer_key].append(f"{mod_type} {target}: ok")
                 except Exception as e:
                     summary["errors"].append(
-                        {"target": mod.get("target", "?"), "error": str(e)})
+                        {"target": target, "error": str(e)})
+                    feedback[layer_key].append(f"{mod_type} {target}: REJECTED ({e})")
                     logger.warning("Failed to apply %s mod: %s", layer_key, e)
+        self._layer_feedback = {
+            "l1": "\n".join(feedback["l1"]) if feedback["l1"] else "",
+            "l2": "\n".join(feedback["l2"]) if feedback["l2"] else "",
+            "l3": "\n".join(feedback["l3"]) if feedback["l3"] else "",
+        }
+        total = sum(len(v) for v in feedback.values())
+        ok_count = sum(1 for v in feedback.values() for x in v if x.endswith(": ok"))
+        rej_count = total - ok_count
+        mode = "dry-run (未实际应用)" if self._dry_run else "已应用"
+        self._shared_feedback = (
+            f"本次共 {total} 条修改 ({mode})：{ok_count} 成功"
+            + (f"，{rej_count} 被拒" if rej_count else "")
+        )
 
         if not self._dry_run:
             self._save_stats()
@@ -219,6 +243,10 @@ class LearningEnv(Environment):
                 "l1_output_format": _L1_OUTPUT,
                 "l2_output_format": _L2_OUTPUT,
                 "l3_output_format": _L3_OUTPUT,
+                "feedback": self._shared_feedback,
+                "l1_feedback": self._layer_feedback.get("l1", ""),
+                "l2_feedback": self._layer_feedback.get("l2", ""),
+                "l3_feedback": self._layer_feedback.get("l3", ""),
             },
             session={
                 "domain": self._base_domain,
@@ -338,7 +366,17 @@ class LearningEnv(Environment):
 
         return TaskObservation(
             meta="\n".join(lines),
-            state={"current": "\n".join(lines[:10]), "history": ""},
+            state={
+                "current": "\n".join(lines[:10]),
+                "history": "",
+                "l1_output_format": _L1_OUTPUT,
+                "l2_output_format": _L2_OUTPUT,
+                "l3_output_format": _L3_OUTPUT,
+                "feedback": self._shared_feedback,
+                "l1_feedback": self._layer_feedback.get("l1", ""),
+                "l2_feedback": self._layer_feedback.get("l2", ""),
+                "l3_feedback": self._layer_feedback.get("l3", ""),
+            },
             session={
                 "domain": "learning/compile",
                 "domains_hint": ["learning/compile", self._base_domain],
