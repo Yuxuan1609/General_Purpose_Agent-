@@ -1,12 +1,39 @@
 """Seed knowledge — populate initial L2 cards and L3 skills."""
 import logging
+from pathlib import Path
 
 from core.task import Domain
 
 logger = logging.getLogger(__name__)
 
 
-def seed_knowledge(fk, phil, sl=None):
+def init_registry(registry_path: Path) -> "DomainRegistry":
+    from core.domain_registry import DomainRegistry
+    reg = DomainRegistry.load(registry_path)
+    if len(reg) == 0:
+        reg = _seed_domain_nodes()
+        reg.save(registry_path)
+    return reg
+
+
+def _seed_domain_nodes() -> "DomainRegistry":
+    from core.domain_registry import DomainRegistry, DomainNode
+    reg = DomainRegistry()
+    nodes = [
+        ("general", None, "通用领域，跨域知识的默认归属", {}, ""),
+        ("game", "general", "游戏策略领域的根节点", {"learning/reflect": 0.2}, "子域: game/leduc, game/doudizhu"),
+        ("game/leduc", "game", "Leduc Hold'em 简化德州扑克", {"game/doudizhu": 0.6}, "姊妹域: game/doudizhu"),
+        ("game/doudizhu", "game", "斗地主3人卡牌游戏", {"game/leduc": 0.6}, "姊妹域: game/leduc"),
+        ("learning/reflect", "general", "学习反思域", {}, "子域: learning/compile, learning/consolidate"),
+        ("learning/compile", "learning/reflect", "知识编译域", {"learning/consolidate": 0.8}, "姊妹域: learning/consolidate"),
+        ("learning/consolidate", "learning/reflect", "知识整理域", {"learning/compile": 0.8}, "姊妹域: learning/compile"),
+    ]
+    for path, parent, desc, corr, rels in nodes:
+        reg.add_node(path, parent, desc, corr, rels)
+    return reg
+
+
+def seed_knowledge(fk, phil, sl=None, domain_registry=None):
     """Seed L2 knowledge cards + L3 skills. L1 rules are managed via l1_rules.json."""
 
     # L2 knowledge cards — Leduc
@@ -22,7 +49,7 @@ def seed_knowledge(fk, phil, sl=None):
         _seed_consolidation_cards(fk)
 
     # L3 skills
-    if sl is not None:
+    if sl:
         _seed_l3_skills(sl)
 
     logger.info("Seeded: L1 rules=%d L2 cards=%d L3 skills=%d",
