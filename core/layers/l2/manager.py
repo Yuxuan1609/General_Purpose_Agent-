@@ -172,6 +172,8 @@ class L2Agent(LayerAgent):
         cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
 
         current = state.get("current", "")
+        is_consolidation = "l2_output_format" in state
+        filtered_meta = self._filter_meta_for_layer(meta, "l2") if is_consolidation else meta
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
@@ -180,7 +182,7 @@ class L2Agent(LayerAgent):
             "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
             "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
         )
-        system = self._build_system_prompt(instruction, meta)
+        system = self._build_system_prompt(instruction, filtered_meta)
         user = (
             f"[上层查询]\n{query}\n\n"
             f"[学习数据]\n{self._build_learning_section(state)}\n\n"
@@ -200,6 +202,7 @@ class L2Agent(LayerAgent):
         Only sees L3's result + reasoning, not L3's modifications.
         """
         l2_fmt = state.get("l2_output_format")
+        filtered_meta2 = self._filter_meta_for_layer(meta, "l2") if l2_fmt else meta
 
         cards = self._get_cards_for_nodes(selected_nodes)
         node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
@@ -229,7 +232,7 @@ class L2Agent(LayerAgent):
                 "不要修改 L1 行为准则或 L3 技能。"
                 "使用工具 deprecate_l2_card / create_l2_card 记录修改。"
             )
-        system = self._build_system_prompt(instruction, meta)
+        system = self._build_system_prompt(instruction, filtered_meta2)
 
         if l2_fmt:
             user = (

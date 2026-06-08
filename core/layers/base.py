@@ -61,6 +61,29 @@ class LayerAgent(ABC):
         self._pending_mods.clear()
         return mods
 
+    @staticmethod
+    def _filter_meta_for_layer(meta: str, layer: str) -> str:
+        """Strip sections not relevant to this layer from consolidation meta."""
+        if "## Knowledge Consolidation Task" not in meta:
+            return meta
+        import re
+        strip = {
+            "l1": [r"### L2 Knowledge Cards.*?(?=###|## Consolidation|$)",
+                   r"### L3 Skills.*?(?=###|## Consolidation|$)",
+                   r"### L2 Entry Format.*?(?=###|##|$)",
+                   r"### L3 Entry Format.*?(?=###|##|$)"],
+            "l2": [r"### L3 Skills.*?(?=###|## Consolidation|$)",
+                   r"### L1 Entry Format.*?(?=###|##|$)",
+                   r"### L3 Entry Format.*?(?=###|##|$)"],
+            "l3": [r"### L2 Knowledge Cards.*?(?=###|## Consolidation|$)",
+                   r"### L1 Entry Format.*?(?=###|##|$)",
+                   r"### L2 Entry Format.*?(?=###|##|$)"],
+        }
+        result = meta
+        for pat in strip.get(layer, []):
+            result = re.sub(pat, "", result, flags=re.DOTALL)
+        return result.strip()
+
     def set_injector(self, injector):
         """Attach a LayerInjector for tool calling capability."""
         self._injector = injector

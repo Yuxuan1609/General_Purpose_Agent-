@@ -162,6 +162,9 @@ class L1Agent(LayerAgent):
             "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 call_l2=false。\n"
             "从领域节点中选出最相关的 1-5 个节点。不需要领域知识时返回空的 domain_nodes（[]）。"
         )
+        is_consolidation = "l1_output_format" in state
+        if is_consolidation:
+            meta = self._filter_meta_for_layer(meta, "l1")
         system = self._build_system_prompt(
             instruction, meta,
             static_context=f"[领域节点]\n{nodes_text}" if nodes_text else "",
@@ -182,6 +185,7 @@ class L1Agent(LayerAgent):
             "在 rules_used 中列出本次推理中实际引用到的行为准则的 id。"
         )
         if l1_fmt:
+            meta = self._filter_meta_for_layer(meta, "l1")
             instruction += (
                 "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
                 "不要修改 L2 知识卡片或 L3 技能。"

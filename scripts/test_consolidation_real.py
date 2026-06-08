@@ -130,7 +130,15 @@ def _load_fixtures(fk, phil, sl, fixtures_dir: Path) -> dict:
         fp = fixtures_dir / "consolidation_test_skills.md"
         if fp.exists():
             for skill in _parse_skills_from_md(fp):
-                sl.create_skill(name=skill["name"], content=skill["content"],
+                content = (
+                    f"---\n"
+                    f"name: {skill['name']}\n"
+                    f"description: {skill['content'][:80]}\n"
+                    f"domain: game/leduc\n"
+                    f"---\n"
+                    f"{skill['content']}"
+                )
+                sl.create_skill(name=skill["name"], content=content,
                                 domain=Domain("game/leduc", "specific"),
                                 created_by="test_fixture")
                 l3_count += 1

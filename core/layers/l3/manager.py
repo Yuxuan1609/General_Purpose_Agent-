@@ -100,6 +100,8 @@ class L3Agent(LayerAgent):
     def execute(self, meta: str, state: dict,
                 matched_skills: list[dict] | None = None) -> dict:
         l3_fmt = state.get("l3_output_format") if state else None
+        if l3_fmt:
+            meta = self._filter_meta_for_layer(meta, "l3")
 
         current = state.get("current", "") if state else ""
         skills = matched_skills or []
