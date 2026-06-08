@@ -19,6 +19,7 @@ class SkillMeta:
     name: str
     description: str
     domain: "Domain"
+    available_domains: list[str] = field(default_factory=list)
     cross_domain: bool = False
     version: str = "1.0.0"
     created_by: str = "agent"
@@ -29,10 +30,12 @@ class SkillMeta:
 class SkillLayer:
     """L3: Semi-static skills. SKILL.md format (compatible with agentskills.io)."""
 
-    def __init__(self, skills_dir: Path, tool_registry):
+    def __init__(self, skills_dir: Path, tool_registry, domain_registry=None):
         from core.task import Domain
         self.skills_dir = Path(skills_dir)
         self.skills_dir.mkdir(parents=True, exist_ok=True)
+        self._registry = domain_registry
+        self._skills: dict[str, SkillMeta] = {}
         self._register_tools(tool_registry)
 
     def list_all(self) -> list[SkillMeta]:
@@ -49,6 +52,9 @@ class SkillLayer:
         return metas
 
     def match(self, task_domain) -> list[SkillMeta]:
+        if self._registry:
+            ids = self._registry.get_primary_items("l3", task_domain.path)
+            return [self._skills[n] for n in ids if n in self._skills]
         from core.task import Domain
         all_skills = self.list_all()
         scored = []
@@ -65,12 +71,15 @@ class SkillLayer:
         return [s for _, s in scored]
 
     def create_skill(self, name: str, content: str, domain,
-                     cross_domain: bool = False, created_by: str = "agent") -> SkillMeta:
+                     cross_domain: bool = False, created_by: str = "agent",
+                     available_domains: list[str] | None = None) -> SkillMeta:
         from core.task import Domain
         if not re.match(r'^[\w][\w._-]*$', name):
             raise ValueError(f"Invalid skill name: {name}")
         if len(name) > 64:
             raise ValueError(f"Skill name too long: {len(name)} > 64")
+        if available_domains is None:
+            available_domains = [domain.path]
         if domain.is_general:
             skill_dir = self.skills_dir / "general" / name
         else:
@@ -86,14 +95,39 @@ class SkillLayer:
             Path(tmp_path).unlink(missing_ok=True)
         # Extract metadata from YAML frontmatter to allow content-driven overrides
         fm_cross_domain = self._extract_bool_from_frontmatter(content, "cross_domain")
-        return SkillMeta(
+        meta = SkillMeta(
             name=name,
             description=self._extract_description(content),
             domain=domain,
+            available_domains=available_domains,
             cross_domain=cross_domain if cross_domain else fm_cross_domain,
             created_by=created_by,
             skill_dir=skill_dir,
         )
+        self._skills[name] = meta
+        if self._registry:
+            for d in meta.available_domains:
+                self._registry.index_item("l3", d, name)
+        return meta
+
+    def get_skills_by_ids(self, ids: list[str]) -> list[dict]:
+        result = []
+        for name in ids:
+            skill = self._skills.get(name)
+            if skill is None:
+                continue
+            content = ""
+            if skill.skill_dir:
+                skf = skill.skill_dir / "SKILL.md"
+                if skf.exists():
+                    content = skf.read_text(encoding="utf-8")
+            result.append({
+                "name": skill.name,
+                "description": skill.description,
+                "domain": skill.domain.path,
+                "content": content,
+            })
+        return result
 
     def edit_skill(self, name: str, new_content: str) -> SkillMeta:
         skill_dir = self._find_skill_dir(name)

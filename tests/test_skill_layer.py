@@ -141,3 +141,16 @@ version: 1.0.0
         # Test skill_view
         view_result = json.loads(skill_registry.dispatch("skill_view", {"name": "hello-skill"}))
         assert view_result.get("success") is True
+
+    def test_get_skills_by_ids_from_registry(self, tmp_path):
+        from core.domain_registry import DomainRegistry
+        from core.task import Domain
+        reg = DomainRegistry()
+        reg.add_node("game/leduc", "game", "Leduc")
+        sl = SkillLayer(tmp_path / "skills", ToolRegistry(), domain_registry=reg)
+        sl.create_skill("test-skill", "desc", Domain("game/leduc", "specific"))
+        ids = reg.get_primary_items("l3", "game/leduc")
+        assert "test-skill" in ids
+        skills = sl.get_skills_by_ids(ids)
+        assert len(skills) == 1
+        assert skills[0]["name"] == "test-skill"
