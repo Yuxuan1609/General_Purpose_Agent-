@@ -131,7 +131,7 @@ def test_l2_over_limit():
     logger.info("  TaskObservation built: meta=%d chars", len(task.meta))
     logger.debug("  Meta preview:\n%s", task.meta[:500])
     assert "Knowledge Consolidation Task" in task.meta
-    assert "L2 Cards" in task.meta
+    assert "L2 Knowledge Cards" in task.meta
     assert task.session["domain"] == "learning/compile"
     logger.info("  PASS")
 
@@ -158,7 +158,7 @@ def test_deep_over_limit():
     logger.info("  L2=45/30 (15 over), L3=30/20 (10 over) -> level=%d", level)
     assert level == 2, f"expected level 2 (deep), got {level}"
     task = lenv.build_consolidation_task()
-    assert "L2 Cards" in task.meta
+    assert "L2 Knowledge Cards" in task.meta
     assert "L3 Skills" in task.meta
     logger.info("  PASS")
 
@@ -189,7 +189,7 @@ def test_consolidation_task_structure():
     meta = task.meta
     checks = [
         ("header", "Knowledge Consolidation Task" in meta),
-        ("L2 Section", "L2 Cards" in meta),
+        ("L2 Section", "L2 Knowledge Cards" in meta),
         ("L3 Section", "L3 Skills" in meta),
         ("task spec", "consolidation task spec" in meta.lower()),
         ("keep/merge", "keep/merge/delete" in meta.lower()),
@@ -223,7 +223,7 @@ def test_consolidation_task_only_l2():
     logger.info("─── 7. L2-only consolidation task ───")
     lenv = _make_lenv(l2_count=35, l3_count=5)
     task = lenv.build_consolidation_task()
-    assert "L2 Cards" in task.meta
+    assert "L2 Knowledge Cards" in task.meta
     assert "L3 Skills" not in task.meta  # L3 under limit -> not included
     logger.info("  L3 section absent (under limit)")
     logger.info("  PASS")
@@ -235,7 +235,7 @@ def test_consolidation_only_l3():
     lenv = _make_lenv(l2_count=5, l3_count=25)
     task = lenv.build_consolidation_task()
     assert "L3 Skills" in task.meta
-    assert "L2 Cards" not in task.meta
+    assert "L2 Knowledge Cards" not in task.meta
     logger.info("  L2 section absent (under limit)")
     logger.info("  PASS")
 
