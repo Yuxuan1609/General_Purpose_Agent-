@@ -84,6 +84,11 @@ class L3Agent(LayerAgent):
                 for u in units:
                     recs.append(f"[{u.get('index','?')}] {u.get('reasoning','')[:120]}")
                 learning_data = f"[学习数据]\n" + "\n".join(recs) + "\n\n"
+        fb = (state or {}).get("feedback", "")
+        l3_fb = (state or {}).get("l3_feedback", "")
+        if l3_fb:
+            fb = f"{fb}\n{l3_fb}" if fb else l3_fb
+        fb_section = f"[L3 修改结果确认]\n{fb}\n\n" if fb else ""
 
         instruction = (
             "你的核心任务是完成 L2 下发的 l3_task，Meta 提供任务整体背景。\n"
@@ -91,6 +96,7 @@ class L3Agent(LayerAgent):
         )
         system = self._build_system_prompt(instruction, meta)
         user = (
+            f"{fb_section}"
             f"{learning_data}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
@@ -113,10 +119,12 @@ class L3Manager(LayerManager):
     """
 
     def __init__(self, skill_layer, downstream: LayerManager | None = None,
-                 upward=None, downward=None, auxiliary_llm=None):
+                 upward=None, downward=None, auxiliary_llm=None,
+                 domain_registry=None):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
         self._agent = L3Agent(auxiliary_llm) if auxiliary_llm else None
+        self._registry = domain_registry
         self._matched: list[str] = []
         self._matched_skills: list[dict] = []  # E3: local storage, not obs.state
         self._result: dict | None = None
@@ -143,28 +151,36 @@ class L3Manager(LayerManager):
         domain_path = session.get("domain", "general")
 
         # Deterministic: domain-based skill matching
-        try:
-            domain = Domain(domain_path, "specific")
-        except Exception:
-            domain = Domain("general", "general")
+        # Registry-based skill matching
+        if self._registry:
+            skill_ids = self._registry.get_primary_items("l3", domain_path)
+            self._matched_skills = self._skill_layer.get_skills_by_ids(skill_ids)
+            self._matched = [s["name"] for s in self._matched_skills]
+        else:
+            # Fallback to old domain-based matching
+            try:
+                domain = Domain(domain_path, "specific")
+            except Exception:
+                domain = Domain("general", "general")
 
-        matched = self._skill_layer.match(domain)
-        self._matched = [s.name for s in matched]
-        self._matched_skills = []
-        for s in matched:
-            content = ""
-            if s.skill_dir:
-                skill_file = s.skill_dir / "SKILL.md"
-                if skill_file.exists():
-                    content = skill_file.read_text(encoding="utf-8")
-            self._matched_skills.append({
-                "name": s.name, "description": s.description,
-                "domain": s.domain.path, "content": content,
-            })
+            matched = self._skill_layer.match(domain)
+            self._matched = [s.name for s in matched]
+            self._matched_skills = []
+            for s in matched:
+                content = ""
+                if s.skill_dir:
+                    skill_file = s.skill_dir / "SKILL.md"
+                    if skill_file.exists():
+                        content = skill_file.read_text(encoding="utf-8")
+                self._matched_skills.append({
+                    "name": s.name, "description": s.description,
+                    "domain": s.domain.path, "content": content,
+                })
         logger.debug("── L3 (match) ──")
-        logger.debug("  domain: %s → %d skills", domain_path, len(matched))
-        for i, s in enumerate(matched):
-            logger.debug("    [skill %d] %s | %s", i + 1, s.name, s.description)
+        logger.debug("  domain: %s → %d skills", domain_path, len(self._matched))
+        for i, name in enumerate(self._matched):
+            desc = next((s.get("description", "") for s in self._matched_skills if s.get("name") == name), "")
+            logger.debug("    [skill %d] %s | %s", i + 1, name, desc)
 
         # LLM Agent: select relevant skills + execute
         if self._agent:

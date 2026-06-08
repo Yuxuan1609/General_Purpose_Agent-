@@ -8,7 +8,7 @@ from core.layers.l3.manager import L3Manager
 
 
 def build_chain(meta_driver, philosophy, flexible_knowledge, skill_layer,
-                auxiliary_llm=None) -> L0_5_1Manager:
+                auxiliary_llm=None, domain_registry=None) -> L0_5_1Manager:
     """Build the three-layer chain bottom-up.
 
     Each layer is wired with UpwardComm + DownwardComm for LayerMessage protocol.
@@ -25,14 +25,13 @@ def build_chain(meta_driver, philosophy, flexible_knowledge, skill_layer,
     from core.layers.l0_5_1.downward_comm import DownwardComm as L1Downward
 
     l3 = L3Manager(skill_layer, upward=L3Upward(), downward=L3Downward(),
-                   auxiliary_llm=auxiliary_llm)
+                   auxiliary_llm=auxiliary_llm, domain_registry=domain_registry)
     l2 = L2Manager(flexible_knowledge, downstream=l3,
                    upward=L2Upward(), downward=L2Downward(),
-                   auxiliary_llm=auxiliary_llm)
+                   auxiliary_llm=auxiliary_llm, domain_registry=domain_registry)
     l1 = L0_5_1Manager(meta_driver, philosophy, auxiliary_llm=auxiliary_llm,
-                       downstream=l2,
-                       upward=L1Upward(), downward=L1Downward(),
-                       domain_nodes=L2_DOMAIN_NODES)
+                        downstream=l2, upward=L1Upward(), downward=L1Downward(),
+                        domain_registry=domain_registry)
     return l1
 
 

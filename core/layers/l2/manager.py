@@ -128,7 +128,14 @@ class L2Agent(LayerAgent):
                 if l3_r: parts.append(f"L3:{l3_r[:80]}")
                 line += "\n  | " + " | ".join(parts)
             recs.append(line)
-        return "| " + " | ".join(recs) if recs else ""
+        result = "| " + " | ".join(recs) if recs else ""
+        fb = state.get("feedback", "")
+        l2_fb = state.get("l2_feedback", "")
+        if l2_fb:
+            fb = f"{fb}\n{l2_fb}" if fb else l2_fb
+        if fb:
+            result += f"\n\n[L2 修改结果确认]\n{fb}"
+        return result
 
     def stage1(self, query: str, meta: str, state: dict,
                selected_nodes: list[dict]) -> dict:
@@ -257,10 +264,12 @@ class L2Manager(LayerManager):
     """
 
     def __init__(self, knowledge, downstream: LayerManager | None = None,
-                 upward=None, downward=None, auxiliary_llm=None):
+                 upward=None, downward=None, auxiliary_llm=None,
+                 domain_registry=None):
         super().__init__("l2", downstream, upward=upward, downward=downward)
         self._knowledge = knowledge
         self._agent = L2Agent(auxiliary_llm, knowledge) if auxiliary_llm else None
+        self._registry = domain_registry
         self._result: dict | None = None
         self._cards: list[dict] = []   # E3: local storage, not obs.state
 
@@ -308,7 +317,20 @@ class L2Manager(LayerManager):
         logger.debug("")
 
         # E3: store cards locally, not in obs.state
-        self._cards = self._build_cards(selected_nodes)
+        # Try registry-based card retrieval first
+        if self._registry and obs:
+            session = obs.session if obs else {}
+            task_domain = session.get("domain", "general")
+            primary_ids = self._registry.get_primary_items("l2", task_domain)
+            explore_ids = self._registry.get_explore_items("l2", task_domain, threshold=0.5)
+            all_ids = list(dict.fromkeys(primary_ids + explore_ids))
+            reg_cards = self._build_cards_from_ids(all_ids)
+            if reg_cards:
+                self._cards = reg_cards
+            else:
+                self._cards = self._build_cards(selected_nodes)
+        else:
+            self._cards = self._build_cards(selected_nodes)
 
         # Propagate to L3 only when needed
         # TODO: When L2→L3 multi-round is enabled, loop here to refine l3_task
@@ -370,6 +392,20 @@ class L2Manager(LayerManager):
             }
             for c in cards
         ]
+
+    def _build_cards_from_ids(self, card_ids: list[str]) -> list[dict]:
+        cards = []
+        for cid in card_ids:
+            for c in self._knowledge.cards:
+                if c.id == cid:
+                    cards.append({
+                        "content": c.content,
+                        "confidence": c.confidence,
+                        "activation": c.activation,
+                        "domain": c.domain.path,
+                    })
+                    break
+        return cards
 
     def notify(self) -> Any:
         if self._result:

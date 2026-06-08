@@ -111,7 +111,13 @@ class L1Agent(LayerAgent):
                         line += f"\n  | " + " | ".join(parts)
                     recs.append(line)
             records_text = "\n".join(recs) if recs else "（无）"
-            return f"[学习数据]\n{records_text}"
+            feedback = state.get("feedback", "")
+            l1_fb = state.get("l1_feedback", "")
+            fb_text = feedback
+            if l1_fb:
+                fb_text = f"{feedback}\n{l1_fb}" if feedback else l1_fb
+            fb_section = f"\n\n[L1 修改结果确认]\n{fb_text}" if fb_text else ""
+            return f"[学习数据]\n{records_text}{fb_section}"
         return (
             f"[当前局面]\n{current}\n\n"
             f"[对局历史]\n{history or '（无）'}"
@@ -125,7 +131,8 @@ class L1Agent(LayerAgent):
         """
         nodes = domain_nodes or []
         nodes_text = "\n".join(
-            f"{i + 1}. {n['name']}\n   {n['description']}"
+            f"{i + 1}. {n.path if hasattr(n, 'path') else n['name']}\n"
+            f"   {n.description if hasattr(n, 'description') else n.get('description','')}"
             for i, n in enumerate(nodes)
         )
         instruction = (
@@ -189,12 +196,12 @@ class L0_5_1Manager(LayerManager):
     def __init__(self, meta_driver, philosophy, auxiliary_llm=None,
                  downstream: LayerManager | None = None,
                  upward=None, downward=None,
-                 domain_nodes: list[dict] | None = None):
+                 domain_registry=None):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._meta = meta_driver
         self._philosophy = philosophy
         self._agent = L1Agent(auxiliary_llm, philosophy) if auxiliary_llm else None
-        self._domain_nodes = domain_nodes or []
+        self._registry = domain_registry
         self._final_result: dict | None = None
 
     def process(self, data: Any) -> dict:
@@ -218,8 +225,11 @@ class L0_5_1Manager(LayerManager):
 
         for loop in range(1, L1Agent.MAX_LOOPS + 1):
             logger.debug("── L1 Stage 1 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
+            domain_nodes = []
+            if self._registry:
+                domain_nodes = self._registry.list_all()
             stage1_result = self._agent.stage1(meta, obs.state,
-                                                domain_nodes=self._domain_nodes)
+                                                domain_nodes=domain_nodes)
             query_text = stage1_result.get("query", "")
             selected_nodes = stage1_result.get("domain_nodes", [])
             logger.debug("  query: %s", query_text)
