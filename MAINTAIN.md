@@ -9,7 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-08 | **反向notify协议**：LearningEnv 新增 `_layer_feedback` 存储 per-layer apply 结果。`build_task_observation()`/`build_consolidation_task()` 在 state 中注入 `l1_feedback`/`l2_feedback`/`l3_feedback` 字段。L1/L2/L3 Agent 读取各自 feedback 注入 prompt。 |
+| 2026-06-08 | **Domain System Redesign**：新增 `core/domain_registry.py`（DomainNode dataclass + DomainRegistry 类）。所有可检索实体统一 `available_domains: list[str]` 字段。Registry 提供反向索引 + 双路召回（primary/explore）。L1/L2/L3 managers 接入 registry，废弃 `L2_DOMAIN_NODES` 硬编码。`Domain.level` 标记 deprecated。 |
 | 2026-06-07 | **Phase 3 实现**：新增 `capability/` 模块（Capability ABC + ToolCapability + KnowledgeCapability + LayerInjector）。`LayerAgent._call_llm()` 支持多轮 tool call 循环（role:"tool" 消息）。`LLMClient.chat()` 支持 tools 参数 + ToolCall.id。`LearningEnv` 新增 needs_consolidation/get_consolidation_level + consolidation.yaml spec。 |
 | 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统 + `MetaDriver` 旧触发器。迁移 `ThresholdScorer`。 |
 
