@@ -132,6 +132,7 @@
 - 启用 `PROPOSAL` / `APPROVAL` / `REJECTION` 消息流
 - 每层 Manager 从被动 `process()` 改为主动 `run_loop()`
 - 新增 `Orchestrator` 实现类
+- **Stage1 工具挂载**：当前仅 stage2 在 consolidation 时挂载工具（deprecate/create/modify）。Hermes 循环下，stage1 也需要挂载工具（如 `todo` 分步跟踪、`knowledge_query` 查卡片），实现多轮拆解-反馈-调整。
 
 ---
 

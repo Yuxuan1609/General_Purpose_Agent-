@@ -102,6 +102,15 @@ class L2Agent(LayerAgent):
                 "reason": {"type": "string", "description": "创建理由，如'合并了3张K翻牌前加注策略卡片'"},
             }, "required": ["content", "domain", "reason"], "additionalProperties": False},
         }},
+        {"type": "function", "function": {
+            "name": "modify_l2_card",
+            "description": "修改一张已有 L2 知识卡片的内容。用新的卡片文本替换指定 id 的旧内容。",
+            "parameters": {"type": "object", "properties": {
+                "card_id": {"type": "string", "description": "要修改的卡片 id，如 card_xxxxxxxx"},
+                "content": {"type": "string", "description": "修改后的完整卡片内容"},
+                "reason": {"type": "string", "description": "修改理由，如'补充了对手Call后的应对策略'"},
+            }, "required": ["card_id", "content", "reason"], "additionalProperties": False},
+        }},
     ]
 
     def _setup_l2_consolidation(self):
@@ -122,9 +131,17 @@ class L2Agent(LayerAgent):
             })
             return f"已记录: 创建新卡片"
 
+        def modify_l2_card(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "update", "target": args["card_id"], "layer": "l2",
+                "content": args["content"], "reason": args["reason"],
+            })
+            return f"已记录: 修改 {args['card_id']}"
+
         self._injector = DictInjector({
             "deprecate_l2_card": deprecate_l2_card,
             "create_l2_card": create_l2_card,
+            "modify_l2_card": modify_l2_card,
         })
 
     def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None):
@@ -136,11 +153,27 @@ class L2Agent(LayerAgent):
                               static_context: str = "") -> str:
         extra = f"\n{static_context}\n" if static_context else ""
         return (
-            f"你是 L2 层的认知 Agent。\n"
-            f"{instruction}\n\n"
+            f"## 认知层架构\n"
+            f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
+            f"- L2（你）：管理概率性知识卡片，负责相关知识检索与技能调度\n"
+            f"- L3：管理 SKILL.md 技能，负责标准化流程执行\n\n"
+            f"## 领域边界\n"
+            f"你只管理 L2 知识卡片（Knowledge Cards）。\n"
+            f"不要修改 L1 的行为准则或 L3 的技能。\n\n"
+            f"## 指令\n{instruction}\n\n"
             f"[Meta]\n{meta}\n"
             f"{extra}"
         )
+
+    def _format_domain_nodes(self, nodes: list[dict]) -> str:
+        if not nodes:
+            return ""
+        lines = ["[L1 选定领域]"]
+        for n in nodes:
+            name = n.get("name", n.get("path", "?"))
+            score = n.get("score", n.get("relevance", 0))
+            lines.append(f"  {name} (score={score:.2f})")
+        return "\n".join(lines) + "\n\n"
 
     def _build_learning_section(self, state: dict) -> str:
         units = state.get("learning_units", [])
@@ -177,18 +210,20 @@ class L2Agent(LayerAgent):
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
-            "L3 层职责：根据具体任务执行标准化流程操作，管理一组 SKILL.md 技能。\n"
             "需要 L3 时输出 call_l3=true 和 l3_task（一句话任务描述）；否则 call_l3=false。\n\n"
             "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
             "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
         )
         system = self._build_system_prompt(instruction, filtered_meta)
+        nodes_section = self._format_domain_nodes(selected_nodes)
         user = (
             f"[上层查询]\n{query}\n\n"
+            f"{nodes_section}"
             f"[学习数据]\n{self._build_learning_section(state)}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         ) if state.get("l1_output_format") else (
             f"[上层查询]\n{query}\n\n"
+            f"{nodes_section}"
             f"[当前局面]\n{current}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         )
@@ -230,13 +265,15 @@ class L2Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L2 知识卡片（KnowledgeCard）的修改。"
                 "不要修改 L1 行为准则或 L3 技能。"
-                "使用工具 deprecate_l2_card / create_l2_card 记录修改。"
+                "使用工具 deprecate_l2_card / create_l2_card / modify_l2_card 记录修改。"
             )
         system = self._build_system_prompt(instruction, filtered_meta2)
+        nodes_section = self._format_domain_nodes(selected_nodes)
 
         if l2_fmt:
             user = (
                 f"[上层查询]\n{query}\n\n"
+                f"{nodes_section}"
                 f"[学习数据]\n{self._build_learning_section(state)}\n\n"
                 f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
                 f"[L3 返回]\n{l3_text}\n\n"
@@ -253,6 +290,7 @@ class L2Agent(LayerAgent):
             current = state.get("current", "")
             user = (
                 f"[上层查询]\n{query}\n\n"
+                f"{nodes_section}"
                 f"[当前局面]\n{current}\n\n"
                 f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
                 f"[L3 返回]\n{l3_text}"

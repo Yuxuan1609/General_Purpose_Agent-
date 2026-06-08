@@ -66,6 +66,15 @@ class L1Agent(LayerAgent):
                 "reason": {"type": "string", "description": "创建理由，如'合并了3条概率决策规则'"},
             }, "required": ["content", "reason"], "additionalProperties": False},
         }},
+        {"type": "function", "function": {
+            "name": "modify_l1_rule",
+            "description": "修改一条已有 L1 行为准则的内容。用新的规则文本替换指定 id 的旧内容。",
+            "parameters": {"type": "object", "properties": {
+                "rule_id": {"type": "string", "description": "要修改的规则 id，如 l1_001"},
+                "content": {"type": "string", "description": "修改后的完整规则文本"},
+                "reason": {"type": "string", "description": "修改理由，如'补充了动态更新策略说明'"},
+            }, "required": ["rule_id", "content", "reason"], "additionalProperties": False},
+        }},
     ]
 
     def _setup_l1_consolidation(self):
@@ -86,9 +95,17 @@ class L1Agent(LayerAgent):
             })
             return f"已记录: 创建新规则"
 
+        def modify_l1_rule(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "update", "target": args["rule_id"], "layer": "l1",
+                "content": args["content"], "reason": args["reason"],
+            })
+            return f"已记录: 修改 {args['rule_id']}"
+
         self._injector = DictInjector({
             "deprecate_l1_rule": deprecate_l1_rule,
             "create_l1_rule": create_l1_rule,
+            "modify_l1_rule": modify_l1_rule,
         })
 
     def __init__(self, llm_client, philosophy):
@@ -97,13 +114,19 @@ class L1Agent(LayerAgent):
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
-        """Build system prompt: task meta + behavior rules + optional static context + instruction."""
+        """Build system prompt: layer identity + instruction + meta + behavior rules."""
         rules = self._philosophy.all_rules()
         rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
         return (
-            f"你是 L1 层的认知 Agent。\n"
-            f"{instruction}\n\n"
+            f"## 认知层架构\n"
+            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策\n"
+            f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度\n"
+            f"- L3：管理 SKILL.md 技能，负责标准化流程执行\n\n"
+            f"## 领域边界\n"
+            f"你只管理 L1 行为准则（Philosophy Rules）。\n"
+            f"不要修改 L2 的知识卡片或 L3 的技能。\n\n"
+            f"## 指令\n{instruction}\n\n"
             f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
             f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"
@@ -157,7 +180,6 @@ class L1Agent(LayerAgent):
         instruction = (
             "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。\n"
             "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
-            "下层 L2 层的职责：根据你的查询检索相关知识卡片，筛选最相关的卡片并判断是否需要 L3 技能协助。\n"
             "你的 query 应结合本层的行为准则和任务目标，给出清晰的拆解任务交给 L2 层。\n\n"
             "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 call_l2=false。\n"
             "从领域节点中选出最相关的 1-5 个节点。不需要领域知识时返回空的 domain_nodes（[]）。"
@@ -189,7 +211,7 @@ class L1Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
                 "不要修改 L2 知识卡片或 L3 技能。"
-                "使用工具 deprecate_l1_rule / create_l1_rule 记录修改。"
+                "使用工具 deprecate_l1_rule / create_l1_rule / modify_l1_rule 记录修改。"
             )
         system = self._build_system_prompt(instruction, meta)
 

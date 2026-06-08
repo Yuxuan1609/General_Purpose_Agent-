@@ -90,9 +90,9 @@ _CONSOLIDATION_FORMAT = (
     "Decide which entries to keep/merge/delete based on usage stats below.\n\n"
     "## How to make modifications\n"
     "Use the available tool functions to record modifications:\n"
-    "- L1 layer: deprecate_l1_rule / create_l1_rule\n"
-    "- L2 layer: deprecate_l2_card / create_l2_card\n"
-    "- L3 layer: deprecate_l3_skill / create_l3_skill\n\n"
+    "- L1 layer: deprecate_l1_rule / create_l1_rule / modify_l1_rule\n"
+    "- L2 layer: deprecate_l2_card / create_l2_card / modify_l2_card\n"
+    "- L3 layer: deprecate_l3_skill / create_l3_skill / modify_l3_skill\n\n"
     "Rules:\n"
     "- Each layer ONLY modifies its own content (L1→rules, L2→cards, L3→skills)\n"
     "- Prioritize: unused entries, low activation, highly redundant content\n"
@@ -295,13 +295,12 @@ class LearningEnv(Environment):
                 domain_counts[c.domain.path] += 1
                 all_domains.add(c.domain.path)
             l2_limits = spec.get("l2", {}).get("limits", {}) if spec else {}
-            l2_hard = l2_limits.get("hard", 30) if l2_limits else 30
-            l2_per_domain = l2_limits.get("per_domain_hard", l2_hard) if l2_limits else l2_hard
-            lines.append("### L2 Domain Statistics")
+            l2_soft = l2_limits.get("per_domain_soft", l2_limits.get("soft", 25)) if l2_limits else 25
+            l2_hard = l2_limits.get("per_domain_hard", l2_limits.get("hard", 30)) if l2_limits else 30
+            lines.append("### L2 Cards by Domain")
             for domain, count in domain_counts.most_common():
-                over = count - l2_per_domain
-                flag = f" ⚠ OVER by {over}" if over > 0 else ""
-                lines.append(f"- {domain}: {count}/{l2_per_domain} cards{flag}")
+                over = "OVER HARD LIMIT" if count > l2_hard else ("over soft limit" if count > l2_soft else "ok")
+                lines.append(f"- {domain}: current number: {count}/soft limit: {l2_soft} cards/hard limit: {l2_hard} cards ({over})")
             lines.append("")
         if needs_l3:
             from collections import Counter
@@ -310,12 +309,12 @@ class LearningEnv(Environment):
                 skill_domain_counts[s.domain.path] += 1
                 all_domains.add(s.domain.path)
             l3_limits = spec.get("l3", {}).get("limits", {}) if spec else {}
-            l3_hard = l3_limits.get("hard", 20) if l3_limits else 20
-            lines.append("### L3 Domain Statistics")
+            l3_soft = l3_limits.get("per_domain_soft", l3_limits.get("soft", 15)) if l3_limits else 15
+            l3_hard = l3_limits.get("per_domain_hard", l3_limits.get("hard", 20)) if l3_limits else 20
+            lines.append("### L3 Skills by Domain")
             for domain, count in skill_domain_counts.most_common():
-                over = count - l3_hard
-                flag = f" ⚠ OVER by {over}" if over > 0 else ""
-                lines.append(f"- {domain}: {count}/{l3_hard} skills{flag}")
+                over = "OVER HARD LIMIT" if count > l3_hard else ("over soft limit" if count > l3_soft else "ok")
+                lines.append(f"- {domain}: current number: {count}/soft limit: {l3_soft} skills/hard limit: {l3_hard} skills ({over})")
             lines.append("")
 
         # ── Collect domain hints for retrieval ──
@@ -419,17 +418,29 @@ class LearningEnv(Environment):
             good_skills = []
             bad_skills = []
             for s in l3.list_all():
+                st = self._stats.get("l3", {}).get(s.name, {})
+                used = st.get("use_count", 0)
                 conf = getattr(s, 'confidence', None)
-                if isinstance(conf, (int, float)):
+                # Prefer stats: unused skills are bad; frequently used are good
+                if used > 0:
+                    good_skills.append(s)
+                elif used == 0 and len(getattr(s, 'description', '')) < 30:
+                    bad_skills.append(s)
+                elif isinstance(conf, (int, float)):
                     if conf > 0.5:
                         good_skills.append(s)
                     elif conf < 0.2:
                         bad_skills.append(s)
             lines.append("### L3 Skills")
             if good_skills:
-                lines.append(f"🟢 GOOD (keep): [{good_skills[0].name}] {good_skills[0].description[:120]}")
+                s = good_skills[0]
+                st = self._stats.get("l3", {}).get(s.name, {})
+                lines.append(f"🟢 GOOD (keep): [{s.name}] used={st.get('use_count', 0)} {s.description[:120]}")
             if bad_skills:
-                lines.append(f"🔴 BAD  (remove): [{bad_skills[0].name}] {bad_skills[0].description[:120]}")
+                s = bad_skills[0]
+                lines.append(f"🔴 BAD  (remove): [{s.name}] used=0 {s.description[:120]}")
+            if not good_skills and not bad_skills:
+                lines.append("（无足够统计数据进行示例判断）")
 
         # ── Append per-layer output format from spec ──
         if spec:

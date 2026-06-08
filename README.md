@@ -297,6 +297,7 @@ per-layer modifications (create/update/deprecate)
 ## 文档
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — 完整架构设计：A1-A4 设计原则、E1-E8 工程原则、通信协议、各层详解、评估策略
+- **[IDENTITY.md](IDENTITY.md)** — 每层 Agent 术语与概念：L1 行为准则 Agent、L2 知识卡片 Agent、L3 技能执行 Agent 的完整定义与领域边界
 - **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)** — Phase 3+ 升级路线图：Tool Use 挂载、并行 Agent、Hermes 循环编排、整理模式
 - **[config/layers/consolidation.yaml](config/layers/consolidation.yaml)** — 各层内容规格与整理策略：条目格式、容量限制、anti-patterns、三级整理策略
 - **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表

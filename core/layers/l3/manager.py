@@ -62,6 +62,15 @@ class L3Agent(LayerAgent):
                 "reason": {"type": "string", "description": "创建理由，如'编译自3张高激活配对加注卡片'"},
             }, "required": ["name", "content", "domain", "reason"], "additionalProperties": False},
         }},
+        {"type": "function", "function": {
+            "name": "modify_l3_skill",
+            "description": "修改一个已有 L3 技能的内容。用新的 SKILL.md 内容替换指定名称的旧技能。",
+            "parameters": {"type": "object", "properties": {
+                "skill_name": {"type": "string", "description": "要修改的技能名称，如 leduc-preflop-strategy"},
+                "content": {"type": "string", "description": "修改后的完整 SKILL.md 内容"},
+                "reason": {"type": "string", "description": "修改理由，如'补充了翻牌后未配对的应对策略'"},
+            }, "required": ["skill_name", "content", "reason"], "additionalProperties": False},
+        }},
     ]
 
     def _setup_l3_consolidation(self):
@@ -82,9 +91,17 @@ class L3Agent(LayerAgent):
             })
             return f"已记录: 创建 {args['name']}"
 
+        def modify_l3_skill(args: dict) -> str:
+            agent._pending_mods.append({
+                "type": "update", "target": args["skill_name"], "layer": "l3",
+                "content": args["content"], "reason": args["reason"],
+            })
+            return f"已记录: 修改 {args['skill_name']}"
+
         self._injector = DictInjector({
             "deprecate_l3_skill": deprecate_l3_skill,
             "create_l3_skill": create_l3_skill,
+            "modify_l3_skill": modify_l3_skill,
         })
 
     def __init__(self, llm_client):
@@ -92,13 +109,20 @@ class L3Agent(LayerAgent):
 
     def _build_system_prompt(self, instruction: str, meta: str) -> str:
         return (
-            f"你是 L3 层的认知 Agent。\n"
-            f"{instruction}\n\n"
+            f"## 认知层架构\n"
+            f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
+            f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度\n"
+            f"- L3（你）：管理 SKILL.md 技能，负责标准化流程执行\n\n"
+            f"## 领域边界\n"
+            f"你只管理 L3 技能（Skills / SKILL.md）。\n"
+            f"不要修改 L1 的行为准则或 L2 的知识卡片。\n\n"
+            f"## 指令\n{instruction}\n\n"
             f"[Meta]\n{meta}"
         )
 
     def execute(self, meta: str, state: dict,
-                matched_skills: list[dict] | None = None) -> dict:
+                matched_skills: list[dict] | None = None,
+                l3_task: str = "") -> dict:
         l3_fmt = state.get("l3_output_format") if state else None
         if l3_fmt:
             meta = self._filter_meta_for_layer(meta, "l3")
@@ -136,12 +160,14 @@ class L3Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L3 技能（Skill）的修改。"
                 "不要修改 L1 行为准则或 L2 知识卡片。"
-                "使用工具 deprecate_l3_skill / create_l3_skill 记录修改。"
+                "使用工具 deprecate_l3_skill / create_l3_skill / modify_l3_skill 记录修改。"
             )
         system = self._build_system_prompt(instruction, meta)
+        query_section = f"[上层查询]\n完成 L2 下发的 l3_task：{l3_task}\n\n" if l3_task else ""
         user = (
             f"{fb_section}"
             f"{learning_data}"
+            f"{query_section}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
@@ -238,7 +264,8 @@ class L3Manager(LayerManager):
             logger.debug("── L3 Agent ──")
             meta = l3_task or (obs.meta if obs else "")
             result = self._agent.execute(meta, obs.state if obs else {},
-                                         matched_skills=self._matched_skills)
+                                          matched_skills=self._matched_skills,
+                                          l3_task=l3_task)
             logger.debug("  skills_used: %s", result.get("skills_used"))
             logger.debug("  result: %s", str(result.get("result", ""))[:200])
             self._result = result
