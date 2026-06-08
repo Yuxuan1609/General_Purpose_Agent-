@@ -28,6 +28,38 @@ class DomainRegistry:
     def children_of(self, path: str) -> list[DomainNode]:
         return [n for n in self._nodes.values() if n.parent == path]
 
+    def get_primary_items(self, layer: str, domain: str) -> list[str]:
+        idx = self._reverse_index.get(layer, {})
+        items = idx.get(domain, [])
+        return list(items)
+
+    def get_explore_items(self, layer: str, domain: str,
+                          threshold: float = 0.5) -> list[str]:
+        node = self._nodes.get(domain)
+        if not node:
+            return []
+        idx = self._reverse_index.get(layer, {})
+        result: list[str] = []
+        seen: set[str] = set()
+        for neighbor_path, weight in node.correlations.items():
+            if weight >= threshold:
+                for item_id in idx.get(neighbor_path, []):
+                    if item_id not in seen:
+                        seen.add(item_id)
+                        result.append(item_id)
+        return result
+
+    def get_items_for_domains(self, layer: str, domains: list[str]) -> list[str]:
+        idx = self._reverse_index.get(layer, {})
+        seen: set[str] = set()
+        result: list[str] = []
+        for d in domains:
+            for item_id in idx.get(d, []):
+                if item_id not in seen:
+                    seen.add(item_id)
+                    result.append(item_id)
+        return result
+
     def save(self, filepath: Path) -> None:
         import json
         import tempfile

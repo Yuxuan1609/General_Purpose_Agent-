@@ -84,3 +84,54 @@ class TestDomainRegistry:
     def test_load_nonexistent_returns_empty(self, tmp_path):
         reg = DomainRegistry.load(tmp_path / "nonexistent.json")
         assert len(reg) == 0
+
+    def _setup_registry_with_index(self):
+        reg = DomainRegistry()
+        reg._nodes["game/leduc"] = DomainNode(
+            path="game/leduc", parent="game",
+            description="Leduc", correlations={"game/doudizhu": 0.6}
+        )
+        reg._nodes["game/doudizhu"] = DomainNode(
+            path="game/doudizhu", parent="game",
+            description="Doudizhu", correlations={"game/leduc": 0.6}
+        )
+        reg._nodes["coding"] = DomainNode(
+            path="coding", parent=None,
+            description="Code", correlations={}
+        )
+        reg._reverse_index = {
+            "l2": {
+                "game/leduc": ["card_1", "card_2"],
+                "game/doudizhu": ["card_3"],
+                "coding": ["card_4"],
+            },
+            "l3": {
+                "game/leduc": ["skill_a"],
+            },
+            "tool": {
+                "general": ["web_search"],
+                "game/leduc": ["poker_calc"],
+            },
+        }
+        return reg
+
+    def test_get_primary_items(self):
+        reg = self._setup_registry_with_index()
+        assert reg.get_primary_items("l2", "game/leduc") == ["card_1", "card_2"]
+        assert reg.get_primary_items("l2", "nonexistent") == []
+
+    def test_get_explore_items(self):
+        reg = self._setup_registry_with_index()
+        items = reg.get_explore_items("l2", "game/leduc", threshold=0.5)
+        assert "card_3" in items
+        assert "card_4" not in items
+
+    def test_get_explore_items_below_threshold(self):
+        reg = self._setup_registry_with_index()
+        items = reg.get_explore_items("l2", "game/leduc", threshold=0.9)
+        assert items == []
+
+    def test_get_items_for_domains(self):
+        reg = self._setup_registry_with_index()
+        items = reg.get_items_for_domains("l2", ["game/leduc", "game/doudizhu"])
+        assert sorted(items) == ["card_1", "card_2", "card_3"]

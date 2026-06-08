@@ -9,10 +9,28 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-08 | **反向notify协议**：LearningEnv 新增 `_layer_feedback` 存储 per-layer apply 结果。`build_task_observation()`/`build_consolidation_task()` 在 state 中注入 `l1_feedback`/`l2_feedback`/`l3_feedback` 字段。L1/L2/L3 Agent 读取各自 feedback 注入 prompt。 |
 | 2026-06-07 | **Phase 3 实现**：新增 `capability/` 模块（Capability ABC + ToolCapability + KnowledgeCapability + LayerInjector）。`LayerAgent._call_llm()` 支持多轮 tool call 循环（role:"tool" 消息）。`LLMClient.chat()` 支持 tools 参数 + ToolCall.id。`LearningEnv` 新增 needs_consolidation/get_consolidation_level + consolidation.yaml spec。 |
 | 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统 + `MetaDriver` 旧触发器。迁移 `ThresholdScorer`。 |
 
 ---
+
+## core/domain_registry.py (Task 3)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `DomainRetrieveResult` | `@dataclass(path, depth, correlation, primary_count, explore_count, total_count)` | 单域名检索结果容器 | DomainRegistry.retrieve_from_root() | Executor, L2Manager |
+| `DomainNode` | `@dataclass(path, parent, description, correlations, relations)` | 领域树节点 | DomainRegistry | — |
+| `DomainRegistry` | `__init__(nodes)` | 领域注册中心，管理 domain tree + reverse index | build_chain, seed_knowledge | — |
+| `DomainRegistry.get_node` | `(path) → DomainNode\|None` | 按路径查找节点 | L2Agent, Executor | — |
+| `DomainRegistry.list_all` | `() → list[DomainNode]` | 列出所有节点 | — | — |
+| `DomainRegistry.children_of` | `(path) → list[DomainNode]` | 获取直接子节点 | — | — |
+| `DomainRegistry.get_primary_items` | `(layer, domain) → list[str]` | 获取某 layer 下某 domain 的主项 ID 列表 | L2Manager, Executor | — |
+| `DomainRegistry.get_explore_items` | `(layer, domain, threshold=0.5) → list[str]` | 按关联权重阈值获取相邻 domain 的项 ID | L2Manager, Executor | — |
+| `DomainRegistry.get_items_for_domains` | `(layer, domains) → list[str]` | 批量获取多个 domain 的项 ID（去重） | L2Manager, Executor | — |
+| `DomainRegistry.retrieve_from_root` | `(root_path, layer, depth, correlation_threshold) → list[DomainRetrieveResult]` | 从 root 递归检索子孙邻域及自身项 | L2Manager | get_primary_items, get_explore_items, children_of |
+| `DomainRegistry.save` | `(filepath) → None` | 原子持久化 nodes + reverse_index 到 JSON | seed_knowledge | — |
+| `DomainRegistry.load` | `(filepath) → DomainRegistry` | 从 JSON 加载注册中心 | build_chain | — |
 
 ## core/types.py (NEW in Phase 1)
 
@@ -308,7 +326,14 @@
 | `LearningEnv.__init__` | 新增 `consolidation_spec` 参数 | 加载 consolidation spec，用于 build_consolidation_task 的增强 prompt | scripts | — |
 | `LearningEnv.needs_consolidation` | `() → bool` | **新增** 方法，L2/L3 超限检测 | run scripts | — |
 | `LearningEnv.get_consolidation_level` | `() → int` | **新增** 方法，0=无, 1=例行, 2=深度 | run scripts | — |
-| `LearningEnv.build_consolidation_task` | `() → TaskObservation` | **增强**：从 spec 注入条目格式规范、anti-patterns、整理策略等级 | run scripts | — |
+| `LearningEnv.build_consolidation_task` | `() → TaskObservation` | **增强**：从 spec 注入条目格式规范、anti-patterns、整理策略等级；注入 `l1/l2/l3_feedback` | run scripts | — |
+| `LearningEnv._layer_feedback` | `dict[str, str]` | **新增** 属性：`step()` 后将 per-layer apply 结果存入，供下次 `build_task_observation()` 注入 state | step() → build_task_observation() | — |
+| `LearningEnv._shared_feedback` | `str` | **新增** 属性：`step()` 生成共享摘要（总修改数/成功/被拒/dry-run），所有层均读取 | step() → build_task_observation() | — |
+| `state.feedback` | `str` | **新增** state 字段：共享反馈，被 L1/L2/L3 共同读取，作为 `[修改结果确认]` 的通用前缀 | build_task_observation() / build_consolidation_task() | L1/L2/L3 Agent |
+| `state.lX_feedback` | `str` | **增强**：L1/L2/L3 各自读取 `feedback` + `lX_feedback` 合并为完整反馈展示。共享 → `feedback`，专属 → `lX_feedback` | build_task_observation() | L1/L2/L3 Agent |
+| `L1Agent._build_user_context` | `(state) → str` | **增强**：读取 `state["feedback"]`（共享）+ `state["l1_feedback"]`（专属），合并追加 `[L1 修改结果确认]` 节 | stage1/stage2 | — |
+| `L2Agent._build_learning_section` | `(state) → str` | **增强**：读取 `state["feedback"]`（共享）+ `state["l2_feedback"]`（专属），合并追加 `[L2 修改结果确认]` 节 | stage1/stage2 | — |
+| `L3Agent.execute` | `(meta, state, matched_skills) → dict` | **增强**：读取 `state["feedback"]`（共享）+ `state["l3_feedback"]`（专属），合并前置 `[L3 修改结果确认]` 节 | L3Manager.query() | _call_llm() |
 
 ## config/layers/consolidation.yaml — Phase 3 新增
 
