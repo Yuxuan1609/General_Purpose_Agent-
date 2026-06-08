@@ -171,8 +171,9 @@ class LayerAgent(ABC):
                         layer, tc.function.name,
                         tc.function.arguments,
                     )
+                    result_str = raw.data.get("result", "") if raw.success else raw.error
                     self._log.debug("  tool %s → %s", tc.function.name,
-                                   str(raw)[:120])
+                                   str(result_str)[:120])
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
