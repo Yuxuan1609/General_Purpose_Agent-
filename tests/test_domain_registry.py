@@ -54,3 +54,33 @@ class TestDomainRegistry:
         children = reg.children_of("game")
         assert len(children) == 2
         assert {c.path for c in children} == {"game/leduc", "game/doudizhu"}
+
+    def test_save_load_roundtrip(self, tmp_path):
+        reg = DomainRegistry()
+        reg._nodes["game"] = DomainNode(
+            path="game", parent=None,
+            description="Games", correlations={}, relations=""
+        )
+        reg._nodes["game/leduc"] = DomainNode(
+            path="game/leduc", parent="game",
+            description="Leduc", correlations={"game/doudizhu": 0.6}, relations="sib"
+        )
+        reg._reverse_index["l2"]["game/leduc"] = ["card_1", "card_2"]
+        reg._reverse_index["l3"]["game/leduc"] = ["skill_a"]
+        reg._reverse_index["tool"]["general"] = ["web_search"]
+
+        fp = tmp_path / "registry.json"
+        reg.save(fp)
+
+        loaded = DomainRegistry.load(fp)
+        assert len(loaded) == 2
+        node = loaded.get_node("game/leduc")
+        assert node.description == "Leduc"
+        assert node.correlations == {"game/doudizhu": 0.6}
+        assert loaded._reverse_index["l2"]["game/leduc"] == ["card_1", "card_2"]
+        assert loaded._reverse_index["l3"]["game/leduc"] == ["skill_a"]
+        assert loaded._reverse_index["tool"]["general"] == ["web_search"]
+
+    def test_load_nonexistent_returns_empty(self, tmp_path):
+        reg = DomainRegistry.load(tmp_path / "nonexistent.json")
+        assert len(reg) == 0

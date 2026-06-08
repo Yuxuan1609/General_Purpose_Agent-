@@ -1,0 +1,51 @@
+{
+  "nodes": {
+    "general": {
+      "parent": null,
+      "description": "通用领域，跨域知识的默认归属",
+      "correlations": {},
+      "relations": ""
+    },
+    "game": {
+      "parent": "general",
+      "description": "游戏策略领域的根节点，涵盖各类对抗性游戏的决策知识",
+      "correlations": {"learning/reflect": 0.2},
+      "relations": "子域: game/leduc, game/doudizhu"
+    },
+    "game/leduc": {
+      "parent": "game",
+      "description": "Leduc Hold'em 简化德州扑克，2人对局，K/Q/J各两种花色，翻牌前/翻牌后两轮下注",
+      "correlations": {"game/doudizhu": 0.6},
+      "relations": "姊妹域: game/doudizhu（同为扑克类游戏，部分策略可迁移）"
+    },
+    "game/doudizhu": {
+      "parent": "game",
+      "description": "斗地主3人卡牌游戏，54张牌含大小王，1地主vs2农民",
+      "correlations": {"game/leduc": 0.6},
+      "relations": "姊妹域: game/leduc（扑克类，顶牌/炸弹等策略部分互通）"
+    },
+    "learning/reflect": {
+      "parent": "general",
+      "description": "学习反思域，消费执行记录分析策略问题和改进机会",
+      "correlations": {},
+      "relations": "子域: learning/compile, learning/consolidate"
+    },
+    "learning/compile": {
+      "parent": "learning/reflect",
+      "description": "知识编译域，将高激活同域卡片编译为L3技能",
+      "correlations": {"learning/consolidate": 0.8},
+      "relations": "姊妹域: learning/consolidate"
+    },
+    "learning/consolidate": {
+      "parent": "learning/reflect",
+      "description": "知识整理域，管理知识库容量：合并相似条目、归档低活跃内容",
+      "correlations": {"learning/compile": 0.8},
+      "relations": "姊妹域: learning/compile"
+    }
+  },
+  "reverse_index": {
+    "l2": {},
+    "l3": {},
+    "tool": {}
+  }
+}
