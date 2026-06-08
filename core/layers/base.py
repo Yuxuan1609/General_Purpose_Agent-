@@ -132,6 +132,9 @@ class LayerAgent(ABC):
 
         self._log.debug("  ── system ──\n%s", _indent(str(messages[0]["content"]), 4))
         self._log.debug("  ── user ──\n%s", _indent(str(messages[1]["content"]), 4))
+        if tools:
+            tool_names = [t["function"]["name"] for t in tools]
+            self._log.debug("  ── tools: %s ──", ", ".join(tool_names))
 
         # Only use json_mode when no tools (DeepSeek incompatibility)
         use_json_mode = bool(schema) and not tools
@@ -140,7 +143,7 @@ class LayerAgent(ABC):
             resp = self._llm.chat(
                 messages=messages,
                 json_mode=use_json_mode,
-                tools=tools,  # send tools every turn (DeepSeek supports multi-turn tools)
+                tools=tools,
             )
 
             if resp.has_tool_calls and self._injector and layer:
@@ -182,8 +185,10 @@ class LayerAgent(ABC):
 
             # No tool calls → final answer
             text = resp.text if hasattr(resp, 'text') else str(resp)
-            self._log.debug("  response (turn %d):\n%s", turn, _indent(text, 4))
+            self._log.debug("  ═══ response (turn %d) ═══\n%s", turn, _indent(text, 4))
 
+            if schema is None:
+                return {"reply": text, "reasoning": ""}
             try:
                 parsed = json.loads(text)
                 if not isinstance(parsed, dict):
