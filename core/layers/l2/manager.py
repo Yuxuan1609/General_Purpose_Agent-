@@ -83,19 +83,17 @@ class L2Agent(LayerAgent):
         "reasoning": "string (综合推理过程)",
     }
 
-    # Learning task extension
-    _L2_MOD_SCHEMA = {
-        "l2_modifications": [
-            {"target": "l2/<card_id> (existing id for update/deprecate; new id for create)",
-             "type": "update | create | deprecate",
-             "payload": {
-                 "content": "string (full card content, matching KnowledgeCard granularity: domain-specific strategy tip)",
-                 "reason": "string (why)",
-                 "domain": "string (for create, e.g. game/leduc)",
-                 "confidence": "float 0.1-1.0 (for create, default 0.5)",
-             }},
-        ],
-    }
+    # Learning/consolidation output format — injected into prompt, NOT JSON schema
+    _L2_MOD_FORMAT = (
+        "## 输出格式\n"
+        "使用 @modify 标记格式输出 L2 知识卡片的修改，每行一条：\n"
+        "  @modify layer=l2 type=deprecate target=<card_id> reason=\"理由\"\n"
+        "  @modify layer=l2 type=create target=new_id content=\"卡片内容\" domain=\"game/leduc\" reason=\"理由\"\n"
+        "  @modify layer=l2 type=update target=<card_id> content=\"修改后内容\" reason=\"理由\"\n"
+        "注意：只修改 L2 知识卡片。不要修改 L1 行为准则或 L3 技能。\n"
+        "content 和 reason 使用双引号，内部使用单引号。每条 @modify 独占一行。\n"
+        "优先使用 deprecate（可回滚），非必要不 create。不要输出任何 JSON。"
+    )
 
     def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None):
         super().__init__(llm_client, logger)
@@ -118,16 +116,9 @@ class L2Agent(LayerAgent):
             return ""
         recs = []
         for u in units:
-            line = f"[{u.get('index', '?')}] action={u.get('action', '')} result={u.get('result', '')} | {u.get('reasoning', '')[:120]}"
-            l1_r = u.get("l1_reasoning", "")
             l2_r = u.get("l2_reasoning", "")
-            l3_r = u.get("l3_reasoning", "")
-            if l1_r or l2_r or l3_r:
-                parts = []
-                if l1_r: parts.append(f"L1:{l1_r[:80]}")
-                if l2_r: parts.append(f"L2:{l2_r[:80]}")
-                if l3_r: parts.append(f"L3:{l3_r[:80]}")
-                line += "\n  | " + " | ".join(parts)
+            action = u.get("action", "")
+            line = f"[{u.get('index', '?')}] action={action} | L2: {l2_r[:200]}" if l2_r else f"[{u.get('index', '?')}] action={action}"
             recs.append(line)
         result = "| " + " | ".join(recs) if recs else ""
         fb = state.get("feedback", "")
@@ -153,10 +144,8 @@ class L2Agent(LayerAgent):
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
             "L3 层职责：根据具体任务执行标准化流程操作，管理一组 SKILL.md 技能。\n"
-            "需要 L3 时输出 l3_task（一句话任务描述），L3 会匹配技能并执行。\n"
-            "如果当前问题适合被固定流程解决，call_l3=true 并给出任务；否则 call_l3=false。\n\n"
+            "需要 L3 时输出 call_l3=true 和 l3_task（一句话任务描述）；否则 call_l3=false。\n\n"
             "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
-            "(技能 leduc-preflop-raise 可处理此任务：持有K时强制加注)\n"
             "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
         )
         system = self._build_system_prompt(instruction, meta)
@@ -202,6 +191,12 @@ class L2Agent(LayerAgent):
             "你的职责：基于上层拆解的任务和筛选出的知识卡片，整合 L3 返回的执行结果，"
             "给出最终答复。"
         )
+        if l2_fmt:
+            instruction += (
+                "\n\n【整理任务】你只负责 L2 知识卡片（KnowledgeCard）的修改。"
+                "不要修改 L1 行为准则或 L3 技能。"
+                "根据知识卡片列表和 usage stats，判断哪些卡片需要合并、删除或创建。"
+            )
         system = self._build_system_prompt(instruction, meta)
 
         if l2_fmt:
@@ -214,6 +209,8 @@ class L2Agent(LayerAgent):
                 f"call_l3: {stage1_result.get('call_l3', False)}\n"
                 f"l3_task: {stage1_result.get('l3_task', '')}"
             )
+            user += f"\n\n{self._L2_MOD_FORMAT}"
+            schema = None
         else:
             current = state.get("current", "")
             user = (
@@ -223,10 +220,7 @@ class L2Agent(LayerAgent):
                 f"[L3 返回]\n{l3_text}"
             )
 
-        schema = self.STAGE2_SCHEMA
-        if l2_fmt:
-            schema = {**schema, **self._L2_MOD_SCHEMA}
-        return self._call_llm(system, user, schema=schema)
+        return self._call_llm(system, user, schema=None if l2_fmt else self.STAGE2_SCHEMA)
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
         all_cards = []

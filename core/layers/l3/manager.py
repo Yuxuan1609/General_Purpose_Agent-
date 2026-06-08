@@ -42,17 +42,17 @@ class L3Agent(LayerAgent):
         "reasoning": "string (技能选择和执行的推理过程)",
     }
 
-    _L3_MOD_SCHEMA = {
-        "l3_modifications": [
-            {"target": "l3/<skill_name> (existing name for update/deprecate; new name for create)",
-             "type": "update | create | deprecate",
-             "payload": {
-                 "content": "string (full SKILL.md: YAML frontmatter + markdown body)",
-                 "reason": "string (why)",
-                 "domain": "string (for create)",
-             }},
-        ],
-    }
+    # Learning/consolidation output format — injected into prompt, NOT JSON schema
+    _L3_MOD_FORMAT = (
+        "## 输出格式\n"
+        "使用 @modify 标记格式输出 L3 技能的修改，每行一条：\n"
+        "  @modify layer=l3 type=deprecate target=<skill_name> reason=\"理由\"\n"
+        "  @modify layer=l3 type=create target=new_name content=\"SKILL.md内容\" domain=\"game/leduc\" reason=\"理由\"\n"
+        "  @modify layer=l3 type=update target=<skill_name> content=\"修改后内容\" reason=\"理由\"\n"
+        "注意：只修改 L3 技能。不要修改 L1 行为准则或 L2 知识卡片。\n"
+        "content 和 reason 使用双引号，内部使用单引号。每条 @modify 独占一行。\n"
+        "优先使用 deprecate（可回滚），非必要不 create。不要输出任何 JSON。"
+    )
 
     def __init__(self, llm_client):
         super().__init__(llm_client, logger)
@@ -82,8 +82,11 @@ class L3Agent(LayerAgent):
             if isinstance(units, list) and units:
                 recs = []
                 for u in units:
-                    recs.append(f"[{u.get('index','?')}] {u.get('reasoning','')[:120]}")
-                learning_data = f"[学习数据]\n" + "\n".join(recs) + "\n\n"
+                    l3_r = u.get("l3_reasoning", "")
+                    if l3_r:
+                        recs.append(f"[{u.get('index','?')}] L3: {l3_r[:200]}")
+                if recs:
+                    learning_data = f"[学习数据]\n" + "\n".join(recs) + "\n\n"
         fb = (state or {}).get("feedback", "")
         l3_fb = (state or {}).get("l3_feedback", "")
         if l3_fb:
@@ -94,6 +97,12 @@ class L3Agent(LayerAgent):
             "你的核心任务是完成 L2 下发的 l3_task，Meta 提供任务整体背景。\n"
             "选择相关技能并基于技能内容执行任务。"
         )
+        if l3_fmt:
+            instruction += (
+                "\n\n【整理任务】你只负责 L3 技能（Skill）的修改。"
+                "不要修改 L1 行为准则或 L2 知识卡片。"
+                "根据可用技能列表和 usage stats，判断哪些技能需要合并、删除或创建。"
+            )
         system = self._build_system_prompt(instruction, meta)
         user = (
             f"{fb_section}"
@@ -102,9 +111,11 @@ class L3Agent(LayerAgent):
             f"[可用技能]\n{skills_text}"
         )
 
-        schema = self.EXECUTE_SCHEMA
         if l3_fmt:
-            schema = {**schema, **self._L3_MOD_SCHEMA}
+            user += f"\n\n{self._L3_MOD_FORMAT}"
+            schema = None
+        else:
+            schema = self.EXECUTE_SCHEMA
         return self._call_llm(system, user, schema=schema)
 
 

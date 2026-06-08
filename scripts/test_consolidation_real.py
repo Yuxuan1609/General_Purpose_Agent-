@@ -101,11 +101,24 @@ def _parse_skills_from_md(path: Path) -> list[dict]:
     return skills
 
 
-def _load_fixtures(fk, sl, fixtures_dir: Path) -> dict:
+def _load_fixtures(fk, phil, sl, fixtures_dir: Path) -> dict:
     from core.task import Domain
-    l2_count = l3_count = 0
+    l1_count = l2_count = l3_count = 0
+    # L1 rules
+    fp = fixtures_dir / "consolidation_test_l1.md"
+    if fp.exists():
+        for line in fp.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("#") or not line or line.startswith("-"):
+                continue
+            try:
+                phil.add_rule(line[:300], created_by="test_fixture", source="l1")
+                l1_count += 1
+            except Exception:
+                pass
+    # L2 cards
     for name, domain_path in [("consolidation_test_leduc", "game/leduc"),
-                               ("consolidation_test_doudizhu", "game/doudizhu")]:
+                                ("consolidation_test_doudizhu", "game/doudizhu")]:
         fp = fixtures_dir / f"{name}.md"
         if fp.exists():
             for card in _parse_cards_from_md(fp):
@@ -121,7 +134,7 @@ def _load_fixtures(fk, sl, fixtures_dir: Path) -> dict:
                                 domain=Domain("game/leduc", "specific"),
                                 created_by="test_fixture")
                 l3_count += 1
-    return {"l2_count": l2_count, "l3_count": l3_count}
+    return {"l1_count": l1_count, "l2_count": l2_count, "l3_count": l3_count}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -181,7 +194,7 @@ def main():
     seed_knowledge(fk, phil, sl)
 
     # Load consolidation test fixtures
-    loaded = _load_fixtures(fk, sl, PROJECT_ROOT / "tests" / "fixtures")
+    loaded = _load_fixtures(fk, phil, sl, PROJECT_ROOT / "tests" / "fixtures")
     _write_log(env_log, "Knowledge state (pre-consolidation)",
                f"L1 rules: {len(phil.all_rules())}\n"
                + "\n".join(f"  [{r.id}] [{r.source}] {r.content[:100]}" for r in phil.all_rules())

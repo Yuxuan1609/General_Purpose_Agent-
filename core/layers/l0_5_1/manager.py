@@ -34,6 +34,7 @@ class L1Agent(LayerAgent):
 
     STAGE1_SCHEMA = {
         "query": "string (需要下层根据领域知识完成的任务。可附上基于【行为准则】的完成建议，给出可直接使用的相关准则整合。注意下层看不到完整的【行为准则】)",
+        "call_l2": "boolean (是否需要查询下层 L2 知识库，true/false)",
         "domain_nodes": [
             {"name": "string (从领域节点列表中选出的节点路径，如 game/leduc)",
              "score": "float (该节点与当前决策的相关度分数，0.0-1.0)",
@@ -47,17 +48,17 @@ class L1Agent(LayerAgent):
         "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
     }
 
-    # Learning task extension: schema for l1_modifications field
-    _L1_MOD_SCHEMA = {
-        "l1_modifications": [
-            {"target": "l1/<rule_id> (target for modify/deprecate; new id for create)",
-             "type": "update | create | deprecate",
-             "payload": {
-                 "content": "string (full rule text, ~1-2 sentences matching existing L1 rule granularity)",
-                 "reason": "string (why, citing execution record evidence)",
-             }},
-        ],
-    }
+    # Learning/consolidation output format — injected into prompt, NOT JSON schema
+    _L1_MOD_FORMAT = (
+        "## 输出格式\n"
+        "使用 @modify 标记格式输出 L1 行为准则的修改，每行一条：\n"
+        "  @modify layer=l1 type=deprecate target=l1/<rule_id> reason=\"合并到 xxx\"\n"
+        "  @modify layer=l1 type=create target=l1_new_id content=\"新规则文本\" reason=\"基于 evidence\"\n"
+        "  @modify layer=l1 type=update target=l1/<rule_id> content=\"修改后的规则\" reason=\"理由\"\n"
+        "注意：只修改 L1 行为准则。不要修改 L2 知识卡片或 L3 技能。\n"
+        "content 和 reason 使用双引号，内部使用单引号。每条 @modify 独占一行。\n"
+        "优先使用 deprecate（可回滚），非必要不 create。不要输出任何 JSON。"
+    )
 
     def __init__(self, llm_client, philosophy):
         super().__init__(llm_client, logger)
@@ -93,22 +94,9 @@ class L1Agent(LayerAgent):
             if isinstance(units, list):
                 for u in units:
                     idx = u.get("index", "?")
-                    action = u.get("action", "")
-                    result = u.get("result", "")
-                    reasoning = u.get("reasoning", "")
                     l1_r = u.get("l1_reasoning", "")
-                    l2_r = u.get("l2_reasoning", "")
-                    l3_r = u.get("l3_reasoning", "")
-                    line = f"[{idx}] action={action} result={result} | {reasoning[:120]}"
-                    if l1_r or l2_r or l3_r:
-                        parts = []
-                        if l1_r:
-                            parts.append(f"L1: {l1_r[:100]}")
-                        if l2_r:
-                            parts.append(f"L2: {l2_r[:100]}")
-                        if l3_r:
-                            parts.append(f"L3: {l3_r[:100]}")
-                        line += f"\n  | " + " | ".join(parts)
+                    action = u.get("action", "")
+                    line = f"[{idx}] action={action} | L1: {l1_r[:200]}" if l1_r else f"[{idx}] action={action}"
                     recs.append(line)
             records_text = "\n".join(recs) if recs else "（无）"
             feedback = state.get("feedback", "")
@@ -140,8 +128,8 @@ class L1Agent(LayerAgent):
             "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
             "下层 L2 层的职责：根据你的查询检索相关知识卡片，筛选最相关的卡片并判断是否需要 L3 技能协助。\n"
             "你的 query 应结合本层的行为准则和任务目标，给出清晰的拆解任务交给 L2 层。\n\n"
-            "从领域节点中选出最相关的 1-5 个节点，输出语义查询。"
-            "如果不需要领域知识，返回空的 domain_nodes（[]）。"
+            "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 call_l2=false。\n"
+            "从领域节点中选出最相关的 1-5 个节点。不需要领域知识时返回空的 domain_nodes（[]）。"
         )
         system = self._build_system_prompt(
             instruction, meta,
@@ -155,6 +143,7 @@ class L1Agent(LayerAgent):
                l2_result: dict | None = None) -> dict:
         """Stage2: integrate L2 knowledge and produce final decision.
         Only sees L2's reply + reasoning, not L2's modifications.
+        For learning tasks: outputs @modify markup instead of JSON.
         """
         l1_fmt = state.get("l1_output_format")
 
@@ -162,6 +151,12 @@ class L1Agent(LayerAgent):
             "你的职责：基于【行为准则】整合下层返回的知识信息，做出最终决策。"
             "在 rules_used 中列出本次推理中实际引用到的行为准则的 id。"
         )
+        if l1_fmt:
+            instruction += (
+                "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
+                "不要修改 L2 知识卡片或 L3 技能。"
+                "根据下层（L2）的建议和自身判断，决定哪些 L1 规则需要增删改。"
+            )
         system = self._build_system_prompt(instruction, meta)
 
         l2 = l2_result or {}
@@ -175,9 +170,11 @@ class L1Agent(LayerAgent):
         response_text = "\n\n".join(parts) if parts else "（下层未返回信息）"
         user = f"{self._build_user_context(state)}\n\n[下层任务返回]\n{response_text}"
 
-        schema = self.STAGE2_SCHEMA
         if l1_fmt:
-            schema = {**schema, **self._L1_MOD_SCHEMA}
+            user += f"\n\n{self._L1_MOD_FORMAT}"
+            schema = None
+        else:
+            schema = self.STAGE2_SCHEMA
         result = self._call_llm(system, user, schema=schema)
 
         return result
@@ -232,11 +229,13 @@ class L0_5_1Manager(LayerManager):
                                                 domain_nodes=domain_nodes)
             query_text = stage1_result.get("query", "")
             selected_nodes = stage1_result.get("domain_nodes", [])
+            call_l2 = stage1_result.get("call_l2", True)
             logger.debug("  query: %s", query_text)
+            logger.debug("  call_l2: %s", call_l2)
             for n in selected_nodes:
                 logger.debug("    node: %s (score=%s)", n.get("name"), n.get("score"))
 
-            need_l2 = bool(selected_nodes) or bool(query_text)
+            need_l2 = call_l2 and bool(selected_nodes or query_text)
             if self._downstream and need_l2:
                 # E3: pass data via LayerMessage payload, not obs.state mutation
                 q_msg = self._downward.wrap_query(
