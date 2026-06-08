@@ -69,7 +69,11 @@ def main():
         handlers=[logging.StreamHandler()],
     )
 
-    executor = _setup_executor()
+    try:
+        executor = _setup_executor()
+    except Exception as e:
+        print(f"Failed to initialize: {e}")
+        sys.exit(1)
 
     from core.env.interaction_env import InteractionEnv
     env = InteractionEnv(
@@ -91,18 +95,18 @@ def main():
 
         if user_input.lower() in ("exit", "quit"):
             break
-        if user_input == "/new":
+        elif user_input == "/new":
             state = env.reset("interaction")
             print(state.observation)
             continue
-        if user_input == "/info":
+        elif user_input == "/info":
             info = env.session_info()
             print(
                 f"Session: {info['id'][:8]}... | turns: {info['turns']} "
                 f"| started: {info['started_at'][:19]}"
             )
             continue
-        if not user_input:
+        elif not user_input:
             continue
 
         env.receive_input(user_input)
@@ -112,6 +116,9 @@ def main():
 
         try:
             result = executor.execute(task_obs)
+            if not isinstance(result, dict):
+                print(f"Error: unexpected response type: {type(result).__name__}")
+                continue
         except Exception as e:
             print(f"Error: {e}")
             continue
