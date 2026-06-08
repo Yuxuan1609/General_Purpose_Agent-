@@ -155,6 +155,15 @@ def main():
     llm = build_llm_client(PROJECT_ROOT / "config.yaml", temperature=0.1)
     _write_log(env_log, "LLM Client", f"model: {llm.model}")
 
+    # ── Domain registry ──
+    reg_path = PROJECT_ROOT / "data" / "layers" / "domain_registry.json"
+    reg = None
+    try:
+        from core.seed_knowledge import init_registry
+        reg = init_registry(reg_path)
+    except Exception:
+        pass
+
     # ── Knowledge stores ──
     from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
@@ -165,8 +174,10 @@ def main():
 
     phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
     fk = FlexibleKnowledge(PROJECT_ROOT / "data" / "layers" / "knowledge",
-                           PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json")
-    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", ToolRegistry())
+                           PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json",
+                           domain_registry=reg)
+    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", ToolRegistry(),
+                    domain_registry=reg)
     seed_knowledge(fk, phil, sl)
 
     # Load consolidation test fixtures
@@ -182,7 +193,7 @@ def main():
     # ── Build chain + Executor ──
     from core.layers import build_chain as _build_chain
     meta_driver = MetaDriver(DEFAULT_VALIDATORS.copy())
-    chain = _build_chain(meta_driver, phil, fk, sl, auxiliary_llm=llm)
+    chain = _build_chain(meta_driver, phil, fk, sl, auxiliary_llm=llm, domain_registry=reg)
     from core.executor import Executor
     executor = Executor(layer_root=chain, llm_client=llm,
                         learning_dir=PROJECT_ROOT / "data" / "learning")

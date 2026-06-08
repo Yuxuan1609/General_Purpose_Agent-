@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 class Domain:
     """Hierarchical domain identifier. Frozen for use as dict key."""
     path: str
-    level: str
+    level: str = "specific"  # DEPRECATED: will be removed; use DomainRegistry instead
 
     @property
     def is_general(self) -> bool:

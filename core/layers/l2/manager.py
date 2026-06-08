@@ -14,6 +14,7 @@ logger = logging.getLogger("l2")
 # with name (matching L2 card domain path) and a ~100-char description.
 # TODO: Unified node design (schema, persistence, auto-generation) to be
 #       finalized in a future session. For now, manually maintained.
+# DEPRECATED: will be removed; use DomainRegistry.list_all() instead
 L2_DOMAIN_NODES = [
     {
         "name": "game/leduc",
