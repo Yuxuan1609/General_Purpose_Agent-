@@ -119,6 +119,31 @@ class TestFlexibleKnowledge:
         assert stats["count"] >= 2
         assert 0 < stats["avg_activation"] <= 1.0
 
+    def test_card_available_domains_indexed(self, tmp_path):
+        from core.domain_registry import DomainRegistry
+        reg = DomainRegistry()
+        reg.add_node("game/leduc", "game", "Leduc")
+        reg.add_node("game", None, "Game")
+        fk = FlexibleKnowledge(tmp_path / "k", tmp_path / "index.json",
+                               domain_registry=reg)
+        from core.task import Domain
+        card = fk.add_card(content="test", domain=Domain("game/leduc", "specific"))
+        assert card.available_domains == ["game/leduc"]
+        items = reg.get_primary_items("l2", "game/leduc")
+        assert card.id in items
+
+    def test_card_remove_unsyncs_index(self, tmp_path):
+        from core.domain_registry import DomainRegistry
+        reg = DomainRegistry()
+        reg.add_node("game/leduc", "game", "Leduc")
+        fk = FlexibleKnowledge(tmp_path / "k", tmp_path / "index.json",
+                               domain_registry=reg)
+        from core.task import Domain
+        card = fk.add_card(content="test", domain=Domain("game/leduc", "specific"))
+        assert card.id in reg.get_primary_items("l2", "game/leduc")
+        fk.remove_card(card.id)
+        assert card.id not in reg.get_primary_items("l2", "game/leduc")
+
 
 class TestKnowledgeGraph:
     def test_build_from_index(self):

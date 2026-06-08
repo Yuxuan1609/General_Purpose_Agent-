@@ -27,6 +27,7 @@ class KnowledgeCard:
     id: str
     content: str
     domain: "Domain"
+    available_domains: list[str] = field(default_factory=list)
     sub_tags: list[str] = field(default_factory=list)
     confidence: float = 0.5
     activation: float = 0.5
@@ -121,12 +122,14 @@ class KnowledgeGraph:
 class FlexibleKnowledge:
     """L2: Flexible knowledge. Stores cards in memory, persists via MD+JSON+Graph."""
 
-    def __init__(self, knowledge_dir: Path, index_path: Path):
+    def __init__(self, knowledge_dir: Path, index_path: Path,
+                 domain_registry=None):
         self.knowledge_dir = Path(knowledge_dir)
         self.index_path = Path(index_path)
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
         self.cards: list[KnowledgeCard] = []
         self.graph: KnowledgeGraph | None = None
+        self._registry = domain_registry
         self._load_index()
 
     def get_active_cards(self, task_domain, task_context: str = "", top_k: int = 5) -> list[KnowledgeCard]:
@@ -146,23 +149,43 @@ class FlexibleKnowledge:
         return result
 
     def add_card(self, content: str, domain, sub_tags: list[str] | None = None,
-                 confidence: float = 0.5, source: str = "observation") -> KnowledgeCard:
+                 confidence: float = 0.5, source: str = "observation",
+                 available_domains: list[str] | None = None) -> KnowledgeCard:
+        if available_domains is None:
+            available_domains = [domain.path]
         card = KnowledgeCard(
             id=f"card_{uuid.uuid4().hex[:8]}",
             content=content,
             domain=domain,
+            available_domains=available_domains,
             sub_tags=sub_tags or [],
             confidence=confidence,
             activation=confidence,
             source=source,
         )
         self.cards.append(card)
+        self._sync_card_index(card)
         return card
+
+    def _sync_card_index(self, card) -> None:
+        if self._registry is None:
+            return
+        for d in card.available_domains:
+            self._registry.index_item("l2", d, card.id)
+
+    def _unsync_card_index(self, card_id: str) -> None:
+        if self._registry is None:
+            return
+        idx = self._registry._reverse_index.get("l2", {})
+        for d, ids in idx.items():
+            if card_id in ids:
+                ids.remove(card_id)
 
     def remove_card(self, card_id: str) -> bool:
         """Remove a knowledge card by id. Returns True if found and removed."""
         for i, c in enumerate(self.cards):
             if c.id == card_id:
+                self._unsync_card_index(card_id)
                 self.cards.pop(i)
                 return True
         return False
