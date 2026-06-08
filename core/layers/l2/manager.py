@@ -83,7 +83,7 @@ class L2Agent(LayerAgent):
         "reasoning": "string (综合推理过程)",
     }
 
-    # Learning/consolidation — tool call instead of @modify text
+    # Consolidation tools — modifications via tool calls
     _L2_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "deprecate_l2_card",

@@ -48,7 +48,7 @@ class L1Agent(LayerAgent):
         "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
     }
 
-    # Learning/consolidation — tool call instead of @modify text
+    # Consolidation tools — modifications via tool calls
     _L1_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "deprecate_l1_rule",

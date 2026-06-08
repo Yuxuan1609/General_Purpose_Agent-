@@ -2,7 +2,7 @@
 
 Loads test fixture data into FlexibleKnowledge + SkillLayer, builds the
 full Executor + L(0.5+1)↔L2↔L3 chain, dispatches a consolidation task
-through the chain, and parses the Agent's @modify markup output.
+through the chain, and collects tool call modifications from layer NOTIFY.
 
 LearningEnv runs dry_run=True — NO modifications applied.
 

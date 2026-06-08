@@ -42,7 +42,7 @@ class L3Agent(LayerAgent):
         "reasoning": "string (技能选择和执行的推理过程)",
     }
 
-    # Learning/consolidation — tool call instead of @modify text
+    # Consolidation tools — modifications via tool calls
     _L3_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "deprecate_l3_skill",
