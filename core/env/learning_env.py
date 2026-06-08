@@ -296,11 +296,12 @@ class LearningEnv(Environment):
                 all_domains.add(c.domain.path)
             l2_limits = spec.get("l2", {}).get("limits", {}) if spec else {}
             l2_hard = l2_limits.get("hard", 30) if l2_limits else 30
+            l2_per_domain = l2_limits.get("per_domain_hard", l2_hard) if l2_limits else l2_hard
             lines.append("### L2 Domain Statistics")
             for domain, count in domain_counts.most_common():
-                over = count - l2_hard
-                flag = f" ⚠ OVER LIMIT by {over}" if over > 0 else ""
-                lines.append(f"- {domain}: {count} cards{flag}")
+                over = count - l2_per_domain
+                flag = f" ⚠ OVER by {over}" if over > 0 else ""
+                lines.append(f"- {domain}: {count}/{l2_per_domain} cards{flag}")
             lines.append("")
         if needs_l3:
             from collections import Counter
@@ -313,8 +314,8 @@ class LearningEnv(Environment):
             lines.append("### L3 Domain Statistics")
             for domain, count in skill_domain_counts.most_common():
                 over = count - l3_hard
-                flag = f" ⚠ OVER LIMIT by {over}" if over > 0 else ""
-                lines.append(f"- {domain}: {count} skills{flag}")
+                flag = f" ⚠ OVER by {over}" if over > 0 else ""
+                lines.append(f"- {domain}: {count}/{l3_hard} skills{flag}")
             lines.append("")
 
         # ── Collect domain hints for retrieval ──
