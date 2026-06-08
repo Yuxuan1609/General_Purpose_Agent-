@@ -362,6 +362,16 @@
 | `L2Agent._build_learning_section` | `(state) → str` | **增强**：读取 `state["feedback"]`（共享）+ `state["l2_feedback"]`（专属），合并追加 `[L2 修改结果确认]` 节 | stage1/stage2 | — |
 | `L3Agent.execute` | `(meta, state, matched_skills) → dict` | **增强**：读取 `state["feedback"]`（共享）+ `state["l3_feedback"]`（专属），合并前置 `[L3 修改结果确认]` 节 | L3Manager.query() | _call_llm() |
 
+## docs/superpowers/specs/2026-06-08-env-agent-boundary.md — 项目纪律
+
+| 规则 | 含义 |
+|------|------|
+| R1 | Environment 不碰 Agent 内部（不注入 tool、不修改 prompt、不调 ToolRegistry） |
+| R2 | Agent 不感知 Environment 类型（不 if env_type，只读 meta/state） |
+| R3 | 工具挂载由 Agent 层自主决定（Environment 只设 state 信号） |
+| R4 | 持久化由 Executor 执行，Environment 只设 enable_learning 标志位 |
+| R5 | Layer feedback 通过 state 字段注入，不走旁路 |
+
 ## config/layers/consolidation.yaml — Phase 3 新增
 
 | 功能 | 描述 |

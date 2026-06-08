@@ -56,6 +56,31 @@ Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
 
 ---
 
+## 项目纪律 — Environment ↔ Agent 边界
+
+> **Environment 决定 Agent 看什么和输出什么格式；Agent 决定怎么推理和输出什么内容。**  
+> 详见 [docs/superpowers/specs/2026-06-08-env-agent-boundary.md](docs/superpowers/specs/2026-06-08-env-agent-boundary.md)。
+
+| 规则 | 含义 |
+|------|------|
+| **R1** | Environment 不碰 Agent 内部（不注入 tool、不修改 prompt、不调 ToolRegistry） |
+| **R2** | Agent 不感知 Environment 类型（不 `if env_type == ...`，只读 `meta`/`state` 字段） |
+| **R3** | 工具挂载由 Agent 层自主决定（Environment 只设 `state` 信号，不注入 tool 定义） |
+| **R4** | 持久化由 Executor 执行，Environment 只设 `enable_learning` 标志位 |
+| **R5** | Layer feedback 通过 `state` 字段注入，不走旁路 |
+
+**三个 Environment 对照**：
+
+| | GameEnv | LearningEnv | InteractionEnv |
+|---|---|---|---|
+| domain | `game/*` | `learning/*` | `interaction` |
+| meta 角色 | 游戏状态 + action 格式 | 修改建议格式 + 统计 | system_prompt |
+| state 信号 | 合法动作 | `lX_output_format` + feedback | `current` + `history` |
+| 工具挂载 | 无 | consolidation tools | 无（预留） |
+| 持久化 | Executor 每步写 | 不重复记录 | Executor 每轮写 |
+
+---
+
 ## 快速开始
 
 ### 环境要求
