@@ -207,6 +207,8 @@ class L1Agent(LayerAgent):
         if l1_fmt:
             self._setup_l1_consolidation()
             tools = self._L1_CONSOLIDATION_TOOLS
+            self._log.debug("  consolidation tools: %s",
+                           [t["function"]["name"] for t in tools])
             schema = None
         else:
             tools = None

@@ -286,6 +286,42 @@ class LearningEnv(Environment):
             lines.append(f"Strategy: {level_info.get('strategy', '')}")
             lines.append("")
 
+        # ── Per-domain statistics ──
+        all_domains: set[str] = set()
+        if needs_l2:
+            from collections import Counter
+            domain_counts: Counter[str] = Counter()
+            for c in l2.cards:
+                domain_counts[c.domain.path] += 1
+                all_domains.add(c.domain.path)
+            l2_limits = spec.get("l2", {}).get("limits", {}) if spec else {}
+            l2_hard = l2_limits.get("hard", 30) if l2_limits else 30
+            lines.append("### L2 Domain Statistics")
+            for domain, count in domain_counts.most_common():
+                over = count - l2_hard
+                flag = f" ⚠ OVER LIMIT by {over}" if over > 0 else ""
+                lines.append(f"- {domain}: {count} cards{flag}")
+            lines.append("")
+        if needs_l3:
+            from collections import Counter
+            skill_domain_counts: Counter[str] = Counter()
+            for s in l3.list_all():
+                skill_domain_counts[s.domain.path] += 1
+                all_domains.add(s.domain.path)
+            l3_limits = spec.get("l3", {}).get("limits", {}) if spec else {}
+            l3_hard = l3_limits.get("hard", 20) if l3_limits else 20
+            lines.append("### L3 Domain Statistics")
+            for domain, count in skill_domain_counts.most_common():
+                over = count - l3_hard
+                flag = f" ⚠ OVER LIMIT by {over}" if over > 0 else ""
+                lines.append(f"- {domain}: {count} skills{flag}")
+            lines.append("")
+
+        # ── Collect domain hints for retrieval ──
+        hint_domains = ["learning/compile"]
+        if needs_l2:
+            hint_domains.extend(sorted(all_domains))
+
         # ── L2 section ──
         if needs_l2:
             l2_spec = spec.get("l2", {})
@@ -427,7 +463,7 @@ class LearningEnv(Environment):
             },
             session={
                 "domain": "learning/compile",
-                "domains_hint": ["learning/compile", self._base_domain],
+                "domains_hint": list(dict.fromkeys(hint_domains)),
                 "id": f"consolidation_{self._step_count}",
                 "step_index": 0,
                 "enable_learning": False,

@@ -246,6 +246,8 @@ class L2Agent(LayerAgent):
             )
             self._setup_l2_consolidation()
             tools = self._L2_CONSOLIDATION_TOOLS
+            self._log.debug("  consolidation tools: %s",
+                           [t["function"]["name"] for t in tools])
             schema = None
         else:
             current = state.get("current", "")
@@ -353,12 +355,10 @@ class L2Manager(LayerManager):
         # Try registry-based card retrieval first
         if self._registry and obs:
             session = obs.session if obs else {}
-            task_domain = session.get("domain", "general")
-            primary_ids = self._registry.get_primary_items("l2", task_domain)
-            explore_ids = self._registry.get_explore_items("l2", task_domain, threshold=0.5)
-            all_ids = list(dict.fromkeys(primary_ids + explore_ids))
-            reg_cards = self._build_cards_from_ids(all_ids)
-            if reg_cards:
+            domains_hint = session.get("domains_hint", [session.get("domain", "general")])
+            all_ids = self._registry.get_items_for_domains("l2", domains_hint)
+            if all_ids:
+                reg_cards = self._build_cards_from_ids(all_ids)
                 self._cards = reg_cards
             else:
                 self._cards = self._build_cards(selected_nodes)

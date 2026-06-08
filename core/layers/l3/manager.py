@@ -149,6 +149,8 @@ class L3Agent(LayerAgent):
         if l3_fmt:
             self._setup_l3_consolidation()
             tools = self._L3_CONSOLIDATION_TOOLS
+            self._log.debug("  consolidation tools: %s",
+                           [t["function"]["name"] for t in tools])
             schema = None
         else:
             tools = None
@@ -201,7 +203,8 @@ class L3Manager(LayerManager):
         # Deterministic: domain-based skill matching
         # Registry-based skill matching
         if self._registry:
-            skill_ids = self._registry.get_primary_items("l3", domain_path)
+            domains_hint = session.get("domains_hint", [domain_path])
+            skill_ids = self._registry.get_items_for_domains("l3", domains_hint)
             self._matched_skills = self._skill_layer.get_skills_by_ids(skill_ids)
             self._matched = [s["name"] for s in self._matched_skills]
         else:
