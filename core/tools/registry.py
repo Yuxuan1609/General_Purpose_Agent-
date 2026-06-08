@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
@@ -12,6 +12,7 @@ class ToolEntry:
     handler: Callable
     check_fn: Callable | None = None
     toolset: str = "core"
+    available_domains: list[str] = field(default_factory=list)
 
 
 class ToolRegistry:
@@ -19,7 +20,7 @@ class ToolRegistry:
     _instance: ToolRegistry | None = None
     _lock = threading.RLock()
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -27,9 +28,15 @@ class ToolRegistry:
                     cls._instance._entries: dict[str, ToolEntry] = {}
         return cls._instance
 
+    def __init__(self, domain_registry=None):
+        self._registry = domain_registry
+
     def register(self, name: str, schema: dict, handler: Callable,
                  check_fn: Callable | None = None, toolset: str = "core",
+                 available_domains: list[str] | None = None,
                  override: bool = False):
+        if available_domains is None:
+            available_domains = ["general"]
         with self._lock:
             existing = self._entries.get(name)
             if existing and existing.toolset != toolset and not override:
@@ -37,10 +44,15 @@ class ToolRegistry:
                     f"Tool '{name}' already registered from toolset "
                     f"'{existing.toolset}' (attempted from '{toolset}')"
                 )
-            self._entries[name] = ToolEntry(
+            tool = ToolEntry(
                 name=name, schema=schema, handler=handler,
                 check_fn=check_fn, toolset=toolset,
+                available_domains=available_domains,
             )
+            self._entries[name] = tool
+            if self._registry:
+                for d in tool.available_domains:
+                    self._registry.index_item("tool", d, name)
 
     def get_definitions(self, requested: set[str] | None = None) -> list[dict]:
         with self._lock:
@@ -68,6 +80,12 @@ class ToolRegistry:
     def deregister(self, name: str):
         with self._lock:
             self._entries.pop(name, None)
+
+    def get_tools_for_domain(self, domain: str) -> list[ToolEntry]:
+        if self._registry:
+            ids = self._registry.get_primary_items("tool", domain)
+            return [t for t in self._entries.values() if t.name in ids]
+        return list(self._entries.values())
 
     def clear(self):
         """Reset all entries. For testing only."""

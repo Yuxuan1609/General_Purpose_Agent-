@@ -15,6 +15,19 @@
 
 ---
 
+## core/tools/registry.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `ToolEntry` | `@dataclass(name, schema, handler, check_fn, toolset, available_domains)` | 工具条目数据类，含域名归属 | ToolRegistry | — |
+| `ToolRegistry` | `__init__(domain_registry=None)` → singleton | 线程安全工具注册中心，支持域名索引 | setup scripts, LayerAgent | DomainRegistry.index_item() |
+| `ToolRegistry.register` | `(name, schema, handler, check_fn, toolset, available_domains, override)` | 注册工具，可选同步到 DomainRegistry reverse index | setup scripts | DomainRegistry.index_item() |
+| `ToolRegistry.get_definitions` | `(requested=None) → list[dict]` | 获取所有可见工具的 OpenAI schema 列表 | Executor, LayerInjector | — |
+| `ToolRegistry.dispatch` | `(name, args, context) → str` | 按名分发工具调用 | ToolCapability | entry.handler() |
+| `ToolRegistry.deregister` | `(name)` | 注销工具 | — | — |
+| `ToolRegistry.get_tools_for_domain` | `(domain) → list[ToolEntry]` | 按域名过滤工具列表，无 registry 时返回全部 | L2Manager, Executor | DomainRegistry.get_primary_items() |
+| `ToolRegistry.clear` | `()` | 重置所有条目（仅测试用） | test fixtures | — |
+
 ## core/domain_registry.py (Task 3)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |

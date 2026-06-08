@@ -90,3 +90,20 @@ class TestToolRegistry:
         r.register("dup", schema, echo_handler, check_fn=check_always, toolset="A")
         with pytest.raises(ValueError, match="already registered"):
             r.register("dup", schema, echo_handler, check_fn=check_always, toolset="B")
+
+    def test_tool_domain_filtering(self):
+        from core.domain_registry import DomainRegistry
+        reg = DomainRegistry()
+        reg.add_node("game/leduc", "game", "Leduc")
+        reg.add_node("general", None, "General")
+        tr = ToolRegistry(domain_registry=reg)
+        tr.register("web_search",
+                    {"type": "function", "function": {"name": "web_search", "description": "search", "parameters": {}}},
+                    lambda args, ctx=None: None, available_domains=["general"])
+        tr.register("poker_calc",
+                    {"type": "function", "function": {"name": "poker_calc", "description": "odds", "parameters": {}}},
+                    lambda args, ctx=None: None, available_domains=["game/leduc"])
+        tools = tr.get_tools_for_domain("game/leduc")
+        names = [t.name for t in tools]
+        assert "poker_calc" in names
+        assert "web_search" not in names
