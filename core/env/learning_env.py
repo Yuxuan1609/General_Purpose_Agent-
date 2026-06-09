@@ -301,11 +301,11 @@ class LearningEnv(Environment):
         # Fallback: if total exceeds limit but no per-domain trigger, trigger all domains
         if needs_l2 and not l2_triggers and l2:
             for d in set(c.domain.path for c in l2.cards):
-                l2_triggers[d] = "global_overflow"
+                l2_triggers[d] = "total_overflow"
                 domain_counts[d] += 1
         if needs_l3 and not l3_triggers and l3:
             for d in set(s.domain.path for s in l3.list_all()):
-                l3_triggers[d] = "global_overflow"
+                l3_triggers[d] = "total_overflow"
                 skill_domain_counts[d] += 1
 
         if not l2_triggers and not l3_triggers:
@@ -348,9 +348,9 @@ class LearningEnv(Environment):
                             f"- **{domain}**: {count} cards (capacity overflow — {over} over soft limit {l2_soft}). "
                             f"Reduce to below {l2_soft} via merge/deprecate."
                         )
-                elif reason == "global_overflow":
+                elif reason == "total_overflow":
                     meta_lines.append(
-                        f"- **{domain}**: {count} cards (included — global total exceeds limit). "
+                        f"- **{domain}**: {count} cards (included — total card count {len(l2.cards)} exceeds limit {self._l2_limit}). "
                         f"Review for quality, merge similar, deprecate unused."
                     )
                 elif reason == "maintenance":
@@ -378,9 +378,9 @@ class LearningEnv(Environment):
                             f"- **{domain}**: {count} skills (capacity overflow — {over} over soft limit {l3_soft}). "
                             f"Reduce to below {l3_soft} via deprecate/compile."
                         )
-                elif reason == "global_overflow":
+                elif reason == "total_overflow":
                     meta_lines.append(
-                        f"- **{domain}**: {count} skills (included — global total exceeds limit). "
+                        f"- **{domain}**: {count} skills (included — total skill count {len(l3.list_all())} exceeds limit {self._l3_limit}). "
                         f"Review quality, deprecate unused, compile redundant."
                     )
                 elif reason == "maintenance":
