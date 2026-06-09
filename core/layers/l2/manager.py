@@ -104,15 +104,15 @@ class L2Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l2_card",
-            "description": "Modify an existing L2 card. Use content to update card text. Use usefulness (positive int) / misleading (positive int) / comment to record quality feedback from reflection. This replaces the old boost/penalize mechanism.",
+            "description": "Modify an existing L2 card. Use content to update card text, or pass only usefulness/misleading/comment to record quality feedback without changing content.\n\nQuality fields:\n  usefulness: int, range -5 to +5. +5=critical help, +3=helpful, +1=slightly useful, 0=unset, -1=not very useful, -3=useless, -5=harmful leading to wrong decisions. Cumulative across multiple modifies.\n  misleading: int, range 0 to +5. +5=severely misleading causing critical error, +3=clearly misleading, +1=slightly inaccurate/outdated. Non-negative, cumulative.\n  comment: natural language quality note, max 100 chars. Omit if no opinion.",
             "parameters": {"type": "object", "properties": {
-                "card_id": {"type": "string", "description": "要修改的卡片 id，如 card_xxxxxxxx"},
-                "content": {"type": "string", "description": "修改后的完整卡片内容"},
-                "reason": {"type": "string", "description": "修改理由"},
-                "usefulness": {"type": "integer", "description": "如果该卡片在反思中有用，设为正值（如 3）。没有意见时省略。"},
-                "misleading": {"type": "integer", "description": "如果该卡片误导了思考，设为正值（如 1）。没有意见时省略。"},
-                "comment": {"type": "string", "description": "质量描述，最多 100 字。没有意见时省略。"},
-            }, "required": ["card_id", "content", "reason"], "additionalProperties": False},
+                "card_id": {"type": "string", "description": "Card id to modify, e.g. card_xxxxxxxx"},
+                "content": {"type": "string", "description": "Full modified card content. Omit if only recording quality feedback without content change."},
+                "reason": {"type": "string", "description": "Reason for modification or quality update"},
+                "usefulness": {"type": "integer", "description": "How useful this card was during reflection. Range -5 to +5."},
+                "misleading": {"type": "integer", "description": "How misleading this card was during reflection. Range 0 to +5."},
+                "comment": {"type": "string", "description": "Quality description, max 100 chars."},
+            }, "required": ["card_id", "reason"], "additionalProperties": False},
         }},
     ]
 

@@ -314,41 +314,57 @@ class LearningEnv(Environment):
         level = self.get_consolidation_level()
         level_info = spec.get("consolidation_levels", {}).get(level, {}) if spec else {}
 
-        # ── meta: slim header only ──
+        # ── meta: clear task description with trigger info ──
         meta_lines = [
             "## Knowledge Consolidation Task",
-            f"**Level: {level} — {level_info.get('label', '')}**",
+            "",
+            f"**Level {level}**: {level_info.get('label', '整理')}.",
+            f"Target: L1 rules + L2 cards + L3 skills need review across {len(all_domains)} domain(s).",
+            "All three layers must participate — each layer has its own sub-task in state.",
             "",
         ]
         if l2_triggers:
-            meta_lines.append(f"L2 Knowledge Cards to review: {len(l2_triggers)} domain(s) triggered")
-        if l3_triggers:
-            meta_lines.append(f"L3 Skills to review: {len(l3_triggers)} domain(s) triggered")
-        meta_lines.append("")
-        meta_lines.append("Each layer has its own task in state. Only modify your own layer's data.")
-
-        # ── Per-domain statistics (shared, all layers see) ──
-        if l2_triggers:
-            meta_lines.append("### L2 Cards by Domain")
+            target_count = sum(
+                max(0, domain_counts.get(d, 0) - l2_soft)
+                for d in l2_triggers if l2_triggers.get(d) == "capacity"
+            )
+            meta_lines.append("### L2 Cards — triggered domains")
             for domain, count in sorted(domain_counts.items()):
-                trigger = l2_triggers.get(domain, "")
-                over = "OVER HARD LIMIT" if count > l2_hard else ("over soft limit" if count > l2_soft else "ok")
-                meta_lines.append(
-                    f"- {domain}: current number: {count}/soft limit: {l2_soft} cards/"
-                    f"hard limit: {l2_hard} cards ({over}) — {trigger}"
-                )
+                if domain not in l2_triggers:
+                    continue
+                reason = l2_triggers[domain]
+                mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
+                if reason == "capacity":
+                    over = count - l2_soft
+                    meta_lines.append(
+                        f"- **{domain}**: {count} cards (capacity overflow — {over} over soft limit {l2_soft}). "
+                        f"Reduce to below {l2_soft} via merge/deprecate."
+                    )
+                else:
+                    meta_lines.append(
+                        f"- **{domain}**: {count} cards (routine maintenance — {mods} modifications since last consolidate). "
+                        f"Review for quality, merge similar, deprecate unused."
+                    )
             meta_lines.append("")
         if l3_triggers:
-            meta_lines.append("### L3 Skills by Domain")
+            meta_lines.append("### L3 Skills — triggered domains")
             for domain, count in sorted(skill_domain_counts.items()):
-                trigger = l3_triggers.get(domain, "")
-                over = "OVER HARD LIMIT" if count > l3_hard else ("over soft limit" if count > l3_soft else "ok")
-                meta_lines.append(
-                    f"- {domain}: current number: {count}/soft limit: {l3_soft} skills/"
-                    f"hard limit: {l3_hard} skills ({over}) — {trigger}"
-                )
+                if domain not in l3_triggers:
+                    continue
+                reason = l3_triggers[domain]
+                mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
+                if reason == "capacity":
+                    over = count - l3_soft
+                    meta_lines.append(
+                        f"- **{domain}**: {count} skills (capacity overflow — {over} over soft limit {l3_soft}). "
+                        f"Reduce to below {l3_soft} via deprecate/compile."
+                    )
+                else:
+                    meta_lines.append(
+                        f"- **{domain}**: {count} skills (routine maintenance — {mods} modifications since last consolidate). "
+                        f"Review quality, deprecate unused, compile redundant."
+                    )
             meta_lines.append("")
-
         meta = "\n".join(meta_lines)
 
         # ── l1_task: criteria text only (DD4 — no rule listing, system prompt has rules) ──

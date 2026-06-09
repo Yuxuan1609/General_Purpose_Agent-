@@ -71,8 +71,7 @@ def _seed_leduc_cards(fk):
          "对手可能已配对或持有更高单张。fold损失已有投入但避免更大损失。", "game/leduc", 0.7),
     ]
     for content, domain, conf in cards:
-        fk.add_card(content=content, domain=Domain(domain, "specific"),
-                    confidence=conf, source="seed")
+        fk.add_card(content=content, domain=Domain(domain, "specific"), source="seed")
 
 
 def _seed_doudizhu_cards(fk):
@@ -85,8 +84,7 @@ def _seed_doudizhu_cards(fk):
          "game/doudizhu", 0.85),
     ]
     for content, domain, conf in cards:
-        fk.add_card(content=content, domain=Domain(domain, "specific"),
-                    confidence=conf, source="seed")
+        fk.add_card(content=content, domain=Domain(domain, "specific"), source="seed")
 
 
 def _seed_l3_skills(sl):
@@ -206,5 +204,4 @@ def _seed_consolidation_cards(fk):
          "learning/consolidate", 0.9),
     ]
     for content, domain, conf in cards:
-        fk.add_card(content=content, domain=Domain(domain, "specific"),
-                    confidence=conf, source="seed")
+        fk.add_card(content=content, domain=Domain(domain, "specific"), source="seed")

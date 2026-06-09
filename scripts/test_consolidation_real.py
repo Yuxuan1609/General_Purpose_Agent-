@@ -129,8 +129,7 @@ def _load_fixtures(fk, phil, sl, fixtures_dir: Path) -> dict:
         if fp.exists():
             for card in _parse_cards_from_md(fp):
                 fk.add_card(content=card["content"],
-                            domain=Domain(domain_path, "specific"),
-                            confidence=card["confidence"], source="test_fixture")
+                            domain=Domain(domain_path, "specific"), source="test_fixture")
                 l2_count += 1
     if sl is not None:
         for fixture_name, domain_path in [("consolidation_test_skills", "game/leduc"),
