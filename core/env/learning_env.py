@@ -333,6 +333,8 @@ class LearningEnv(Environment):
                 if domain not in l2_triggers:
                     continue
                 reason = l2_triggers[domain]
+                if reason == "capacity" and count <= l2_soft:
+                    continue  # fallback-triggered but not actually over limit
                 mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
                 if reason == "capacity":
                     over = count - l2_soft
@@ -352,6 +354,8 @@ class LearningEnv(Environment):
                 if domain not in l3_triggers:
                     continue
                 reason = l3_triggers[domain]
+                if reason == "capacity" and count <= l3_soft:
+                    continue  # fallback-triggered but not actually over limit
                 mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
                 if reason == "capacity":
                     over = count - l3_soft
