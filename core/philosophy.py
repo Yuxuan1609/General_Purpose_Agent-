@@ -23,6 +23,9 @@ class Rule:
     added_at: str = field(default_factory=_now)
     version: int = 1
     last_modified: str = field(default_factory=_now)
+    usefulness: int = 0
+    misleading: int = 0
+    comment: str = ""
 
 
 @dataclass

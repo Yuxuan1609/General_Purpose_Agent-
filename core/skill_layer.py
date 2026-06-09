@@ -25,6 +25,9 @@ class SkillMeta:
     created_by: str = "agent"
     source_cards: list[str] = field(default_factory=list)
     skill_dir: Path | None = None
+    usefulness: int = 0
+    misleading: int = 0
+    comment: str = ""
 
 
 class SkillLayer:

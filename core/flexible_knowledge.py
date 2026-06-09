@@ -39,6 +39,9 @@ class KnowledgeCard:
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
     marker: str = ""
+    usefulness: int = 0
+    misleading: int = 0
+    comment: str = ""
 
     def __post_init__(self):
         if self.activation == 0.5 and self.confidence != 0.5:
