@@ -315,11 +315,13 @@ class LearningEnv(Environment):
         level_info = spec.get("consolidation_levels", {}).get(level, {}) if spec else {}
 
         # ── meta: clear task description with trigger info ──
+        triggered = sorted(set(l2_triggers.keys()) | set(l3_triggers.keys()))
+        domain_list = ", ".join(triggered)
         meta_lines = [
             "## Knowledge Consolidation Task",
             "",
             f"**Level {level}**: {level_info.get('label', '整理')}.",
-            f"Target: L1 rules + L2 cards + L3 skills need review across {len(all_domains)} domain(s).",
+            f"Triggered domains: {domain_list}.",
             "All three layers must participate — each layer has its own sub-task in state.",
             "",
         ]
