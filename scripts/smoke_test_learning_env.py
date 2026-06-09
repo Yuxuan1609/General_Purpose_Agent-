@@ -185,7 +185,7 @@ def main():
                        for r in rules))
 
         show("STEP 4: 验证 — L2 卡片变更",
-             "\n".join(f"  [{c.id}] [{c.domain.path}] conf={c.confidence:.1f} {c.content[:80]}"
+             "\n".join(f"  [{c.id}] [{c.domain.path}]  {c.content[:80]}"
                        for c in fk.cards))
 
         stats = json.loads(stats_file.read_text()) if stats_file.exists() else {}

@@ -386,8 +386,6 @@ def test_consolidation_with_spec(_injector=None):
         def __init__(self, i):
             self.id = f"card_{i:03d}"
             self.content = f"Strategy {i}: Always raise with King variant {i}"
-            self.confidence = 0.5 + i * 0.005
-            self.activation = self.confidence
             from core.task import Domain
             self.domain = Domain("game/leduc", "specific")
 

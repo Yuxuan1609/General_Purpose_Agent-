@@ -56,8 +56,8 @@ sl = SkillLayer(LAYERS_DATA / "skills", ToolRegistry())
 # Seed L2 cards for modify/remove tests
 from core.task import Domain
 leduc = Domain("game/leduc", "specific")
-card1 = fk.add_card(content="card one: hold K raise preflop", domain=leduc, confidence=0.8, source="seed")
-card2 = fk.add_card(content="card two: fold weak hands", domain=leduc, confidence=0.6, source="seed")
+card1 = fk.add_card(content="card one: hold K raise preflop", domain=leduc, source="seed")
+card2 = fk.add_card(content="card two: fold weak hands", domain=leduc, source="seed")
 
 # Seed L3 skills for update/remove tests
 sl.create_skill(name="test-skill-a", content="---\nname: test-skill-a\ndescription: A\n---\n# A", domain=leduc)
@@ -167,17 +167,8 @@ l2_mgr.apply_update("remove_card", {"card_id": "nonexistent"})
 check(True, "non-existent remove handled without crash")
 
 # L2: boost_card (TODO — just verify it doesn't crash)
-print("\n  [boost_card (TODO)]")
-card3 = fk.add_card(content="boostable card", domain=leduc, confidence=0.5, source="seed")
-l2_mgr.apply_update("boost_card", {"card_id": card3.id})
-updated = next(c for c in fk.cards if c.id == card3.id)
-check(updated.confidence > 0.5, f"card boosted: confidence {updated.confidence} > 0.5")
-
-# L2: penalize_card (TODO)
-print("\n  [penalize_card (TODO)]")
-l2_mgr.apply_update("penalize_card", {"card_id": card3.id})
-updated = next(c for c in fk.cards if c.id == card3.id)
-check(updated.confidence < 0.55, f"card penalized: confidence {updated.confidence} < 0.55")
+print("\n  [boost_card / penalize_card — removed, use modify tools instead]")
+# boost/penalize removed; quality tracked via usefulness/misleading via modify_l2_card
 
 # ══════════════════════════════════════════════
 print("\n=== L3 Manager Smoke Test ===")

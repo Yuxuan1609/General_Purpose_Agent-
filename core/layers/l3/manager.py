@@ -64,7 +64,7 @@ class L3Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l3_skill",
-            "description": "修改一个已有 L3 技能。用新的 SKILL.md 内容替换，可选记录 usefulness/misleading/comment 质量反馈。",
+            "description": "Modify an existing L3 skill. Use content to update SKILL.md. Use usefulness (positive int) / misleading (positive int) / comment to record quality feedback from reflection. This replaces the old boost/penalize mechanism.",
             "parameters": {"type": "object", "properties": {
                 "skill_name": {"type": "string", "description": "要修改的技能名称"},
                 "content": {"type": "string", "description": "修改后的完整 SKILL.md 内容"},
@@ -196,7 +196,11 @@ class L3Agent(LayerAgent):
         else:
             tools = None
             schema = self.EXECUTE_SCHEMA
-        return self._call_llm(system, user, schema=schema, tools=tools, layer="l3")
+        result = self._call_llm(system, user, schema=schema, tools=tools, layer="l3")
+        # Normalize: consolidation mode returns {"reply": ...}, exec mode returns {"result": ...}
+        if l3_fmt and result.get("reply") and not result.get("result"):
+            result["result"] = result["reply"]
+        return result
 
 
 class L3Manager(LayerManager):

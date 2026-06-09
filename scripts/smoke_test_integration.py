@@ -145,7 +145,7 @@ def main():
 
         new_card = [c for c in fk.cards if "试探" in c.content]
         assert len(new_card) == 1
-        print(f"[verify] L2 card created: {new_card[0].content} (conf={new_card[0].confidence})")
+        print(f"[verify] L2 card created: {new_card[0].content}")
 
         # ── Verify usage stats ──────────────────────────────────────
         assert stats.exists()

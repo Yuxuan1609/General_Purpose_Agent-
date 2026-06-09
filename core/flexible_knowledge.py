@@ -29,30 +29,16 @@ class KnowledgeCard:
     domain: "Domain"
     available_domains: list[str] = field(default_factory=list)
     sub_tags: list[str] = field(default_factory=list)
-    confidence: float = 0.5
-    activation: float = 0.5
     last_used: datetime = field(default_factory=_now)
-    decay_rate: float = 0.01
     source: str = "observation"
-    success_count: int = 0
-    failure_count: int = 0
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
-    marker: str = ""
     usefulness: int = 0
     misleading: int = 0
     comment: str = ""
 
-    def __post_init__(self):
-        if self.activation == 0.5 and self.confidence != 0.5:
-            self.activation = self.confidence
-
     def compute_activation(self, task_domain, task_context: str = "") -> float:
-        domain_score = self._domain_match_score(task_domain)
-        if domain_score == 0.0:
-            return 0.0
-        recency_score = max(0, 1.0 - _days_since(self.last_used) * 0.1)
-        return min(1.0, self.confidence * (domain_score * 0.6 + recency_score * 0.4))
+        return self._domain_match_score(task_domain)
 
     def _domain_match_score(self, task_domain) -> float:
         from core.task import Domain
@@ -67,23 +53,6 @@ class KnowledgeCard:
         if self.domain.parent and self.domain.parent.path == task_domain.path:
             return 0.5
         return 0.0
-
-    def boost(self):
-        self.confidence = min(1.0, self.confidence + 0.05)
-        self.success_count += 1
-        self.activation = min(1.0, self.activation + 0.1)
-        self.last_used = _now()
-        self.updated_at = _now()
-
-    def penalize(self):
-        self.confidence = max(0.1, self.confidence - 0.1)
-        self.failure_count += 1
-        self.updated_at = _now()
-
-    def apply_decay(self):
-        days = _days_since(self.last_used)
-        self.activation *= (1 - self.decay_rate) ** days
-        self.updated_at = _now()
 
 
 class KnowledgeGraph:
@@ -152,7 +121,7 @@ class FlexibleKnowledge:
         return result
 
     def add_card(self, content: str, domain, sub_tags: list[str] | None = None,
-                 confidence: float = 0.5, source: str = "observation",
+                 source: str = "observation",
                  available_domains: list[str] | None = None) -> KnowledgeCard:
         if available_domains is None:
             available_domains = [domain.path]
@@ -162,8 +131,6 @@ class FlexibleKnowledge:
             domain=domain,
             available_domains=available_domains,
             sub_tags=sub_tags or [],
-            confidence=confidence,
-            activation=confidence,
             source=source,
         )
         self.cards.append(card)
@@ -206,17 +173,18 @@ class FlexibleKnowledge:
         for name, result_str in results:
             success = "error" not in str(result_str).lower()
             for card in self.get_active_cards(task.domain, "", top_k=5):
+                card.last_used = _now()
+                card.updated_at = _now()
                 if success:
-                    card.boost()
+                    card.usefulness += 1
                 else:
-                    card.penalize()
+                    card.misleading += 1
 
     def apply_updates(self, updates: list, domain):
         for update in updates:
             self.add_card(
                 content=update.get("content", ""),
                 domain=domain,
-                confidence=update.get("confidence", 0.5),
                 source=update.get("source", "reflection"),
             )
 
@@ -224,23 +192,21 @@ class FlexibleKnowledge:
         self.add_card(
             content=f"L1 proposal rejected: {getattr(proposal, 'content', str(proposal))[:80]}",
             domain=getattr(proposal, 'domain', 'general'),
-            confidence=0.3,
             source="reflection_rejected",
         )
 
     def run_decay_cycle(self):
-        for card in self.cards:
-            card.apply_decay()
+        # No-op: confidence/activation/decay fields removed.
+        # Quality tracking is now handled by usefulness/misleading via modify tools.
+        pass
 
     def domain_stats(self, domain) -> dict:
         cards = [c for c in self.cards
                  if c.domain.path == domain.path or c.domain.path.startswith(domain.path + "/")]
         if not cards:
-            return {"count": 0, "avg_activation": 0.0, "avg_confidence": 0.0}
+            return {"count": 0}
         return {
             "count": len(cards),
-            "avg_activation": sum(c.activation for c in cards) / len(cards),
-            "avg_confidence": sum(c.confidence for c in cards) / len(cards),
         }
 
     def _write_md(self, domain, filename: str, content: str) -> Path:

@@ -167,16 +167,13 @@ class SkillLayer:
 
     def should_create_skill(self, domain, domain_cards: list) -> bool:
         cards = [c for c in domain_cards if c.domain.path == domain.path]
-        if len(cards) < L3_CREATION_THRESHOLD_CARDS:
-            return False
-        avg = sum(c.activation for c in cards) / len(cards)
-        return avg > L3_CREATION_THRESHOLD_ACTIVATION
+        return len(cards) >= L3_CREATION_THRESHOLD_CARDS
 
     def propose_and_create(self, domain, cards: list, llm_client=None) -> SkillMeta | None:
         if llm_client is None:
             return None
         cards_text = "\n\n".join(
-            f"- [{c.id}] (confidence:{c.confidence:.1f}, activation:{c.activation:.2f}) {c.content}"
+            f"- [{c.id}] {c.content}"
             for c in cards if c.domain.path == domain.path
         )
         prompt = (

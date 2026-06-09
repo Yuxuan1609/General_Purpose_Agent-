@@ -215,7 +215,7 @@ def main():
                f"L1 rules: {len(phil.all_rules())}\n"
                + "\n".join(f"  [{r.id}] [{r.source}] {r.content[:100]}" for r in phil.all_rules())
                + f"\n\nL2 cards: {len(fk.cards)} (fixtures +{loaded['l2_count']})\n"
-               + "\n".join(f"  [{c.id}] [{c.domain.path}] conf={c.confidence:.2f} {c.content[:100]}" for c in fk.cards)
+               + "\n".join(f"  [{c.id}] [{c.domain.path}]  {c.content[:100]}" for c in fk.cards)
                + f"\n\nL3 skills: {len(sl.list_all())} (fixtures +{loaded['l3_count']})\n"
                + "\n".join(f"  [{s.name}] [{s.domain.path}] {s.description[:100]}" for s in sl.list_all()))
 

@@ -107,7 +107,7 @@ def main():
                f"L1 rules: {len(phil.all_rules())}\n"
                + "\n".join(f"  [{r.id}] [{r.source}] {r.content[:100]}" for r in phil.all_rules())
                + f"\n\nL2 cards: {len(fk.cards)}\n"
-               + "\n".join(f"  [{c.id}] [{c.domain.path}] conf={c.confidence} {c.content[:100]}" for c in fk.cards)
+               + "\n".join(f"  [{c.id}] [{c.domain.path}]  {c.content[:100]}" for c in fk.cards)
                + f"\n\nL3 skills: {len(sl.list_all())}\n"
                + "\n".join(f"  [{s.name}] [{s.domain.path}]" for s in sl.list_all()))
 
@@ -204,7 +204,7 @@ def main():
                f"L1 rules: {len(phil.all_rules())}\n"
                + "\n".join(f"  [{r.id}] [{r.source}] v{r.version} {r.content[:100]}" for r in phil.all_rules())
                + f"\n\nL2 cards: {len(fk.cards)}\n"
-               + "\n".join(f"  [{c.id}] [{c.domain.path}] conf={c.confidence} {c.content[:100]}" for c in fk.cards))
+               + "\n".join(f"  [{c.id}] [{c.domain.path}]  {c.content[:100]}" for c in fk.cards))
 
     if stats_file.exists():
         try:

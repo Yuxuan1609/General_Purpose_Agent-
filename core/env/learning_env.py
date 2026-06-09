@@ -370,7 +370,7 @@ class LearningEnv(Environment):
         l2_task = json.dumps({
             "criteria": (
                 "### Judgment Criteria\n"
-                "- **deprecate**: used=0 + conf<0.2, placeholder/experimental content, "
+                "- **deprecate**: used=0 + content appears to be placeholder/experimental, "
                 "content semantically > 80% similar to another card (keep higher-quality one)\n"
                 "- **modify**: merge >= 2 similar cards in same domain into one refined card; "
                 "also use modify to update usefulness/misleading/comment for cards "

@@ -37,68 +37,65 @@ class TestKnowledgeCard:
             content="map_A的钥匙在厨房抽屉里",
             domain=textworld_domain,
             sub_tags=["navigation", "key_location"],
-            confidence=0.9,
             source="observation",
         )
-        assert card.confidence == 0.9
-        assert card.activation == 0.9
-        assert card.success_count == 0
+        assert card.usefulness == 0
+        assert card.misleading == 0
+        assert card.comment == ""
 
-    def test_boost_increases_confidence(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, confidence=0.5, source="observation")
-        card.boost()
-        assert card.confidence > 0.5
-        assert card.success_count == 1
+    def test_usefulness_updated(self, textworld_domain):
+        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
+        card.usefulness += 3
+        assert card.usefulness == 3
 
-    def test_penalize_decreases_confidence(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, confidence=0.5, source="observation")
-        card.penalize()
-        assert card.confidence < 0.5
-        assert card.failure_count == 1
+    def test_misleading_updated(self, textworld_domain):
+        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
+        card.misleading += 1
+        assert card.misleading == 1
 
-    def test_confidence_cannot_exceed_one(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, confidence=0.99, source="observation")
-        card.boost()
-        assert card.confidence <= 1.0
+    def test_comment_set(self, textworld_domain):
+        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
+        card.comment = "useful for pre-flop strategy"
+        assert card.comment == "useful for pre-flop strategy"
 
-    def test_confidence_floor(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, confidence=0.05, source="observation")
-        card.penalize()
-        assert card.confidence >= 0.1
+    def test_compute_activation_domain_match(self, textworld_domain):
+        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
+        act = card.compute_activation(textworld_domain)
+        assert act == 1.0  # exact domain match
 
     def test_domain_match_exact(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, confidence=1.0, source="observation")
+        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
         score = card._domain_match_score(textworld_domain)
         assert score == 1.0
 
     def test_domain_match_general(self, general_domain, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=general_domain, confidence=1.0, source="observation")
+        card = KnowledgeCard(id="card_001", content="test", domain=general_domain, source="observation")
         score = card._domain_match_score(textworld_domain)
         assert score == 0.4
 
     def test_domain_match_parent(self):
         parent = Domain("textworld", "general")
         child = Domain("textworld/map_A", "specific")
-        card = KnowledgeCard(id="card_001", content="test", domain=parent, confidence=1.0, source="observation")
+        card = KnowledgeCard(id="card_001", content="test", domain=parent, source="observation")
         score = card._domain_match_score(child)
         assert score == 0.7
 
     def test_domain_match_unrelated(self):
-        card = KnowledgeCard(id="card_001", content="test", domain=Domain("programming/python", "specific"), confidence=1.0, source="observation")
+        card = KnowledgeCard(id="card_001", content="test", domain=Domain("programming/python", "specific"), source="observation")
         score = card._domain_match_score(Domain("textworld/map_A", "specific"))
         assert score == 0.0
 
 
 class TestFlexibleKnowledge:
     def test_add_card(self, l2_store, textworld_domain):
-        card = l2_store.add_card("map_A的钥匙在厨房抽屉里", textworld_domain, sub_tags=["key_location"], confidence=0.9, source="observation")
+        card = l2_store.add_card("map_A的钥匙在厨房抽屉里", textworld_domain, sub_tags=["key_location"], source="observation")
         assert card.id is not None
         assert len(l2_store.cards) == 1
 
     def test_get_active_cards(self, l2_store, textworld_domain):
-        l2_store.add_card("钥匙在厨房", textworld_domain, confidence=0.9, source="observation")
-        l2_store.add_card("宝藏在阁楼", textworld_domain, confidence=0.8, source="observation")
-        l2_store.add_card("无关卡片", Domain("programming/python", "specific"), confidence=0.9, source="observation")
+        l2_store.add_card("钥匙在厨房", textworld_domain, source="observation")
+        l2_store.add_card("宝藏在阁楼", textworld_domain, source="observation")
+        l2_store.add_card("无关卡片", Domain("programming/python", "specific"), source="observation")
         active = l2_store.get_active_cards(textworld_domain, "", top_k=5)
         assert len(active) <= 3
         assert all(c.domain.path.startswith("textworld") or c.domain.is_general for c in active)
@@ -113,11 +110,10 @@ class TestFlexibleKnowledge:
         assert len(chapters) > 0
 
     def test_domain_stats(self, l2_store, textworld_domain):
-        l2_store.add_card("card A", textworld_domain, confidence=0.9, source="observation")
-        l2_store.add_card("card B", textworld_domain, confidence=0.7, source="observation")
+        l2_store.add_card("card A", textworld_domain, source="observation")
+        l2_store.add_card("card B", textworld_domain, source="observation")
         stats = l2_store.domain_stats(textworld_domain)
         assert stats["count"] >= 2
-        assert 0 < stats["avg_activation"] <= 1.0
 
     def test_card_available_domains_indexed(self, tmp_path):
         from core.domain_registry import DomainRegistry

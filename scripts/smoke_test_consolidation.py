@@ -73,7 +73,7 @@ class MockKnowledgeCard:
     def __init__(self, id, content, confidence, domain):
         self.id = id
         self.content = content
-        self.confidence = confidence
+        self.content[:20] = confidence
         self.domain = domain
         self.activation = confidence
 

@@ -104,7 +104,7 @@ class L2Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l2_card",
-            "description": "修改一张已有 L2 知识卡片。用新的卡片文本替换，可选记录 usefulness/misleading/comment 质量反馈。",
+            "description": "Modify an existing L2 card. Use content to update card text. Use usefulness (positive int) / misleading (positive int) / comment to record quality feedback from reflection. This replaces the old boost/penalize mechanism.",
             "parameters": {"type": "object", "properties": {
                 "card_id": {"type": "string", "description": "要修改的卡片 id，如 card_xxxxxxxx"},
                 "content": {"type": "string", "description": "修改后的完整卡片内容"},
@@ -180,7 +180,12 @@ class L2Agent(LayerAgent):
         for n in nodes:
             name = n.get("name", n.get("path", "?"))
             score = n.get("score", n.get("relevance", 0))
-            lines.append(f"  {name} (score={score:.2f})")
+            corrs = n.get("correlations", {})
+            corr_str = ""
+            if corrs:
+                parts = [f"{k}:{v:.1f}" for k, v in sorted(corrs.items())]
+                corr_str = f" corr={{ {'  '.join(parts)} }}"
+            lines.append(f"  {name} (score={score:.2f}{corr_str})")
         return "\n".join(lines) + "\n\n"
 
     def _format_consolidation_cards(self, domains: list[str], stats: dict) -> str:
@@ -195,7 +200,7 @@ class L2Agent(LayerAgent):
                 st = stats.get("l2", {}).get(c.id, {})
                 comment_line = f"\n  comment: {c.comment}" if c.comment else ""
                 lines.append(
-                    f"- [{c.id}] conf={c.confidence:.1f} used={st.get('use_count', 0)} "
+                    f"- [{c.id}] used={st.get('use_count', 0)} "
                     f"last={st.get('last_used', '-')[:10]} useful=+{c.usefulness} "
                     f"mislead={c.misleading} | {c.content[:120]}{comment_line}"
                 )
@@ -304,9 +309,6 @@ class L2Agent(LayerAgent):
             parts.append(f"L3执行结果: {l3_reply}")
         if l3_reasoning:
             parts.append(f"L3推理: {l3_reasoning}")
-        if skills:
-            skill_names = ", ".join(s.get("name", "") for s in skills)
-            parts.append(f"可用技能: {skill_names}")
         l3_text = "\n".join(parts) if parts else "（L3 未返回信息）"
 
         instruction = (
@@ -427,6 +429,14 @@ class L2Manager(LayerManager):
             selected_nodes = []
         meta = obs.meta if obs else ""
 
+        # Enrich selected_nodes with correlation scores from domain registry
+        if self._registry and selected_nodes:
+            for n in selected_nodes:
+                name = n.get("name", n.get("path", ""))
+                node = self._registry.get_node(name) if name else None
+                if node and node.correlations:
+                    n["correlations"] = node.correlations
+
         if self._agent is None:
             logger.warning("L2Agent not initialized (no auxiliary_llm), skipping")
             self._cards = []
@@ -516,8 +526,6 @@ class L2Manager(LayerManager):
         return [
             {
                 "content": c.content,
-                "confidence": c.confidence,
-                "activation": c.activation,
                 "domain": c.domain.path,
             }
             for c in cards
@@ -530,8 +538,6 @@ class L2Manager(LayerManager):
                 if c.id == cid:
                     cards.append({
                         "content": c.content,
-                        "confidence": c.confidence,
-                        "activation": c.activation,
                         "domain": c.domain.path,
                     })
                     break

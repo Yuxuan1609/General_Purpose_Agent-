@@ -68,7 +68,7 @@ class L1Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l1_rule",
-            "description": "修改一条已有 L1 行为准则。用新的规则文本替换，可选记录 usefulness/misleading/comment 质量反馈。",
+            "description": "Modify an existing L1 rule. Use content to update rule text. Use usefulness (positive int) / misleading (positive int) / comment to record quality feedback from reflection. This replaces the old boost/penalize mechanism.",
             "parameters": {"type": "object", "properties": {
                 "rule_id": {"type": "string", "description": "要修改的规则 id，如 l1_001"},
                 "content": {"type": "string", "description": "修改后的完整规则文本"},
