@@ -458,15 +458,15 @@ class L2Manager(LayerManager):
                      str(stage1_result.get("l3_task", ""))[:120])
         logger.debug("")
 
-        # E3: store cards locally, not in obs.state
-        # Try registry-based card retrieval first
-        if self._registry and obs:
-            session = obs.session if obs else {}
-            domains_hint = session.get("domains_hint", [session.get("domain", "general")])
-            all_ids = self._registry.get_items_for_domains("l2", domains_hint)
-            if all_ids:
-                reg_cards = self._build_cards_from_ids(all_ids)
-                self._cards = reg_cards
+        # E3: store cards locally — use L1's selected_nodes for domain targeting
+        if self._registry and obs and selected_nodes:
+            node_domains = [n.get("name", "") for n in selected_nodes if n.get("name")]
+            if node_domains:
+                all_ids = self._registry.get_items_for_domains("l2", node_domains)
+                if all_ids:
+                    self._cards = self._build_cards_from_ids(all_ids)
+                else:
+                    self._cards = self._build_cards(selected_nodes)
             else:
                 self._cards = self._build_cards(selected_nodes)
         else:
