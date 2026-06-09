@@ -104,13 +104,13 @@ class L2Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l2_card",
-            "description": "Modify an existing L2 card. Use content to update card text, or pass only usefulness/misleading/comment to record quality feedback without changing content.\n\nQuality fields:\n  usefulness: int, range -5 to +5. +5=critical help, +3=helpful, +1=slightly useful, 0=unset, -1=not very useful, -3=useless, -5=harmful leading to wrong decisions. Cumulative across multiple modifies.\n  misleading: int, range 0 to +5. +5=severely misleading causing critical error, +3=clearly misleading, +1=slightly inaccurate/outdated. Non-negative, cumulative.\n  comment: natural language quality note, max 100 chars. Omit if no opinion.",
+            "description": "Modify an existing L2 card. Use content to update card text, or pass only usefulness/misleading/comment to record quality feedback without changing content.\n\nQuality fields (both range -5 to +5):\n  usefulness: +5=critical help for correct decision, +3=helpful guidance, +1=slightly useful, 0=unset/no opinion, -1=not very useful, -3=useless/wasted tokens, -5=harmful leading to wrong decision.\n  misleading: +5=severely misleading causing critical error, +3=clearly misled reasoning, +1=slightly inaccurate/outdated, 0=unset/no opinion, -1=mostly accurate, -3=highly accurate/trustworthy, -5=completely reliable never misleads.\n  comment: natural language quality note, max 100 chars. Omit if no opinion.",
             "parameters": {"type": "object", "properties": {
                 "card_id": {"type": "string", "description": "Card id to modify, e.g. card_xxxxxxxx"},
                 "content": {"type": "string", "description": "Full modified card content. Omit if only recording quality feedback without content change."},
                 "reason": {"type": "string", "description": "Reason for modification or quality update"},
                 "usefulness": {"type": "integer", "description": "How useful this card was during reflection. Range -5 to +5."},
-                "misleading": {"type": "integer", "description": "How misleading this card was during reflection. Range 0 to +5."},
+                "misleading": {"type": "integer", "description": "How misleading this card was during reflection. Range -5 to +5."},
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["card_id", "reason"], "additionalProperties": False},
         }},
