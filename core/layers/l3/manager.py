@@ -239,17 +239,25 @@ class L3Manager(LayerManager):
         if isinstance(data, dict):
             obs = data.get("obs")
             l3_task = data.get("l3_task", "")
+            selected_nodes = data.get("selected_nodes", [])
         else:
             obs = data
             l3_task = ""
+            selected_nodes = []
         session = obs.session if obs else {}
         domain_path = session.get("domain", "general")
 
         # Deterministic: domain-based skill matching
-        # Registry-based skill matching
+        # Merge domains from L1's selected_nodes with session hints
+        node_domains = [n.get("name", "") for n in selected_nodes if n.get("name")]
+        domains_hint = session.get("domains_hint", [domain_path])
+        if node_domains:
+            all_domains = list(dict.fromkeys(domains_hint + node_domains))
+        else:
+            all_domains = domains_hint
+
         if self._registry:
-            domains_hint = session.get("domains_hint", [domain_path])
-            skill_ids = self._registry.get_items_for_domains("l3", domains_hint)
+            skill_ids = self._registry.get_items_for_domains("l3", all_domains)
             self._matched_skills = self._skill_layer.get_skills_by_ids(skill_ids)
             self._matched = [s["name"] for s in self._matched_skills]
         else:

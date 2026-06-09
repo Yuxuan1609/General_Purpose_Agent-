@@ -478,7 +478,8 @@ class L2Manager(LayerManager):
         call_l3 = stage1_result.get("call_l3", False)
         if call_l3:
             l3_task = stage1_result.get("l3_task", "")
-            self._propagate(obs, trace_id, l3_task=l3_task)
+            self._propagate(obs, trace_id, l3_task=l3_task,
+                            selected_nodes=selected_nodes)
 
         # E3: L3 skills from downstream manager, not obs.state
         l3_skills = getattr(self._downstream, '_matched_skills', []) if (self._downstream and call_l3) else []
@@ -501,10 +502,13 @@ class L2Manager(LayerManager):
 
         self._result = final
 
-    def _propagate(self, obs, trace_id: str, l3_task: str = "") -> None:
+    def _propagate(self, obs, trace_id: str, l3_task: str = "",
+                   selected_nodes: list[dict] | None = None) -> None:
         if self._downstream:
             q_msg = self._downward.wrap_query(
-                payload={"obs": obs, "l3_task": l3_task}, source=self.name,
+                payload={"obs": obs, "l3_task": l3_task,
+                         "selected_nodes": selected_nodes or []},
+                source=self.name,
                 target=self._downstream.name, trace_id=trace_id,
             )
             self._downstream.query(q_msg, trace_id)
