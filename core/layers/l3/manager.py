@@ -64,11 +64,14 @@ class L3Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l3_skill",
-            "description": "修改一个已有 L3 技能的内容。用新的 SKILL.md 内容替换指定名称的旧技能。",
+            "description": "修改一个已有 L3 技能。用新的 SKILL.md 内容替换，可选记录 usefulness/misleading/comment 质量反馈。",
             "parameters": {"type": "object", "properties": {
-                "skill_name": {"type": "string", "description": "要修改的技能名称，如 leduc-preflop-strategy"},
+                "skill_name": {"type": "string", "description": "要修改的技能名称"},
                 "content": {"type": "string", "description": "修改后的完整 SKILL.md 内容"},
-                "reason": {"type": "string", "description": "修改理由，如'补充了翻牌后未配对的应对策略'"},
+                "reason": {"type": "string", "description": "修改理由"},
+                "usefulness": {"type": "integer", "description": "如果该技能在反思中有用，设为正值（如 3）。没有意见时省略。"},
+                "misleading": {"type": "integer", "description": "如果该技能误导了思考，设为正值（如 1）。没有意见时省略。"},
+                "comment": {"type": "string", "description": "质量描述，最多 100 字。没有意见时省略。"},
             }, "required": ["skill_name", "content", "reason"], "additionalProperties": False},
         }},
     ]
@@ -92,10 +95,15 @@ class L3Agent(LayerAgent):
             return f"已记录: 创建 {args['name']}"
 
         def modify_l3_skill(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "update", "target": args["skill_name"], "layer": "l3",
-                "content": args["content"], "reason": args["reason"],
-            })
+            mod = {"type": "update", "target": args["skill_name"], "layer": "l3",
+                   "content": args["content"], "reason": args["reason"]}
+            if "usefulness" in args:
+                mod["usefulness"] = args["usefulness"]
+            if "misleading" in args:
+                mod["misleading"] = args["misleading"]
+            if "comment" in args:
+                mod["comment"] = args["comment"]
+            agent._pending_mods.append(mod)
             return f"已记录: 修改 {args['skill_name']}"
 
         self._injector = DictInjector({
@@ -124,13 +132,14 @@ class L3Agent(LayerAgent):
                 matched_skills: list[dict] | None = None,
                 l3_task: str = "") -> dict:
         l3_fmt = state.get("l3_output_format") if state else None
-        if l3_fmt:
-            meta = self._filter_meta_for_layer(meta, "l3")
 
         current = state.get("current", "") if state else ""
         skills = matched_skills or []
         skills_text = "\n".join(
             f"## {s.get('name', '')}: {s.get('description', '')}"
+            f"\n  used={s.get('use_count', 0)} last={str(s.get('last_used', ''))[:10]}"
+            f" useful=+{s.get('usefulness', 0)} mislead={s.get('misleading', 0)}"
+            f"{chr(10) + '  comment: ' + s['comment'] if s.get('comment') else ''}"
             f"\n{_strip_frontmatter(s.get('content', '')[:800])}"
             for s in skills
         ) if skills else "（无匹配技能）"
@@ -164,10 +173,16 @@ class L3Agent(LayerAgent):
             )
         system = self._build_system_prompt(instruction, meta)
         query_section = f"[上层查询]\n完成 L2 下发的 l3_task：{l3_task}\n\n" if l3_task else ""
+        l3_task_raw = state.get("l3_task", "")
+        l3_task_data = json.loads(l3_task_raw) if isinstance(l3_task_raw, str) and l3_task_raw else {}
+        l3_task_section = ""
+        if l3_task_data.get("criteria"):
+            l3_task_section = f"[L3 整理任务]\n{l3_task_data.get('criteria', '')}\n\n"
         user = (
             f"{fb_section}"
             f"{learning_data}"
             f"{query_section}"
+            f"{l3_task_section}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )

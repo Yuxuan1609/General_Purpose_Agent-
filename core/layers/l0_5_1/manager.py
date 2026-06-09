@@ -68,11 +68,14 @@ class L1Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l1_rule",
-            "description": "修改一条已有 L1 行为准则的内容。用新的规则文本替换指定 id 的旧内容。",
+            "description": "修改一条已有 L1 行为准则。用新的规则文本替换，可选记录 usefulness/misleading/comment 质量反馈。",
             "parameters": {"type": "object", "properties": {
                 "rule_id": {"type": "string", "description": "要修改的规则 id，如 l1_001"},
                 "content": {"type": "string", "description": "修改后的完整规则文本"},
-                "reason": {"type": "string", "description": "修改理由，如'补充了动态更新策略说明'"},
+                "reason": {"type": "string", "description": "修改理由"},
+                "usefulness": {"type": "integer", "description": "如果该规则在反思中有用，设为正值（如 3）。没有意见时省略。"},
+                "misleading": {"type": "integer", "description": "如果该规则误导了思考，设为正值（如 1）。没有意见时省略。"},
+                "comment": {"type": "string", "description": "自然语言质量描述，最多 100 字。没有意见时省略。"},
             }, "required": ["rule_id", "content", "reason"], "additionalProperties": False},
         }},
     ]
@@ -96,10 +99,15 @@ class L1Agent(LayerAgent):
             return f"已记录: 创建新规则"
 
         def modify_l1_rule(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "update", "target": args["rule_id"], "layer": "l1",
-                "content": args["content"], "reason": args["reason"],
-            })
+            mod = {"type": "update", "target": args["rule_id"], "layer": "l1",
+                   "content": args["content"], "reason": args["reason"]}
+            if "usefulness" in args:
+                mod["usefulness"] = args["usefulness"]
+            if "misleading" in args:
+                mod["misleading"] = args["misleading"]
+            if "comment" in args:
+                mod["comment"] = args["comment"]
+            agent._pending_mods.append(mod)
             return f"已记录: 修改 {args['rule_id']}"
 
         self._injector = DictInjector({
@@ -184,9 +192,6 @@ class L1Agent(LayerAgent):
             "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 call_l2=false。\n"
             "从领域节点中选出最相关的 1-5 个节点。不需要领域知识时返回空的 domain_nodes（[]）。"
         )
-        is_consolidation = "l1_output_format" in state
-        if is_consolidation:
-            meta = self._filter_meta_for_layer(meta, "l1")
         system = self._build_system_prompt(
             instruction, meta,
             static_context=f"[领域节点]\n{nodes_text}" if nodes_text else "",
@@ -207,7 +212,6 @@ class L1Agent(LayerAgent):
             "在 rules_used 中列出本次推理中实际引用到的行为准则的 id。"
         )
         if l1_fmt:
-            meta = self._filter_meta_for_layer(meta, "l1")
             instruction += (
                 "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
                 "不要修改 L2 知识卡片或 L3 技能。"
@@ -224,7 +228,9 @@ class L1Agent(LayerAgent):
         if reasoning:
             parts.append(f"L2推理: {reasoning}")
         response_text = "\n\n".join(parts) if parts else "（下层未返回信息）"
-        user = f"{self._build_user_context(state)}\n\n[下层任务返回]\n{response_text}"
+        l1_task_text = state.get("l1_task", "")
+        l1_task_section = f"[L1 整理任务]\n{l1_task_text}\n\n" if l1_task_text else ""
+        user = f"{l1_task_section}{self._build_user_context(state)}\n\n[下层任务返回]\n{response_text}"
 
         if l1_fmt:
             self._setup_l1_consolidation()

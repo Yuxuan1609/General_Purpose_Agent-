@@ -104,11 +104,14 @@ class L2Agent(LayerAgent):
         }},
         {"type": "function", "function": {
             "name": "modify_l2_card",
-            "description": "修改一张已有 L2 知识卡片的内容。用新的卡片文本替换指定 id 的旧内容。",
+            "description": "修改一张已有 L2 知识卡片。用新的卡片文本替换，可选记录 usefulness/misleading/comment 质量反馈。",
             "parameters": {"type": "object", "properties": {
                 "card_id": {"type": "string", "description": "要修改的卡片 id，如 card_xxxxxxxx"},
                 "content": {"type": "string", "description": "修改后的完整卡片内容"},
-                "reason": {"type": "string", "description": "修改理由，如'补充了对手Call后的应对策略'"},
+                "reason": {"type": "string", "description": "修改理由"},
+                "usefulness": {"type": "integer", "description": "如果该卡片在反思中有用，设为正值（如 3）。没有意见时省略。"},
+                "misleading": {"type": "integer", "description": "如果该卡片误导了思考，设为正值（如 1）。没有意见时省略。"},
+                "comment": {"type": "string", "description": "质量描述，最多 100 字。没有意见时省略。"},
             }, "required": ["card_id", "content", "reason"], "additionalProperties": False},
         }},
     ]
@@ -132,10 +135,15 @@ class L2Agent(LayerAgent):
             return f"已记录: 创建新卡片"
 
         def modify_l2_card(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "update", "target": args["card_id"], "layer": "l2",
-                "content": args["content"], "reason": args["reason"],
-            })
+            mod = {"type": "update", "target": args["card_id"], "layer": "l2",
+                   "content": args["content"], "reason": args["reason"]}
+            if "usefulness" in args:
+                mod["usefulness"] = args["usefulness"]
+            if "misleading" in args:
+                mod["misleading"] = args["misleading"]
+            if "comment" in args:
+                mod["comment"] = args["comment"]
+            agent._pending_mods.append(mod)
             return f"已记录: 修改 {args['card_id']}"
 
         self._injector = DictInjector({
@@ -175,6 +183,25 @@ class L2Agent(LayerAgent):
             lines.append(f"  {name} (score={score:.2f})")
         return "\n".join(lines) + "\n\n"
 
+    def _format_consolidation_cards(self, domains: list[str], stats: dict) -> str:
+        """Build per-domain card listing with DD3 fields."""
+        lines = []
+        for domain_path in sorted(domains):
+            cards = [c for c in self._knowledge.cards if c.domain.path == domain_path]
+            if not cards:
+                continue
+            lines.append(f"### {domain_path} ({len(cards)} cards)")
+            for c in cards:
+                st = stats.get("l2", {}).get(c.id, {})
+                comment_line = f"\n  comment: {c.comment}" if c.comment else ""
+                lines.append(
+                    f"- [{c.id}] conf={c.confidence:.1f} used={st.get('use_count', 0)} "
+                    f"last={st.get('last_used', '-')[:10]} useful=+{c.usefulness} "
+                    f"mislead={c.misleading} | {c.content[:120]}{comment_line}"
+                )
+            lines.append("")
+        return "\n".join(lines)
+
     def _build_learning_section(self, state: dict) -> str:
         units = state.get("learning_units", [])
         if not isinstance(units, list) or not units:
@@ -206,24 +233,50 @@ class L2Agent(LayerAgent):
 
         current = state.get("current", "")
         is_consolidation = "l2_output_format" in state
-        filtered_meta = self._filter_meta_for_layer(meta, "l2") if is_consolidation else meta
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
+        )
+        if is_consolidation:
+            instruction += (
+                "【整理任务】这是知识库整理任务。你负责审查 L2 知识卡片。\n"
+                "L3 层也需要审查其技能——必须设置 call_l3=true，"
+                "l3_task 描述 L3 需要审查的 domain。\n\n"
+            )
+        instruction += (
             "需要 L3 时输出 call_l3=true 和 l3_task（一句话任务描述）；否则 call_l3=false。\n\n"
             "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
             "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
         )
-        system = self._build_system_prompt(instruction, filtered_meta)
+        system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
+
+        # Inject l2_task cards for consolidation
+        l2_task_raw = state.get("l2_task", "")
+        l2_task = json.loads(l2_task_raw) if isinstance(l2_task_raw, str) and l2_task_raw else {}
+        target_domains = l2_task.get("target_domains", [])
+        if is_consolidation and target_domains:
+            cards_text = self._format_consolidation_cards(target_domains, {})
+
+        l2_task_section = ""
+        if is_consolidation and l2_task.get("criteria"):
+            triggers = l2_task.get("triggers", {})
+            trigger_lines = [f"- {d} ({triggers.get(d, 'unknown')})" for d in target_domains]
+            l2_task_section = (
+                f"[L2 整理任务]\n"
+                f"Target domains:\n" + "\n".join(trigger_lines) + "\n\n"
+                f"{l2_task.get('criteria', '')}\n\n"
+            )
         user = (
             f"[上层查询]\n{query}\n\n"
             f"{nodes_section}"
+            f"{l2_task_section}"
             f"[学习数据]\n{self._build_learning_section(state)}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         ) if state.get("l1_output_format") else (
             f"[上层查询]\n{query}\n\n"
             f"{nodes_section}"
+            f"{l2_task_section}"
             f"[当前局面]\n{current}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         )
@@ -237,7 +290,6 @@ class L2Agent(LayerAgent):
         Only sees L3's result + reasoning, not L3's modifications.
         """
         l2_fmt = state.get("l2_output_format")
-        filtered_meta2 = self._filter_meta_for_layer(meta, "l2") if l2_fmt else meta
 
         cards = self._get_cards_for_nodes(selected_nodes)
         node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
@@ -267,8 +319,15 @@ class L2Agent(LayerAgent):
                 "不要修改 L1 行为准则或 L3 技能。"
                 "使用工具 deprecate_l2_card / create_l2_card / modify_l2_card 记录修改。"
             )
-        system = self._build_system_prompt(instruction, filtered_meta2)
+        system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
+
+        # Inject per-domain cards for consolidation stage2
+        l2_task_raw2 = state.get("l2_task", "")
+        l2_task2 = json.loads(l2_task_raw2) if isinstance(l2_task_raw2, str) and l2_task_raw2 else {}
+        target_domains2 = l2_task2.get("target_domains", [])
+        if l2_fmt and target_domains2:
+            cards_text = self._format_consolidation_cards(target_domains2, {})
 
         if l2_fmt:
             user = (
