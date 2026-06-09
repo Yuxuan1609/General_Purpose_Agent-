@@ -232,9 +232,15 @@ def main():
     lenv = LearningEnv(
         Path(tempfile.mkdtemp()), knowledge,
         dry_run=True,
-        l2_card_limit=15, l3_skill_limit=5,
+        l2_card_limit=25, l3_skill_limit=20,
         consolidation_spec=spec,
     )
+    # Pre-set maintenance triggers for test domains
+    lenv._stats["_consolidation"] = {
+        "game/leduc": {"mod_count": 7, "last_consolidation": ""},
+        "game/doudizhu": {"mod_count": 6, "last_consolidation": ""},
+        "learning/compile": {"mod_count": 5, "last_consolidation": ""},
+    }
 
     needs = lenv.needs_consolidation()
     level = lenv.get_consolidation_level()

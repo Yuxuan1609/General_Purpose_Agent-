@@ -282,7 +282,7 @@ class LearningEnv(Environment):
                 all_domains.add(c.domain.path)
             for domain, count in domain_counts.items():
                 mods = cons_state.get(domain, {}).get("mod_count", 0)
-                if count > l2_soft:
+                if count > self._l2_limit:
                     l2_triggers[domain] = "capacity"
                 elif mods >= 5:
                     l2_triggers[domain] = "maintenance"
@@ -293,20 +293,10 @@ class LearningEnv(Environment):
                 all_domains.add(s.domain.path)
             for domain, count in skill_domain_counts.items():
                 mods = cons_state.get(domain, {}).get("mod_count", 0)
-                if count > l3_soft:
+                if count > self._l3_limit:
                     l3_triggers[domain] = "capacity"
                 elif mods >= 5:
                     l3_triggers[domain] = "maintenance"
-
-        # Fallback: if total exceeds limit but no per-domain trigger, trigger all domains
-        if needs_l2 and not l2_triggers and l2:
-            for d in set(c.domain.path for c in l2.cards):
-                l2_triggers[d] = "total_overflow"
-                domain_counts[d] += 1
-        if needs_l3 and not l3_triggers and l3:
-            for d in set(s.domain.path for s in l3.list_all()):
-                l3_triggers[d] = "total_overflow"
-                skill_domain_counts[d] += 1
 
         if not l2_triggers and not l3_triggers:
             return None
@@ -337,21 +327,10 @@ class LearningEnv(Environment):
                 reason = l2_triggers[domain]
                 mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
                 if reason == "capacity":
-                    if count <= l2_soft:
-                        meta_lines.append(
-                            f"- **{domain}**: {count} cards (within limit {l2_soft} — included due to global overflow). "
-                            f"Review for overlap with over-limit domains."
-                        )
-                    else:
-                        over = count - l2_soft
-                        meta_lines.append(
-                            f"- **{domain}**: {count} cards (capacity overflow — {over} over soft limit {l2_soft}). "
-                            f"Reduce to below {l2_soft} via merge/deprecate."
-                        )
-                elif reason == "total_overflow":
+                    over = count - self._l2_limit
                     meta_lines.append(
-                        f"- **{domain}**: {count} cards (included — total card count {len(l2.cards)} exceeds limit {self._l2_limit}). "
-                        f"Review for quality, merge similar, deprecate unused."
+                        f"- **{domain}**: {count} cards (capacity overflow — {over} over limit {self._l2_limit}). "
+                        f"Reduce to below {self._l2_limit} via merge/deprecate."
                     )
                 elif reason == "maintenance":
                     meta_lines.append(
@@ -367,21 +346,10 @@ class LearningEnv(Environment):
                 reason = l3_triggers[domain]
                 mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
                 if reason == "capacity":
-                    if count <= l3_soft:
-                        meta_lines.append(
-                            f"- **{domain}**: {count} skills (within limit {l3_soft} — included due to global overflow). "
-                            f"Review for overlap with over-limit domains."
-                        )
-                    else:
-                        over = count - l3_soft
-                        meta_lines.append(
-                            f"- **{domain}**: {count} skills (capacity overflow — {over} over soft limit {l3_soft}). "
-                            f"Reduce to below {l3_soft} via deprecate/compile."
-                        )
-                elif reason == "total_overflow":
+                    over = count - self._l3_limit
                     meta_lines.append(
-                        f"- **{domain}**: {count} skills (included — total skill count {len(l3.list_all())} exceeds limit {self._l3_limit}). "
-                        f"Review quality, deprecate unused, compile redundant."
+                        f"- **{domain}**: {count} skills (capacity overflow — {over} over limit {self._l3_limit}). "
+                        f"Reduce to below {self._l3_limit} via deprecate/compile."
                     )
                 elif reason == "maintenance":
                     meta_lines.append(
