@@ -84,22 +84,6 @@ _L3_OUTPUT = {
     ],
 }
 
-_CONSOLIDATION_FORMAT = (
-    "\n## Consolidation task spec\n"
-    "Knowledge base is over limit or needs reorganization. "
-    "Decide which entries to keep/merge/delete based on usage stats below.\n\n"
-    "## How to make modifications\n"
-    "Use the available tool functions to record modifications:\n"
-    "- L1 layer: deprecate_l1_rule / create_l1_rule / modify_l1_rule\n"
-    "- L2 layer: deprecate_l2_card / create_l2_card / modify_l2_card\n"
-    "- L3 layer: deprecate_l3_skill / create_l3_skill / modify_l3_skill\n\n"
-    "Rules:\n"
-    "- Each layer ONLY modifies its own content (L1→rules, L2→cards, L3→skills)\n"
-    "- Prioritize: unused entries, low activation, highly redundant content\n"
-    "- Prefer deprecate over create (reversible)\n"
-    "- Do NOT output @modify markup. Use tool calls only.\n"
-)
-
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -269,205 +253,162 @@ class LearningEnv(Environment):
     def build_consolidation_task(self) -> TaskObservation | None:
         l2 = self._knowledge.get("l2")
         l3 = self._knowledge.get("l3")
+        l1_rules = self._knowledge.get("l1")
         needs_l2 = l2 and len(l2.cards) > self._l2_limit
         needs_l3 = l3 and len(l3.list_all()) > self._l3_limit
-        if not needs_l2 and not needs_l3:
-            return None
 
-        level = self.get_consolidation_level()
+        # ── Build triggered domain lists (DD1: dual trigger) ──
+        cons_state = self._stats.get("_consolidation", {})
         spec = self._consolidation_spec
 
-        lines = ["## Knowledge Consolidation Task", ""]
+        l2_limits = spec.get("l2", {}).get("limits", {}) if spec else {}
+        l2_soft = l2_limits.get("per_domain_soft", l2_limits.get("soft", 25)) if l2_limits else 25
+        l2_hard = l2_limits.get("per_domain_hard", l2_limits.get("hard", 30)) if l2_limits else 30
 
-        # ── Level info from spec ──
-        if spec:
-            level_info = spec.get("consolidation_levels", {}).get(level, {})
-            lines.append(f"**Consolidation Level: {level} — {level_info.get('label', '')}**")
-            lines.append(f"Strategy: {level_info.get('strategy', '')}")
-            lines.append("")
+        l3_limits = spec.get("l3", {}).get("limits", {}) if spec else {}
+        l3_soft = l3_limits.get("per_domain_soft", l3_limits.get("soft", 15)) if l3_limits else 15
+        l3_hard = l3_limits.get("per_domain_hard", l3_limits.get("hard", 20)) if l3_limits else 20
 
-        # ── Per-domain statistics ──
+        l2_triggers: dict[str, str] = {}
+        l3_triggers: dict[str, str] = {}
+        from collections import Counter
         all_domains: set[str] = set()
-        if needs_l2:
-            from collections import Counter
-            domain_counts: Counter[str] = Counter()
+        domain_counts: Counter[str] = Counter()
+        skill_domain_counts: Counter[str] = Counter()
+
+        if needs_l2 and l2:
             for c in l2.cards:
                 domain_counts[c.domain.path] += 1
                 all_domains.add(c.domain.path)
-            l2_limits = spec.get("l2", {}).get("limits", {}) if spec else {}
-            l2_soft = l2_limits.get("per_domain_soft", l2_limits.get("soft", 25)) if l2_limits else 25
-            l2_hard = l2_limits.get("per_domain_hard", l2_limits.get("hard", 30)) if l2_limits else 30
-            lines.append("### L2 Cards by Domain")
-            for domain, count in domain_counts.most_common():
-                over = "OVER HARD LIMIT" if count > l2_hard else ("over soft limit" if count > l2_soft else "ok")
-                lines.append(f"- {domain}: current number: {count}/soft limit: {l2_soft} cards/hard limit: {l2_hard} cards ({over})")
-            lines.append("")
-        if needs_l3:
-            from collections import Counter
-            skill_domain_counts: Counter[str] = Counter()
+            for domain, count in domain_counts.items():
+                mods = cons_state.get(domain, {}).get("mod_count", 0)
+                if count > l2_soft:
+                    l2_triggers[domain] = "capacity"
+                elif mods >= 5:
+                    l2_triggers[domain] = "maintenance"
+
+        if needs_l3 and l3:
             for s in l3.list_all():
                 skill_domain_counts[s.domain.path] += 1
                 all_domains.add(s.domain.path)
-            l3_limits = spec.get("l3", {}).get("limits", {}) if spec else {}
-            l3_soft = l3_limits.get("per_domain_soft", l3_limits.get("soft", 15)) if l3_limits else 15
-            l3_hard = l3_limits.get("per_domain_hard", l3_limits.get("hard", 20)) if l3_limits else 20
-            lines.append("### L3 Skills by Domain")
-            for domain, count in skill_domain_counts.most_common():
+            for domain, count in skill_domain_counts.items():
+                mods = cons_state.get(domain, {}).get("mod_count", 0)
+                if count > l3_soft:
+                    l3_triggers[domain] = "capacity"
+                elif mods >= 5:
+                    l3_triggers[domain] = "maintenance"
+
+        # Fallback: if total exceeds limit but no per-domain trigger, trigger all domains
+        if needs_l2 and not l2_triggers and l2:
+            for d in set(c.domain.path for c in l2.cards):
+                l2_triggers[d] = "capacity"
+                domain_counts[d] += 1
+        if needs_l3 and not l3_triggers and l3:
+            for d in set(s.domain.path for s in l3.list_all()):
+                l3_triggers[d] = "capacity"
+                skill_domain_counts[d] += 1
+
+        if not l2_triggers and not l3_triggers:
+            return None
+
+        level = self.get_consolidation_level()
+        level_info = spec.get("consolidation_levels", {}).get(level, {}) if spec else {}
+
+        # ── meta: slim header only ──
+        meta_lines = [
+            "## Knowledge Consolidation Task",
+            f"**Level: {level} — {level_info.get('label', '')}**",
+            "",
+        ]
+        if l2_triggers:
+            meta_lines.append(f"L2 Knowledge Cards to review: {len(l2_triggers)} domain(s) triggered")
+        if l3_triggers:
+            meta_lines.append(f"L3 Skills to review: {len(l3_triggers)} domain(s) triggered")
+        meta_lines.append("")
+        meta_lines.append("Each layer has its own task in state. Only modify your own layer's data.")
+
+        # ── Per-domain statistics (shared, all layers see) ──
+        if l2_triggers:
+            meta_lines.append("### L2 Cards by Domain")
+            for domain, count in sorted(domain_counts.items()):
+                trigger = l2_triggers.get(domain, "")
+                over = "OVER HARD LIMIT" if count > l2_hard else ("over soft limit" if count > l2_soft else "ok")
+                meta_lines.append(
+                    f"- {domain}: current number: {count}/soft limit: {l2_soft} cards/"
+                    f"hard limit: {l2_hard} cards ({over}) — {trigger}"
+                )
+            meta_lines.append("")
+        if l3_triggers:
+            meta_lines.append("### L3 Skills by Domain")
+            for domain, count in sorted(skill_domain_counts.items()):
+                trigger = l3_triggers.get(domain, "")
                 over = "OVER HARD LIMIT" if count > l3_hard else ("over soft limit" if count > l3_soft else "ok")
-                lines.append(f"- {domain}: current number: {count}/soft limit: {l3_soft} skills/hard limit: {l3_hard} skills ({over})")
-            lines.append("")
-
-        # ── Collect domain hints for retrieval ──
-        hint_domains = ["learning/compile"]
-        if needs_l2:
-            hint_domains.extend(sorted(all_domains))
-
-        # ── L2 section ──
-        if needs_l2:
-            l2_spec = spec.get("l2", {})
-            l2_limits = l2_spec.get("limits", {})
-            lines.append(
-                f"### L2 Knowledge Cards "
-                f"(current {len(l2.cards)}, soft={l2_limits.get('soft', '?')}, "
-                f"hard={l2_limits.get('hard', '?')})"
-            )
-            # Entry format spec
-            if l2_spec:
-                entry = l2_spec.get("entry_spec", {})
-                lines.append("**Entry format:**")
-                for fld in entry.get("fields", []):
-                    lines.append(
-                        f"  - `{fld['name']}` ({fld.get('type', 'string')}): "
-                        f"{fld.get('description', '')}"
-                    )
-                anti = entry.get("anti_patterns", [])
-                if anti:
-                    lines.append("**Avoid:**")
-                    for ap in anti:
-                        lines.append(f"  - {ap}")
-            lines.append("")
-            for c in l2.cards:
-                st = self._stats.get("l2", {}).get(c.id, {})
-                lines.append(
-                    f"- [{c.id}] domain={c.domain.path} conf={c.confidence:.1f} "
-                    f"activation={c.activation:.1f} "
-                    f"used={st.get('use_count', 0)} "
-                    f"last={st.get('last_used', '-')[:10]} "
-                    f"| {c.content[:80]}"
+                meta_lines.append(
+                    f"- {domain}: current number: {count}/soft limit: {l3_soft} skills/"
+                    f"hard limit: {l3_hard} skills ({over}) — {trigger}"
                 )
+            meta_lines.append("")
 
-        # ── L3 section ──
-        if needs_l3:
-            l3_spec = spec.get("l3", {})
-            l3_limits = l3_spec.get("limits", {})
-            lines.append(
-                f"\n### L3 Skills "
-                f"(current {len(l3.list_all())}, soft={l3_limits.get('soft', '?')}, "
-                f"hard={l3_limits.get('hard', '?')})"
-            )
-            if l3_spec:
-                entry = l3_spec.get("entry_spec", {})
-                lines.append("**Entry format:**")
-                for fld in entry.get("fields", []):
-                    lines.append(
-                        f"  - `{fld['name']}` ({fld.get('type', 'string')}): "
-                        f"{fld.get('description', '')}"
-                    )
-                anti = entry.get("anti_patterns", [])
-                if anti:
-                    lines.append("**Avoid:**")
-                    for ap in anti:
-                        lines.append(f"  - {ap}")
-            lines.append("")
-            for s in l3.list_all():
-                st = self._stats.get("l3", {}).get(s.name, {})
-                lines.append(
-                    f"- [{s.name}] domain={s.domain.path} "
-                    f"used={st.get('use_count', 0)} "
-                    f"last={st.get('last_used', '-')[:10]} "
-                    f"| {s.description[:80]}"
-                )
+        meta = "\n".join(meta_lines)
 
-        lines.append("")
-        lines.append(_CONSOLIDATION_FORMAT)
+        # ── l1_task: criteria text only (DD4 — no rule listing, system prompt has rules) ──
+        l1_task = (
+            "## L1 Task\n\n"
+            "Review your behavior rules in the system prompt against the criteria below.\n\n"
+            "### Judgment Criteria\n"
+            "- **deprecate**: duplicate rules (semantic similarity > 80%), domain-specific content "
+            "(should belong to L2), vague rules (< 20 chars with no specific directive), "
+            "violates cross-domain methodology principle\n"
+            "- **modify**: merge multiple rules into one while preserving complete semantics; "
+            "also use modify to update usefulness/misleading/comment for rules "
+            "that were helpful or misleading during reflection\n"
+            "- **create**: only for new cross-domain methodology not achievable via modify\n\n"
+            "Use tools: deprecate_l1_rule / create_l1_rule / modify_l1_rule"
+        )
 
-        # ── Few-shot examples: good vs bad entries ──
-        lines.append("")
-        lines.append("## Few-shot examples")
-        l1_rules = self._knowledge.get("l1")
-        if l1_rules and hasattr(l1_rules, 'all_rules'):
-            all_r = [r for r in l1_rules.all_rules() if r.source == "l1"]
-            good = [r for r in all_r if len(r.content) > 30 and getattr(r, 'version', 1) == 1]
-            bad = [r for r in all_r if len(r.content) < 20 or "模糊" in r.content]
-            lines.append("### L1 Rules")
-            if good:
-                r = good[0]
-                lines.append(f"🟢 GOOD (keep): [{r.id}] {r.content[:120]}")
-            if bad:
-                r = bad[0]
-                lines.append(f"🔴 BAD  (remove): [{r.id}] {r.content[:120]}")
-        if needs_l2:
-            good_cards = [c for c in l2.cards if c.confidence > 0.7 and len(c.content) > 30]
-            bad_cards = [c for c in l2.cards if c.confidence < 0.2]
-            lines.append("### L2 Cards")
-            if good_cards:
-                lines.append(f"🟢 GOOD (keep): [{good_cards[0].id}] conf={good_cards[0].confidence:.1f} {good_cards[0].content[:120]}")
-            if bad_cards:
-                lines.append(f"🔴 BAD  (remove): [{bad_cards[0].id}] conf={bad_cards[0].confidence:.2f} {bad_cards[0].content[:120]}")
-        if needs_l3:
-            good_skills = []
-            bad_skills = []
-            for s in l3.list_all():
-                st = self._stats.get("l3", {}).get(s.name, {})
-                used = st.get("use_count", 0)
-                conf = getattr(s, 'confidence', None)
-                # Prefer stats: unused skills are bad; frequently used are good
-                if used > 0:
-                    good_skills.append(s)
-                elif used == 0 and len(getattr(s, 'description', '')) < 30:
-                    bad_skills.append(s)
-                elif isinstance(conf, (int, float)):
-                    if conf > 0.5:
-                        good_skills.append(s)
-                    elif conf < 0.2:
-                        bad_skills.append(s)
-            lines.append("### L3 Skills")
-            if good_skills:
-                s = good_skills[0]
-                st = self._stats.get("l3", {}).get(s.name, {})
-                lines.append(f"🟢 GOOD (keep): [{s.name}] used={st.get('use_count', 0)} {s.description[:120]}")
-            if bad_skills:
-                s = bad_skills[0]
-                lines.append(f"🔴 BAD  (remove): [{s.name}] used=0 {s.description[:120]}")
-            if not good_skills and not bad_skills:
-                lines.append("（无足够统计数据进行示例判断）")
+        # ── l2_task: target_domains dict (DD4 — cards fetched by L2Manager) ──
+        l2_task = json.dumps({
+            "criteria": (
+                "### Judgment Criteria\n"
+                "- **deprecate**: used=0 + conf<0.2, placeholder/experimental content, "
+                "content semantically > 80% similar to another card (keep higher-quality one)\n"
+                "- **modify**: merge >= 2 similar cards in same domain into one refined card; "
+                "also use modify to update usefulness/misleading/comment for cards "
+                "that were helpful or misleading during reflection\n"
+                "- **create**: cross-domain generalization (multiple similar cards -> one higher-level card)"
+            ),
+            "target_domains": list(l2_triggers.keys()),
+            "triggers": l2_triggers,
+        }, ensure_ascii=False)
 
-        # ── Append per-layer output format from spec ──
-        if spec:
-            lines.append("")
-            lines.append("## Per-layer entry format reference")
-            for layer_key in ("l1", "l2", "l3"):
-                layer_spec = spec.get(layer_key, {})
-                entry_spec = layer_spec.get("entry_spec", {})
-                if not entry_spec:
-                    continue
-                lines.append(f"\n### {layer_key.upper()} Entry Format")
-                for fld in entry_spec.get("fields", []):
-                    req = " (required)" if fld.get("required") else ""
-                    gen = f" [generated by {fld.get('generated_by', 'system')}]"
-                    lines.append(
-                        f"- `{fld['name']}`: {fld.get('type', 'string')}"
-                        f"{req}{gen} — {fld.get('description', '')}"
-                    )
+        # ── l3_task: target_domains dict (DD4 — skills fetched by L3Manager) ──
+        l3_task = json.dumps({
+            "criteria": (
+                "### Judgment Criteria\n"
+                "- **deprecate**: never matched/used (use_count=0), vague content, "
+                "functionally overlaps with another skill\n"
+                "- **modify**: add missing process steps, update outdated instructions; "
+                "also use modify to update usefulness/misleading/comment\n"
+                "- **create**: compile >= 3 high-activation same-domain cards into SKILL.md "
+                "(write full YAML frontmatter + Markdown procedure)"
+            ),
+            "target_domains": list(l3_triggers.keys()),
+            "triggers": l3_triggers,
+        }, ensure_ascii=False)
+
+        hint_domains = ["learning/compile"] + sorted(all_domains)
 
         return TaskObservation(
-            meta="\n".join(lines),
+            meta=meta,
             state={
-                "current": "\n".join(lines[:10]),
+                "current": "Consolidation task — see per-layer tasks below",
                 "history": "",
                 "l1_output_format": _L1_OUTPUT,
                 "l2_output_format": _L2_OUTPUT,
                 "l3_output_format": _L3_OUTPUT,
+                "l1_task": l1_task,
+                "l2_task": l2_task,
+                "l3_task": l3_task,
                 "feedback": self._shared_feedback,
                 "l1_feedback": self._layer_feedback.get("l1", ""),
                 "l2_feedback": self._layer_feedback.get("l2", ""),
