@@ -254,20 +254,10 @@ class LearningEnv(Environment):
         l2 = self._knowledge.get("l2")
         l3 = self._knowledge.get("l3")
         l1_rules = self._knowledge.get("l1")
-        needs_l2 = l2 and len(l2.cards) > self._l2_limit
-        needs_l3 = l3 and len(l3.list_all()) > self._l3_limit
 
         # ── Build triggered domain lists (DD1: dual trigger) ──
         cons_state = self._stats.get("_consolidation", {})
         spec = self._consolidation_spec
-
-        l2_limits = spec.get("l2", {}).get("limits", {}) if spec else {}
-        l2_soft = l2_limits.get("per_domain_soft", l2_limits.get("soft", 25)) if l2_limits else 25
-        l2_hard = l2_limits.get("per_domain_hard", l2_limits.get("hard", 30)) if l2_limits else 30
-
-        l3_limits = spec.get("l3", {}).get("limits", {}) if spec else {}
-        l3_soft = l3_limits.get("per_domain_soft", l3_limits.get("soft", 15)) if l3_limits else 15
-        l3_hard = l3_limits.get("per_domain_hard", l3_limits.get("hard", 20)) if l3_limits else 20
 
         l2_triggers: dict[str, str] = {}
         l3_triggers: dict[str, str] = {}
@@ -276,7 +266,8 @@ class LearningEnv(Environment):
         domain_counts: Counter[str] = Counter()
         skill_domain_counts: Counter[str] = Counter()
 
-        if needs_l2 and l2:
+        # L2: capacity check (only when over limit) + maintenance check (always)
+        if l2:
             for c in l2.cards:
                 domain_counts[c.domain.path] += 1
                 all_domains.add(c.domain.path)
@@ -287,7 +278,8 @@ class LearningEnv(Environment):
                 elif mods >= 5:
                     l2_triggers[domain] = "maintenance"
 
-        if needs_l3 and l3:
+        # L3: capacity check (only when over limit) + maintenance check (always)
+        if l3:
             for s in l3.list_all():
                 skill_domain_counts[s.domain.path] += 1
                 all_domains.add(s.domain.path)
@@ -316,10 +308,6 @@ class LearningEnv(Environment):
             "",
         ]
         if l2_triggers:
-            target_count = sum(
-                max(0, domain_counts.get(d, 0) - l2_soft)
-                for d in l2_triggers if l2_triggers.get(d) == "capacity"
-            )
             meta_lines.append("### L2 Cards — triggered domains")
             for domain, count in sorted(domain_counts.items()):
                 if domain not in l2_triggers:
