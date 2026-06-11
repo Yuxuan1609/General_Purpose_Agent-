@@ -10,9 +10,8 @@ from capability import Capability, CapabilityResult
 # L3:     full tool access (execution-layer privileges)
 DEFAULT_TOOL_ALLOWLIST: dict[str, set[str]] = {
     "l1": {"todo"},
-    "l2": {"todo", "terminal", "read_file", "grep"},
-    "l3": {"todo", "terminal", "web_search", "read_file", "grep",
-           "skills_list", "skill_view", "skill_manage"},
+    "l2": {"todo", "terminal", "web_search", "read_file", "grep", "tool_proposal"},
+    "l3": {"todo", "terminal", "web_search", "read_file", "grep", "tool_proposal"},
 }
 
 

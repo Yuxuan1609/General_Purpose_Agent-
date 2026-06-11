@@ -43,8 +43,7 @@ def main():
                      confidence=0.5, source="seed")
 
         from core.skill_layer import SkillLayer
-        from core.tools.registry import ToolRegistry
-        sl = SkillLayer(tmp_path / "skills", ToolRegistry())
+        sl = SkillLayer(tmp_path / "skills")
 
         knowledge = {"l1": phil, "l2": fk, "l3": sl}
 

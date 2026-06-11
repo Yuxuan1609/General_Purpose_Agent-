@@ -36,3 +36,13 @@
 - **File**: `core/env/learning_env.py` -> `build_consolidation_task()` L2/L3 entry format sections
 - **Issue**: ``**Entry format:**`` lists spec fields as plain markdown bullet points; LLM may not understand which fields it should populate vs which are system-generated
 - **Idea**: Clearly label each field as [system-generated] vs [agent-populated]. Design the format layout before touching prompts.
+
+---
+
+## Long-term TODOs
+
+### L7. Tools refined by domain
+- Current tools use a flat per-layer allowlist (`DEFAULT_TOOL_ALLOWLIST` in `capability/tool_capability.py`)
+- Each tool should eventually declare which domain(s) it operates in (e.g., `terminal` only for `cli`, `web_search` only for `research`)
+- Layer+domain combined visibility matrix replaces simple per-layer allowlist
+- `ToolProposal` feedback will need a domain field

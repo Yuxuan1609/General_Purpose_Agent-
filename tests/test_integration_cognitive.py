@@ -23,7 +23,6 @@ def full_chain(tmp_path):
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
-    from core.tools.registry import ToolRegistry
 
     rules_path = tmp_path / "l1_rules.json"
     rules_path.write_text('{"version":1,"rules":[{"id":"r1","content":"test rule","created_by":"seed","added_at":"","version":1,"last_modified":""}]}')
@@ -39,7 +38,7 @@ def full_chain(tmp_path):
     meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(rules_path)
     fk = FlexibleKnowledge(knowledge_dir, index_path)
-    sl = SkillLayer(skills_dir, ToolRegistry())
+    sl = SkillLayer(skills_dir)
 
     return build_chain(meta, phil, fk, sl)
 

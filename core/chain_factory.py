@@ -14,9 +14,8 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
-    from core.skill_layer import SkillLayer
-    from core.tools.registry import ToolRegistry
-    from core.layers import build_chain as _build
+from core.skill_layer import SkillLayer
+from core.layers import build_chain as _build
 
     if data_root is None:
         data_root = Path(__file__).resolve().parent.parent
@@ -27,10 +26,39 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         data_root / "data" / "layers" / "knowledge",
         data_root / "data" / "layers" / "knowledge" / "l2_index.json",
     )
-    sl = SkillLayer(data_root / "data" / "layers" / "skills", ToolRegistry())
+    sl = SkillLayer(data_root / "data" / "layers" / "skills")
 
     if seed:
         from core.seed_knowledge import seed_knowledge
         seed_knowledge(fk, phil, sl)
 
-    return _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm)
+    chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm)
+    _mount_tools(chain, data_root)
+    return chain
+
+
+def _mount_tools(chain, data_root: Path):
+    """Register all tools and attach LayerInjector to every layer."""
+    from core.tools import register_all_tools
+    from core.tools.registry import ToolRegistry
+    from capability.tool_capability import ToolCapability
+    from capability import CapabilityRegistry
+    from capability.layer_injector import LayerInjector
+
+    registry = ToolRegistry()
+    register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals")
+
+    cap_registry = CapabilityRegistry()
+    cap_registry.register(ToolCapability(registry))
+
+    injector = LayerInjector(cap_registry)
+    for layer in _iter_layers(chain):
+        layer.set_injector(injector)
+
+
+def _iter_layers(root):
+    """Walk the chain downward from root."""
+    node = root
+    while node is not None:
+        yield node
+        node = node._downstream

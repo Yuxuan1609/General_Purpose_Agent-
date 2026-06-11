@@ -2,13 +2,6 @@ import pytest
 from pathlib import Path
 from core.types import TaskObservation
 from core.task import Domain
-from core.tools.registry import ToolRegistry
-
-
-@pytest.fixture(autouse=True)
-def clear_registry():
-    ToolRegistry().clear()
-    yield
 
 
 @pytest.fixture
@@ -16,7 +9,7 @@ def l3_skill_layer(tmp_path):
     from core.skill_layer import SkillLayer
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
-    return SkillLayer(skills_dir, ToolRegistry())
+    return SkillLayer(skills_dir)
 
 
 class TestL3Manager:

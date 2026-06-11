@@ -44,14 +44,13 @@ from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
 from core.philosophy import Philosophy
 from core.flexible_knowledge import FlexibleKnowledge
 from core.skill_layer import SkillLayer
-from core.tools.registry import ToolRegistry
 from core.layers import build_chain
 from core.layers.l2.manager import L2_DOMAIN_NODES
 
 meta = MetaDriver(DEFAULT_VALIDATORS.copy())
 phil = Philosophy(RULES_PATH)
 fk = FlexibleKnowledge(LAYERS_DATA / "knowledge", L2_INDEX)
-sl = SkillLayer(LAYERS_DATA / "skills", ToolRegistry())
+sl = SkillLayer(LAYERS_DATA / "skills")
 
 # Seed L2 cards for modify/remove tests
 from core.task import Domain

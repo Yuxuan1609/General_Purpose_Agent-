@@ -197,14 +197,13 @@ def main():
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
-    from core.tools.registry import ToolRegistry
     from core.seed_knowledge import seed_knowledge
 
     phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
     fk = FlexibleKnowledge(PROJECT_ROOT / "data" / "layers" / "knowledge",
                            PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json",
                            domain_registry=reg)
-    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", ToolRegistry(),
+    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills",
                     domain_registry=reg)
     seed_knowledge(fk, phil, sl)
 

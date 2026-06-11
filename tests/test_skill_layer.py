@@ -1,31 +1,19 @@
 import pytest
-import json
 from pathlib import Path
 from core.skill_layer import SkillLayer, SkillMeta
 from core.task import Domain
-from core.tools.registry import ToolRegistry
 
-
-@pytest.fixture(autouse=True)
-def clear_registry():
-    """Isolate tests from each other since ToolRegistry is a singleton."""
-    ToolRegistry().clear()
-    yield
 
 @pytest.fixture
-def skill_registry():
-    return ToolRegistry()
-
-@pytest.fixture
-def skill_layer(temp_dir, skill_registry):
+def skill_layer(temp_dir):
     skills_dir = temp_dir / "skills"
     skills_dir.mkdir()
     (skills_dir / "general").mkdir()
-    return SkillLayer(skills_dir, skill_registry)
+    return SkillLayer(skills_dir)
 
 
 class TestSkillLayer:
-    def test_create_skill(self, skill_layer, skill_registry):
+    def test_create_skill(self, skill_layer):
         content = """---
 name: test-skill
 description: "A test skill"
@@ -116,39 +104,13 @@ version: 1.0.0
         archive = skill_layer.skills_dir / ".archive" / "temp-skill"
         assert archive.exists()
 
-    def test_tools_registered(self, skill_layer, skill_registry):
-        defs = skill_registry.get_definitions()
-        names = [d["function"]["name"] for d in defs]
-        assert "skills_list" in names
-        assert "skill_view" in names
-        assert "skill_manage" in names
-
-    def test_tools_are_functional(self, skill_layer, skill_registry):
-        content = """---
-name: hello-skill
-description: "Hello"
-domain: general
-cross_domain: false
-version: 1.0.0
----
-# Hello
-"""
-        skill_layer.create_skill("hello-skill", content, Domain("general", "general"))
-        # Test skills_list
-        list_result = json.loads(skill_registry.dispatch("skills_list", {}))
-        assert len(list_result) >= 1
-        assert any(s["name"] == "hello-skill" for s in list_result)
-        # Test skill_view
-        view_result = json.loads(skill_registry.dispatch("skill_view", {"name": "hello-skill"}))
-        assert view_result.get("success") is True
-
     def test_get_skills_by_ids_from_registry(self, tmp_path):
         from core.domain_registry import DomainRegistry
         from core.task import Domain
         reg = DomainRegistry()
         reg.add_node("game/leduc", "game", "Leduc")
-        sl = SkillLayer(tmp_path / "skills", ToolRegistry(), domain_registry=reg)
-        sl.create_skill("test-skill", "desc", Domain("game/leduc", "specific"))
+        sl = SkillLayer(tmp_path / "skills", domain_registry=reg)
+        sl.create_skill("test-skill", """---\nname: test-skill\ndescription: desc\ndomain: game/leduc\n---\n# Test""", Domain("game/leduc", "specific"))
         ids = reg.get_primary_items("l3", "game/leduc")
         assert "test-skill" in ids
         skills = sl.get_skills_by_ids(ids)

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import json
 import logging
 import re
 import tempfile
@@ -33,13 +32,12 @@ class SkillMeta:
 class SkillLayer:
     """L3: Semi-static skills. SKILL.md format (compatible with agentskills.io)."""
 
-    def __init__(self, skills_dir: Path, tool_registry, domain_registry=None):
+    def __init__(self, skills_dir: Path, domain_registry=None):
         from core.task import Domain
         self.skills_dir = Path(skills_dir)
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self._registry = domain_registry
         self._skills: dict[str, SkillMeta] = {}
-        self._register_tools(tool_registry)
 
     def list_all(self) -> list[SkillMeta]:
         metas = []
@@ -266,99 +264,4 @@ class SkillLayer:
                 return skill_file.parent
         return None
 
-    def _register_tools(self, registry):
-        layer = self
 
-        def _skills_list(args=None, context=None):
-            category = (args or {}).get("category", "")
-            skills = layer.list_all()
-            if category:
-                skills = [s for s in skills if category in s.domain.path]
-            return json.dumps([
-                {"name": s.name, "description": s.description, "domain": s.domain.path}
-                for s in skills
-            ], ensure_ascii=False)
-
-        def _skill_view(args=None, context=None):
-            name = (args or {}).get("name", "")
-            skill_dir = layer._find_skill_dir(name)
-            if not skill_dir:
-                return json.dumps({"error": f"Skill '{name}' not found"})
-            content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
-            return json.dumps({"success": True, "name": name, "content": content}, ensure_ascii=False)
-
-        def _skill_manage(args=None, context=None):
-            action = (args or {}).get("action", "")
-            skill_name = (args or {}).get("name", "")
-            content = (args or {}).get("content", "")
-            domain_path = (args or {}).get("domain", "general")
-            find_text = (args or {}).get("find", "")
-            replace_text = (args or {}).get("replace", "")
-            from core.task import Domain
-            domain = Domain(domain_path, "general" if domain_path == "general" else "specific")
-            try:
-                if action == "create":
-                    meta = layer.create_skill(skill_name, content, domain)
-                    return json.dumps({"success": True, "name": meta.name})
-                elif action == "edit":
-                    meta = layer.edit_skill(skill_name, content)
-                    return json.dumps({"success": True, "name": meta.name})
-                elif action == "patch":
-                    meta = layer.patch_skill(skill_name, find_text, replace_text)
-                    return json.dumps({"success": True, "name": meta.name})
-                elif action == "delete":
-                    layer.delete_skill(skill_name)
-                    return json.dumps({"success": True})
-                else:
-                    return json.dumps({"error": f"Unknown action: {action}"})
-            except Exception as e:
-                return json.dumps({"error": str(e)})
-
-        registry.register("skills_list", {
-            "type": "function",
-            "function": {
-                "name": "skills_list",
-                "description": "List available skills with metadata",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "category": {"type": "string", "description": "Filter by domain/category"}
-                    }
-                }
-            }
-        }, _skills_list, toolset="core")
-
-        registry.register("skill_view", {
-            "type": "function",
-            "function": {
-                "name": "skill_view",
-                "description": "Load full skill content by name",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Skill name"}
-                    },
-                    "required": ["name"]
-                }
-            }
-        }, _skill_view, toolset="core")
-
-        registry.register("skill_manage", {
-            "type": "function",
-            "function": {
-                "name": "skill_manage",
-                "description": "Create, edit, patch, or delete a skill",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "enum": ["create", "edit", "patch", "delete"]},
-                        "name": {"type": "string"},
-                        "content": {"type": "string"},
-                        "domain": {"type": "string"},
-                        "find": {"type": "string"},
-                        "replace": {"type": "string"},
-                    },
-                    "required": ["action", "name"]
-                }
-            }
-        }, _skill_manage, toolset="core")
