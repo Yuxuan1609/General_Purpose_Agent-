@@ -20,19 +20,24 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     if data_root is None:
         data_root = Path(__file__).resolve().parent.parent
 
+    from core.seed_knowledge import init_registry
+    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json")
+
     meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(data_root / "data" / "layers" / "l1_rules.json")
     fk = FlexibleKnowledge(
         data_root / "data" / "layers" / "knowledge",
         data_root / "data" / "layers" / "knowledge" / "l2_index.json",
+        domain_registry=reg,
     )
-    sl = SkillLayer(data_root / "data" / "layers" / "skills")
+    sl = SkillLayer(data_root / "data" / "layers" / "skills", domain_registry=reg)
 
     if seed:
         from core.seed_knowledge import seed_knowledge
-        seed_knowledge(fk, phil, sl)
+        seed_knowledge(fk, phil, sl, domain_registry=reg)
 
-    chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm)
+    chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm,
+                    domain_registry=reg)
     _mount_tools(chain, data_root)
     return chain
 

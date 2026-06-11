@@ -246,7 +246,9 @@ class L2Agent(LayerAgent):
         """
         cards = self._get_cards_for_nodes(selected_nodes)
         node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
-        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
+        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else (
+            "⚠️ 当前所选领域暂无知识卡片。你是这个领域的第一位探索者，请根据上层 query 和可用工具来完成任务。" if selected_nodes else "（无相关卡片）"
+        )
 
         current = state.get("current", "")
         is_consolidation = "l2_output_format" in state
@@ -293,7 +295,9 @@ class L2Agent(LayerAgent):
 
         cards = self._get_cards_for_nodes(selected_nodes)
         node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
-        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else "（无相关卡片）"
+        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else (
+            "⚠️ 当前所选领域暂无知识卡片。你是这个领域的第一位探索者，请根据上层 query 和可用工具来完成任务。" if selected_nodes else "（无相关卡片）"
+        )
 
         skills = l3_skills or []
         l3 = l3_result or {}
