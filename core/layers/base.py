@@ -168,26 +168,18 @@ class LayerAgent(ABC):
                         layer, tc.function.name,
                         tc.function.arguments,
                     )
-                    # Defensive: raw.data may be dict or list depending on tool
-                    result_str = ""
                     if raw.success:
-                        if isinstance(raw.data, dict):
-                            result_str = raw.data.get("result", "")
-                        elif isinstance(raw.data, list):
-                            result_str = json.dumps(raw.data, ensure_ascii=False)[:500]
-                        else:
-                            result_str = str(raw.data)
+                        result_content = raw.data
+                        result_str = str(raw.data.get("result", "") if isinstance(raw.data, dict) else raw.data)[:200]
                     else:
+                        result_content = {"error": raw.error}
                         result_str = raw.error
                     self._log.debug("  tool %s → %s", tc.function.name,
                                    str(result_str)[:120])
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": json.dumps(
-                            raw.data if raw.success else {"error": raw.error},
-                            ensure_ascii=False,
-                        ),
+                        "content": json.dumps(result_content, ensure_ascii=False),
                     })
                 continue  # next turn
 

@@ -78,15 +78,22 @@ class ToolCapability(Capability):
             )
 
         try:
-            result_json = self._registry.dispatch(tool_name, tool_args)
+            raw = self._registry.dispatch(tool_name, tool_args)
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = {"raw": raw}
+            else:
+                parsed = raw
             return CapabilityResult(
                 capability_name="tool", layer=layer, success=True,
-                data=json.loads(result_json) if isinstance(result_json, str) else result_json,
+                data=parsed if isinstance(parsed, dict) else {"result": parsed},
             )
         except json.JSONDecodeError:
             return CapabilityResult(
                 capability_name="tool", layer=layer, success=True,
-                data={"raw": str(result_json)},
+                data={"raw": ""},
             )
         except Exception as e:
             return CapabilityResult(
