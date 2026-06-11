@@ -200,25 +200,31 @@ class L1Agent(LayerAgent):
                tools: list[dict] | None = None, layer: str = "l1") -> dict:
         """Single decision step for L1 while loop.
 
-        Consolidation mode (l1_output_format in state):
-          - Uses _L1_CONSOLIDATION_TOOLS, returns {done:True, result, ...}
-        Normal mode:
-          - Decision schema wrapped as a strict tool, captured via capture_tool.
+        Two capture tools:
+          - l1_query: request knowledge from L2 (done=false, queries=[...])
+          - l1_report: deliver final decision (done=true, result=...)
+        Consolidation mode uses l1_report only.
         """
         l1_fmt = state.get("l1_output_format")
 
         instruction = (
             "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。\n"
             "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
-            "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），调用 l1_decide 并设置 done=true。\n"
-            "如果任务需要调用工具或需要下层知识，调用 l1_decide 并设置 done=false，通过 queries 下发子任务。\n"
+            "*** 输出规则（极其重要）***\n"
+            "1. 如果你需要 L2 层的策略知识才能做出决策 → 调用【l1_query】工具下发查询\n"
+            "2. 如果你已经掌握了足够信息，可以独立做出最终决策 → 调用【l1_report】工具汇报结果\n"
+            "3. 禁止以文本方式直接输出JSON或回复，必须调用以上两个工具之一！\n\n"
+            "l1_query：向下查询，done固定为false，列出需要L2回答的具体问题\n"
+            "l1_report：向上汇报，done固定为true，给出最终决策和理由\n"
         )
         if l1_fmt:
             instruction += (
-                "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
-                "不要修改 L2 知识卡片或 L3 技能。"
-                "使用工具 deprecate_l1_rule / create_l1_rule / modify_l1_rule 记录修改。"
-                "修改完成后调用 l1_decide 输出最终结果。"
+                "\n\n【整理任务】你只负责 L1 行为准则的修改。"
+                "使用整理工具记录修改，完成后调用 l1_report 输出结果。"
+            )
+        else:
+            instruction += (
+                "\n如果任务无需下层协助，直接调用 l1_report。"
             )
 
         domain_nodes = state.get("domain_nodes", [])
@@ -254,26 +260,24 @@ class L1Agent(LayerAgent):
 
         if l1_fmt:
             self._setup_l1_consolidation()
-            # Add a minimal decide tool so LLM can signal completion after consolidation
-            decide_tool = self._schema_to_tool(
-                "l1_decide",
-                "【必选】最终决策工具。你必须使用此 tool 输出 L1 的决策结果，不得直接输出文本。"
-                "先完成必要的知识查询和工具调用，最后调用此 tool 给出结构化决策。",
+            report_tool = self._schema_to_tool(
+                "l1_report",
+                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
                 {
                     "type": "object",
                     "properties": {
-                        "done": {"type": "boolean"},
+                        "done": {"type": "boolean", "const": True},
                         "result": {"type": "string", "description": "最终决策文本"},
                         "reasoning": {"type": "string"},
                     },
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = self._L1_CONSOLIDATION_TOOLS + [decide_tool]
+            all_tools = self._L1_CONSOLIDATION_TOOLS + [report_tool]
             self._log.debug("  tools: %s",
                            [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                    capture_tool="l1_decide")
+                                    capture_tools={"l1_report"})
             result = {
                 "done": True,
                 "result": result.get("result", result.get("reply", "")),
@@ -282,18 +286,52 @@ class L1Agent(LayerAgent):
             }
             return result
 
-        # Normal mode: decision schema as a capture tool
+        # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []
-        decide_tool = self._schema_to_tool(
-            "l1_decide",
-            "【必选】最终决策工具。你必须使用此 tool 输出 L1 的决策结果，不得直接输出文本。"
-            "先完成必要的知识查询和工具调用，最后调用此 tool 给出结构化决策。",
-            self.L1_DECISION_SCHEMA,
+        query_tool = self._schema_to_tool(
+            "l1_query",
+            "【特殊工具：向下查询】当需要下层L2的策略知识辅助决策时使用。"
+            "写清楚需要查询的具体问题和目标领域。禁止以文本方式直接回复！",
+            {
+                "type": "object",
+                "properties": {
+                    "done": {"type": "boolean", "const": False},
+                    "queries": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string", "description": "向下层 L2 查询的问题"},
+                                "domains_hint": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": "建议查询的领域",
+                                },
+                            },
+                        },
+                    },
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["done", "queries", "reasoning"],
+            },
         )
-        all_tools = base_tools + [decide_tool]
+        report_tool = self._schema_to_tool(
+            "l1_report",
+            "【特殊工具：向上汇报】当你有了足够信息可以做出最终决策时使用。"
+            "给出明确的决策结果和推理过程。禁止以文本方式直接回复！",
+            {
+                "type": "object",
+                "properties": {
+                    "done": {"type": "boolean", "const": True},
+                    "result": {"type": "string", "description": "最终决策文本"},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["done", "result", "reasoning"],
+            },
+        )
+        all_tools = base_tools + [query_tool, report_tool]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                capture_tool="l1_decide")
+                                capture_tools={"l1_query", "l1_report"})
         return result
 
 

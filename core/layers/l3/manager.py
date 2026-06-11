@@ -136,11 +136,11 @@ class L3Agent(LayerAgent):
     def decide(self, meta: str, state: dict, context: dict,
                tools: list[dict] | None = None, layer: str = "l3") -> dict:
         """Single decision step for L3 while loop.
-        
-        Consolidation mode (l3_output_format in state):
-          - Uses _L3_CONSOLIDATION_TOOLS, captured via l3_decide tool.
-        Normal mode:
-          - Decision schema wrapped as a strict tool, captured via l3_decide.
+
+        Two capture tools:
+          - l3_continue: request more tool usage / thinking (done=false)
+          - l3_report: deliver execution result (done=true)
+        Consolidation mode uses l3_report only.
         """
         l3_fmt = state.get("l3_output_format")
         matched_skills = context.get("matched_skills", [])
@@ -174,16 +174,18 @@ class L3Agent(LayerAgent):
         fb_section = f"[L3 修改结果确认]\n{fb}\n\n" if fb else ""
 
         instruction = (
-            "你的核心任务是完成 L2 下发的任务，Meta 提供任务整体背景。\n"
-            "选择相关技能并基于技能内容执行任务。\n"
-            "任务完成后调用 l3_decide 输出结果。"
+            "你的核心任务是完成 L2 下发的任务，Meta 提供任务整体背景。\n\n"
+            "*** 输出规则（极其重要）***\n"
+            "1. 如果需要继续思考或执行工具 → 调用【l3_continue】表示还需进一步工作\n"
+            "2. 如果任务已完成 → 调用【l3_report】输出执行结果\n"
+            "3. 禁止以文本方式直接输出JSON或回复，必须调用以上两个工具之一！\n\n"
+            "l3_continue：继续思考，done固定为false\n"
+            "l3_report：汇报结果，done固定为true，含 result 执行结果"
         )
         if l3_fmt:
             instruction += (
-                "\n\n【整理任务】你只负责 L3 技能（Skill）的修改。"
-                "不要修改 L1 行为准则或 L2 知识卡片。"
-                "使用工具 deprecate_l3_skill / create_l3_skill / modify_l3_skill 记录修改。"
-                "修改完成后调用 l3_decide 输出结果。"
+                "\n\n【整理任务】你只负责 L3 技能的修改。"
+                "使用整理工具记录修改，完成后调用 l3_report 输出结果。"
             )
         system = self._build_system_prompt(instruction, meta)
         query_section = f"[上层查询]\n完成 L2 下发的任务：{l3_task}\n\n" if l3_task else ""
@@ -198,14 +200,13 @@ class L3Agent(LayerAgent):
 
         if l3_fmt:
             self._setup_l3_consolidation()
-            decide_tool = self._schema_to_tool(
-                "l3_decide",
-                "【必选】最终决策工具。你必须使用此 tool 输出 L3 的执行结果，不得直接输出文本。"
-                "先完成必要的技能执行和工具调用，最后调用此 tool 给出结构化结果。",
+            report_tool = self._schema_to_tool(
+                "l3_report",
+                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
                 {
                     "type": "object",
                     "properties": {
-                        "done": {"type": "boolean"},
+                        "done": {"type": "boolean", "const": True},
                         "result": {"type": "string", "description": "技能执行结果"},
                         "skills_used": {"type": "array", "items": {"type": "string"}},
                         "reasoning": {"type": "string"},
@@ -213,10 +214,10 @@ class L3Agent(LayerAgent):
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = self._L3_CONSOLIDATION_TOOLS + [decide_tool]
+            all_tools = self._L3_CONSOLIDATION_TOOLS + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                    capture_tool="l3_decide")
+                                    capture_tools={"l3_report"})
             result = {
                 "done": True,
                 "result": result.get("result", ""),
@@ -225,18 +226,41 @@ class L3Agent(LayerAgent):
             }
             return result
 
-        # Normal mode: decision schema as a capture tool
+        # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []
-        decide_tool = self._schema_to_tool(
-            "l3_decide",
-            "【必选】最终决策工具。你必须使用此 tool 输出 L3 的执行结果，不得直接输出文本。"
-            "先完成必要的技能执行和工具调用，最后调用此 tool 给出结构化结果。",
-            self.L3_DECISION_SCHEMA,
+        continue_tool = self._schema_to_tool(
+            "l3_continue",
+            "【特殊工具：继续思考】当你需要进一步思考或执行工具来完成L2下发的任务时使用。"
+            "调用此工具表示还需要继续工作。禁止以文本方式直接回复！",
+            {
+                "type": "object",
+                "properties": {
+                    "done": {"type": "boolean", "const": False},
+                    "skills_used": {"type": "array", "items": {"type": "string"}},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["done", "reasoning"],
+            },
         )
-        all_tools = base_tools + [decide_tool]
+        report_tool = self._schema_to_tool(
+            "l3_report",
+            "【特殊工具：向上汇报】当L2下发的任务执行完成时使用。"
+            "给出明确的执行结果和使用的技能列表。禁止以文本方式直接回复！",
+            {
+                "type": "object",
+                "properties": {
+                    "done": {"type": "boolean", "const": True},
+                    "result": {"type": "string", "description": "技能执行结果"},
+                    "skills_used": {"type": "array", "items": {"type": "string"}},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["done", "result", "reasoning"],
+            },
+        )
+        all_tools = base_tools + [continue_tool, report_tool]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                capture_tool="l3_decide")
+                                capture_tools={"l3_continue", "l3_report"})
         return result
 
 

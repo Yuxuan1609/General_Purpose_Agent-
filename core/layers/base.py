@@ -79,17 +79,16 @@ class LayerAgent(ABC):
                   schema: dict | None = None,
                   tools: list[dict] | None = None,
                   layer: str = "",
-                  capture_tool: str | None = None) -> dict:
+                  capture_tools: set[str] | None = None) -> dict:
         """Call LLM, return parsed JSON dict.
 
         When tools are provided, enables multi-turn tool call loop:
           LLM → tool_calls → execute → role:tool → LLM → ... → final content.
 
-        capture_tool: When set, the named tool's call is treated as the final
-          structured output instead of executing it. The tool's arguments
-          are returned directly as the parsed result. This eliminates the
-          need for JSON-in-prompt schema injection — the LLM outputs
-          structured data via tool call arguments guaranteed valid by the API.
+        capture_tools: Set of tool names treated as structured-output markers.
+          When the LLM calls any of these tools, its arguments are returned
+          directly as the result (with _capture_tool field), instead of
+          executing the tool. Eliminates JSON-in-prompt schema injection.
 
         DeepSeek compatibility:
           - Uses role:"tool" messages for tool results (not text injection)
@@ -101,7 +100,7 @@ class LayerAgent(ABC):
             {"role": "user", "content": user},
         ]
 
-        if schema and not capture_tool:
+        if schema and not capture_tools:
             schema_text = json.dumps(schema, ensure_ascii=False, indent=2)
             messages[0]["content"] = (
                 f"{system}\n\n"
@@ -115,8 +114,8 @@ class LayerAgent(ABC):
             tool_names = [t["function"]["name"] for t in tools]
             self._log.debug("  ── tools: %s ──", ", ".join(tool_names))
 
-        # json_mode only when no tools (DeepSeek incompatibility) and no capture_tool
-        use_json_mode = bool(schema) and not tools and not capture_tool
+        # json_mode only when no tools (DeepSeek incompatibility) and no capture_tools
+        use_json_mode = bool(schema) and not tools and not capture_tools
 
         for turn in range(1, self.MAX_TOOL_TURNS + 1):
             resp = self._llm.chat(
@@ -143,21 +142,21 @@ class LayerAgent(ABC):
                 }
                 messages.append(assistant_msg)
 
-                # Split: capture tool vs executable tools
+                # Split: capture tools vs executable tools
                 executable_calls = []
                 for tc in resp.tool_calls:
-                    if capture_tool and tc.function.name == capture_tool:
-                        self._log.debug("  ═══ capture_tool '%s' called (turn %d) ═══\n%s",
-                                       capture_tool, turn,
+                    if capture_tools and tc.function.name in capture_tools:
+                        self._log.debug("  ═══ capture tool '%s' (turn %d) ═══\n%s",
+                                       tc.function.name, turn,
                                        _indent(tc.function.arguments, 4))
                         try:
                             parsed = json.loads(tc.function.arguments)
                             if isinstance(parsed, dict):
+                                parsed["_capture_tool"] = tc.function.name
                                 return parsed
                         except json.JSONDecodeError:
                             self._log.warning("capture_tool arguments not valid JSON")
-                        # If parse fails, fall back to raw arguments
-                        return {"_raw": tc.function.arguments}
+                        return {"_raw": tc.function.arguments, "_capture_tool": tc.function.name}
                     executable_calls.append(tc)
 
                 if not executable_calls:
@@ -192,11 +191,11 @@ class LayerAgent(ABC):
                     })
                 continue  # next turn
 
-            # No tool calls → final answer (fallback — shouldn't fire when capture_tool is set)
+            # No tool calls → final answer (fallback — shouldn't fire when capture_tools is set)
             text = resp.text if hasattr(resp, 'text') else str(resp)
             self._log.debug("  ═══ response (turn %d) ═══\n%s", turn, _indent(text, 4))
 
-            if capture_tool or schema is None:
+            if capture_tools or schema is None:
                 return {"reply": text, "reasoning": ""}
             try:
                 parsed = json.loads(text)
