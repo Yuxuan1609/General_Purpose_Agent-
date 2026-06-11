@@ -23,7 +23,7 @@ class ToolCapability(Capability):
 
     Example:
         allowlist = {
-            "l1": {"todo"},
+    "l1": {"todo", "create_domain"},
             "l2": {"todo", "terminal"},
             "l3": {"todo", "terminal", "web_search"},
         }

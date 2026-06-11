@@ -52,6 +52,11 @@ def _mount_tools(chain, data_root: Path):
 
     registry = ToolRegistry()
     register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals")
+    from core.tools.domain_tool import set_domain_registry
+    for layer in _iter_layers(chain):
+        if layer._registry:
+            set_domain_registry(layer._registry)
+            break
 
     cap_registry = CapabilityRegistry()
     cap_registry.register(ToolCapability(registry))

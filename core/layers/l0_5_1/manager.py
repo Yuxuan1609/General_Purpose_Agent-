@@ -127,7 +127,7 @@ class L1Agent(LayerAgent):
         extra = f"\n{static_context}\n" if static_context else ""
         return (
             f"## 认知层架构\n"
-            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。不直接调用工具。\n"
+            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。可调用 create_domain 创建新领域。不调用其他工具。\n"
             f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
             f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
             f"## 领域边界\n"
