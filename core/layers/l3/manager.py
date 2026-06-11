@@ -138,9 +138,9 @@ class L3Agent(LayerAgent):
         """Single decision step for L3 while loop.
         
         Consolidation mode (l3_output_format in state):
-          - Uses _L3_CONSOLIDATION_TOOLS, returns {done:True, result, ...}
+          - Uses _L3_CONSOLIDATION_TOOLS, captured via l3_decide tool.
         Normal mode:
-          - Uses L3_DECISION_SCHEMA
+          - Decision schema wrapped as a strict tool, captured via l3_decide.
         """
         l3_fmt = state.get("l3_output_format")
         matched_skills = context.get("matched_skills", [])
@@ -176,13 +176,14 @@ class L3Agent(LayerAgent):
         instruction = (
             "你的核心任务是完成 L2 下发的任务，Meta 提供任务整体背景。\n"
             "选择相关技能并基于技能内容执行任务。\n"
-            "当任务完成时设置 done=true 并给出 result。"
+            "任务完成后调用 l3_decide 输出结果。"
         )
         if l3_fmt:
             instruction += (
                 "\n\n【整理任务】你只负责 L3 技能（Skill）的修改。"
                 "不要修改 L1 行为准则或 L2 知识卡片。"
                 "使用工具 deprecate_l3_skill / create_l3_skill / modify_l3_skill 记录修改。"
+                "修改完成后调用 l3_decide 输出结果。"
             )
         system = self._build_system_prompt(instruction, meta)
         query_section = f"[上层查询]\n完成 L2 下发的任务：{l3_task}\n\n" if l3_task else ""
@@ -197,23 +198,41 @@ class L3Agent(LayerAgent):
 
         if l3_fmt:
             self._setup_l3_consolidation()
-            tools = self._L3_CONSOLIDATION_TOOLS
-            self._log.debug("  consolidation tools: %s",
-                           [t["function"]["name"] for t in tools])
-            schema = None
-        else:
-            schema = self.L3_DECISION_SCHEMA
-
-        result = self._call_llm(system, user, schema=schema, tools=tools, layer=layer)
-
-        if l3_fmt:
+            decide_tool = self._schema_to_tool(
+                "l3_decide", "输出 L3 执行结果",
+                {
+                    "type": "object",
+                    "properties": {
+                        "done": {"type": "boolean"},
+                        "result": {"type": "string", "description": "技能执行结果"},
+                        "skills_used": {"type": "array", "items": {"type": "string"}},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["done", "reasoning"],
+                },
+            )
+            all_tools = self._L3_CONSOLIDATION_TOOLS + [decide_tool]
+            self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
+            result = self._call_llm(system, user, tools=all_tools, layer=layer,
+                                    capture_tool="l3_decide")
             result = {
                 "done": True,
-                "result": result.get("reply", result.get("result", "")),
-                "skills_used": [],
-                "reasoning": "",
+                "result": result.get("result", ""),
+                "skills_used": result.get("skills_used", []),
+                "reasoning": result.get("reasoning", ""),
             }
+            return result
 
+        # Normal mode: decision schema as a strict tool
+        base_tools = self._get_tools(layer) or []
+        decide_tool = self._schema_to_tool(
+            "l3_decide", "输出 L3 执行结果",
+            self.L3_DECISION_SCHEMA,
+        )
+        all_tools = base_tools + [decide_tool]
+        self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
+        result = self._call_llm(system, user, tools=all_tools, layer=layer,
+                                capture_tool="l3_decide")
         return result
 
 

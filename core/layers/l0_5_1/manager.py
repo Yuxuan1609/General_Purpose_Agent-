@@ -203,21 +203,22 @@ class L1Agent(LayerAgent):
         Consolidation mode (l1_output_format in state):
           - Uses _L1_CONSOLIDATION_TOOLS, returns {done:True, result, ...}
         Normal mode:
-          - Uses L1_DECISION_SCHEMA
+          - Decision schema wrapped as a strict tool, captured via capture_tool.
         """
         l1_fmt = state.get("l1_output_format")
 
         instruction = (
             "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。\n"
             "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
-            "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 done=true 并给出 result。\n"
-            "如果任务需要调用工具或需要下层知识，设置 done=false 并通过 queries 下发子任务。\n"
+            "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），调用 l1_decide 并设置 done=true。\n"
+            "如果任务需要调用工具或需要下层知识，调用 l1_decide 并设置 done=false，通过 queries 下发子任务。\n"
         )
         if l1_fmt:
             instruction += (
                 "\n\n【整理任务】你只负责 L1 行为准则（Philosophy rules）的修改。"
                 "不要修改 L2 知识卡片或 L3 技能。"
                 "使用工具 deprecate_l1_rule / create_l1_rule / modify_l1_rule 记录修改。"
+                "修改完成后调用 l1_decide 输出最终结果。"
             )
 
         domain_nodes = state.get("domain_nodes", [])
@@ -253,23 +254,42 @@ class L1Agent(LayerAgent):
 
         if l1_fmt:
             self._setup_l1_consolidation()
-            tools = self._L1_CONSOLIDATION_TOOLS
-            self._log.debug("  consolidation tools: %s",
-                           [t["function"]["name"] for t in tools])
-            schema = None
-        else:
-            tools = self._get_tools(layer)
-            schema = self.L1_DECISION_SCHEMA
-
-        result = self._call_llm(system, user, schema=schema, tools=tools, layer=layer)
-
-        if l1_fmt:
+            # Add a minimal decide tool so LLM can signal completion after consolidation
+            decide_tool = self._schema_to_tool(
+                "l1_decide", "输出 L1 决策结果",
+                {
+                    "type": "object",
+                    "properties": {
+                        "done": {"type": "boolean"},
+                        "result": {"type": "string", "description": "最终决策文本"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["done", "reasoning"],
+                },
+            )
+            all_tools = self._L1_CONSOLIDATION_TOOLS + [decide_tool]
+            self._log.debug("  tools: %s",
+                           [t["function"]["name"] for t in all_tools])
+            result = self._call_llm(system, user, tools=all_tools, layer=layer,
+                                    capture_tool="l1_decide")
             result = {
                 "done": True,
-                "result": result.get("reply", ""),
-                "reasoning": "",
+                "result": result.get("result", result.get("reply", "")),
+                "reasoning": result.get("reasoning", ""),
                 "queries": [],
             }
+            return result
+
+        # Normal mode: decision schema as a strict tool
+        base_tools = self._get_tools(layer) or []
+        decide_tool = self._schema_to_tool(
+            "l1_decide", "输出 L1 决策结果，含子查询",
+            self.L1_DECISION_SCHEMA,
+        )
+        all_tools = base_tools + [decide_tool]
+        self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
+        result = self._call_llm(system, user, tools=all_tools, layer=layer,
+                                capture_tool="l1_decide")
         return result
 
 

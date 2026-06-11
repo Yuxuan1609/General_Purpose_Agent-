@@ -272,16 +272,15 @@ class L2Agent(LayerAgent):
         """Single decision step for L2 while loop.
 
         Consolidation mode (l2_output_format in state):
-          - Uses _L2_CONSOLIDATION_TOOLS, returns {done:True, reply, ...}
+          - Uses _L2_CONSOLIDATION_TOOLS, captured via l2_decide tool.
         Normal mode:
-          - Uses L2_DECISION_SCHEMA
+          - Decision schema wrapped as a strict tool, captured via l2_decide.
         """
         l2_fmt = state.get("l2_output_format")
         selected_nodes = context.get("selected_nodes", [])
         candidate_cards = context.get("candidate_cards", [])
         l3_results = context.get("l3_results", [])
 
-        # Build cards display
         cards_text = ""
         if candidate_cards:
             lines = []
@@ -311,18 +310,18 @@ class L2Agent(LayerAgent):
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
-            "当信息充分时设置 done=true 并给出 reply。\n"
+            "当信息充分时调用 l2_decide 并设置 done=true。\n"
             "当需要更多信息时：\n"
-            "  - 通过 selected_nodes 选择相关领域节点\n"
-            "  - 通过 queries_to_L3 向 L3 下发技能任务\n"
-            "  - 后续轮次中你会收到 L3 的执行结果\n"
-            "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
+            "  - 调用 l2_decide 并通过 selected_nodes 选择相关领域节点\n"
+            "  - 或通过 queries_to_L3 向 L3 下发技能任务\n"
+            "  - 后续轮次中你会收到 L3 的执行结果，可再次调用 l2_decide\n"
         )
         if l2_fmt:
             instruction += (
                 "\n\n【整理任务】你只负责 L2 知识卡片（KnowledgeCard）的修改。"
                 "不要修改 L1 行为准则或 L3 技能。"
                 "使用工具 deprecate_l2_card / create_l2_card / modify_l2_card 记录修改。"
+                "修改完成后调用 l2_decide 输出结果。"
             )
 
         system = self._build_system_prompt(instruction, meta)
@@ -338,25 +337,42 @@ class L2Agent(LayerAgent):
 
         if l2_fmt:
             self._setup_l2_consolidation()
-            tools = self._L2_CONSOLIDATION_TOOLS
-            self._log.debug("  consolidation tools: %s",
-                           [t["function"]["name"] for t in tools])
-            schema = None
-        else:
-            schema = self.L2_DECISION_SCHEMA
-
-        result = self._call_llm(system, user, schema=schema, tools=tools, layer=layer)
-
-        if l2_fmt:
+            decide_tool = self._schema_to_tool(
+                "l2_decide", "输出 L2 决策结果",
+                {
+                    "type": "object",
+                    "properties": {
+                        "done": {"type": "boolean"},
+                        "reply": {"type": "string", "description": "回复上层查询的结论"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["done", "reasoning"],
+                },
+            )
+            all_tools = self._L2_CONSOLIDATION_TOOLS + [decide_tool]
+            self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
+            result = self._call_llm(system, user, tools=all_tools, layer=layer,
+                                    capture_tool="l2_decide")
             result = {
                 "done": True,
                 "reply": result.get("reply", ""),
                 "selected_nodes": [],
                 "selected_cards": [],
                 "queries_to_L3": [],
-                "reasoning": "",
+                "reasoning": result.get("reasoning", ""),
             }
+            return result
 
+        # Normal mode: decision schema as a strict tool
+        base_tools = self._get_tools(layer) or []
+        decide_tool = self._schema_to_tool(
+            "l2_decide", "输出 L2 决策结果，含节点选择与 L3 查询",
+            self.L2_DECISION_SCHEMA,
+        )
+        all_tools = base_tools + [decide_tool]
+        self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
+        result = self._call_llm(system, user, tools=all_tools, layer=layer,
+                                capture_tool="l2_decide")
         return result
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:

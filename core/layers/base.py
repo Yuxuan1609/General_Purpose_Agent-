@@ -78,44 +78,36 @@ class LayerAgent(ABC):
     def _call_llm(self, system: str, user: str,
                   schema: dict | None = None,
                   tools: list[dict] | None = None,
-                  layer: str = "") -> dict:
+                  layer: str = "",
+                  capture_tool: str | None = None) -> dict:
         """Call LLM, return parsed JSON dict.
 
         When tools are provided, enables multi-turn tool call loop:
           LLM → tool_calls → execute → role:tool → LLM → ... → final content.
 
+        capture_tool: When set, the named tool's call is treated as the final
+          structured output instead of executing it. The tool's arguments
+          are returned directly as the parsed result. This eliminates the
+          need for JSON-in-prompt schema injection — the LLM outputs
+          structured data via tool call arguments guaranteed valid by the API.
+
         DeepSeek compatibility:
           - Uses role:"tool" messages for tool results (not text injection)
           - Disables json_mode when tools are present (incompatible)
           - Preserves tool_call_id for result routing
-
-        Args:
-            system: System prompt
-            user: User prompt
-            schema: JSON schema for structured output (via prompt, not json_mode if tools present)
-            tools: OpenAI function-calling tool schemas (from LayerInjector)
-            layer: Calling layer identifier ("l1"/"l2"/"l3")
         """
         messages: list[dict] = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
 
-        if schema:
+        if schema and not capture_tool:
             schema_text = json.dumps(schema, ensure_ascii=False, indent=2)
-            if tools:
-                # Cannot use json_mode with tools — inject schema into system prompt
-                messages[0]["content"] = (
-                    f"{system}\n\n"
-                    f"请以 JSON 格式输出，严格遵循以下结构：\n"
-                    f"```json\n{schema_text}\n```"
-                )
-            else:
-                messages[0]["content"] = (
-                    f"{system}\n\n"
-                    f"请以 JSON 格式输出，严格遵循以下结构：\n"
-                    f"```json\n{schema_text}\n```"
-                )
+            messages[0]["content"] = (
+                f"{system}\n\n"
+                f"请以 JSON 格式输出，严格遵循以下结构：\n"
+                f"```json\n{schema_text}\n```"
+            )
 
         self._log.debug("  ── system ──\n%s", _indent(str(messages[0]["content"]), 4))
         self._log.debug("  ── user ──\n%s", _indent(str(messages[1]["content"]), 4))
@@ -123,8 +115,8 @@ class LayerAgent(ABC):
             tool_names = [t["function"]["name"] for t in tools]
             self._log.debug("  ── tools: %s ──", ", ".join(tool_names))
 
-        # Only use json_mode when no tools (DeepSeek incompatibility)
-        use_json_mode = bool(schema) and not tools
+        # json_mode only when no tools (DeepSeek incompatibility) and no capture_tool
+        use_json_mode = bool(schema) and not tools and not capture_tool
 
         for turn in range(1, self.MAX_TOOL_TURNS + 1):
             resp = self._llm.chat(
@@ -134,7 +126,6 @@ class LayerAgent(ABC):
             )
 
             if resp.has_tool_calls and self._injector and layer:
-                # Append assistant message with tool_calls
                 assistant_msg: dict = {
                     "role": "assistant",
                     "content": resp.text or None,
@@ -152,8 +143,28 @@ class LayerAgent(ABC):
                 }
                 messages.append(assistant_msg)
 
-                # Execute tools and append role:"tool" messages
+                # Split: capture tool vs executable tools
+                executable_calls = []
                 for tc in resp.tool_calls:
+                    if capture_tool and tc.function.name == capture_tool:
+                        self._log.debug("  ═══ capture_tool '%s' called (turn %d) ═══\n%s",
+                                       capture_tool, turn,
+                                       _indent(tc.function.arguments, 4))
+                        try:
+                            parsed = json.loads(tc.function.arguments)
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except json.JSONDecodeError:
+                            self._log.warning("capture_tool arguments not valid JSON")
+                        # If parse fails, fall back to raw arguments
+                        return {"_raw": tc.function.arguments}
+                    executable_calls.append(tc)
+
+                if not executable_calls:
+                    continue  # all calls were captured
+
+                # Execute remaining tools
+                for tc in executable_calls:
                     raw = self._injector.execute_tool_call(
                         layer, tc.function.name,
                         tc.function.arguments,
@@ -171,11 +182,11 @@ class LayerAgent(ABC):
                     })
                 continue  # next turn
 
-            # No tool calls → final answer
+            # No tool calls → final answer (fallback — shouldn't fire when capture_tool is set)
             text = resp.text if hasattr(resp, 'text') else str(resp)
             self._log.debug("  ═══ response (turn %d) ═══\n%s", turn, _indent(text, 4))
 
-            if schema is None:
+            if capture_tool or schema is None:
                 return {"reply": text, "reasoning": ""}
             try:
                 parsed = json.loads(text)
@@ -196,6 +207,23 @@ class LayerAgent(ABC):
         self._log.warning("Max tool call turns (%d) exceeded", self.MAX_TOOL_TURNS)
         return {"_raw": "max_tool_turns", "_error": "tool call loop exceeded"}
 
+
+    @staticmethod
+    def _schema_to_tool(name: str, description: str, schema: dict) -> dict:
+        """Convert a JSON Schema dict to an OpenAI function-calling tool definition.
+
+        The resulting tool can be passed to _call_llm with capture_tool=name
+        so the LLM outputs structured data via tool_call arguments instead of
+        raw JSON text embedded in markdown.
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": schema,
+            },
+        }
 
     @abstractmethod
     def decide(self, **kwargs) -> dict:
