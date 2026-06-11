@@ -53,7 +53,8 @@ def _mount_tools(chain, data_root: Path):
 
     injector = LayerInjector(cap_registry)
     for layer in _iter_layers(chain):
-        layer.set_injector(injector)
+        if layer._agent is not None:
+            layer._agent.set_injector(injector)
 
 
 def _iter_layers(root):
