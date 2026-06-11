@@ -389,7 +389,7 @@ class LearningEnv(Environment):
             "Use tools: deprecate_l1_rule / create_l1_rule / modify_l1_rule"
         )
 
-        # ── l2_task: target_domains dict (DD4 — cards fetched by L2Manager) ──
+        # ── l2_task: criteria only — L2 gets cards from L1's selected_nodes ──
         l2_task = json.dumps({
             "criteria": (
                 "### Judgment Criteria\n"
@@ -400,11 +400,9 @@ class LearningEnv(Environment):
                 "that were helpful or misleading during reflection\n"
                 "- **create**: cross-domain generalization (multiple similar cards -> one higher-level card)"
             ),
-            "target_domains": list(l2_triggers.keys()),
-            "triggers": l2_triggers,
         }, ensure_ascii=False)
 
-        # ── l3_task: target_domains dict (DD4 — skills fetched by L3Manager) ──
+        # ── l3_task: criteria only — L3 gets skills from L2's selected_nodes ──
         l3_task = json.dumps({
             "criteria": (
                 "### Judgment Criteria\n"
@@ -415,8 +413,6 @@ class LearningEnv(Environment):
                 "- **create**: compile >= 3 high-activation same-domain cards into SKILL.md "
                 "(write full YAML frontmatter + Markdown procedure)"
             ),
-            "target_domains": list(l3_triggers.keys()),
-            "triggers": l3_triggers,
         }, ensure_ascii=False)
 
         hint_domains = ["learning/compile"] + sorted(all_domains)

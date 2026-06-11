@@ -176,6 +176,8 @@ def main():
     )
 
     # ── l2_task (L2 only) ──
+    # ── l2_task (L2 only) — criteria only, no target_domains
+    #     L2 receives cards based on L1's query + selected_nodes, not from env
     l2_task = json.dumps({
         "criteria": (
             f"### Context\n{integration.get('l2_summary', 'No L2-related findings.')}\n\n"
@@ -183,14 +185,11 @@ def main():
             f"- **create**: new strategic pattern discovered, create a knowledge card\n"
             f"- **modify**: existing card content needs update based on game results\n"
             f"- **deprecate**: card was used but proved ineffective\n\n"
-            f"### Execution Records\n"
-            f"{len(learning_units)} records from doudizhu games.\n\n"
             f"Use tools: deprecate_l2_card / create_l2_card / modify_l2_card"
         ),
-        "target_domains": ["game/doudizhu"],
     }, ensure_ascii=False)
 
-    # ── l3_task (L3 only) ──
+    # ── l3_task (L3 only) — criteria only
     l3_task = json.dumps({
         "criteria": (
             f"### Context\n{integration.get('l3_summary', 'No L3-related findings.')}\n\n"
@@ -198,11 +197,8 @@ def main():
             f"- **create**: compile high-frequency patterns into a reusable skill\n"
             f"- **modify**: update existing skill based on execution experience\n"
             f"- **deprecate**: remove a skill that was misleading or unused\n\n"
-            f"### Execution Records\n"
-            f"{len(learning_units)} records from doudizhu games.\n\n"
             f"Use tools: deprecate_l3_skill / create_l3_skill / modify_l3_skill"
         ),
-        "target_domains": ["game/doudizhu"],
     }, ensure_ascii=False)
 
     task = TaskObservation(

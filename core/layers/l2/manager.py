@@ -248,22 +248,12 @@ class L2Agent(LayerAgent):
         system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
 
-        # Inject l2_task cards for consolidation
+        # Inject l2_task criteria if present
         l2_task_raw = state.get("l2_task", "")
         l2_task = json.loads(l2_task_raw) if isinstance(l2_task_raw, str) and l2_task_raw else {}
-        target_domains = l2_task.get("target_domains", [])
-        if is_consolidation and target_domains:
-            cards_text = self._format_consolidation_cards(target_domains, {})
-
         l2_task_section = ""
         if is_consolidation and l2_task.get("criteria"):
-            triggers = l2_task.get("triggers", {})
-            trigger_lines = [f"- {d} ({triggers.get(d, 'unknown')})" for d in target_domains]
-            l2_task_section = (
-                f"[L2 整理任务]\n"
-                f"Target domains:\n" + "\n".join(trigger_lines) + "\n\n"
-                f"{l2_task.get('criteria', '')}\n\n"
-            )
+            l2_task_section = f"[L2 整理任务]\n{l2_task.get('criteria', '')}\n\n"
         user = (
             f"[上层查询]\n{query}\n\n"
             f"{nodes_section}"
@@ -315,13 +305,6 @@ class L2Agent(LayerAgent):
             )
         system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
-
-        # Inject per-domain cards for consolidation stage2
-        l2_task_raw2 = state.get("l2_task", "")
-        l2_task2 = json.loads(l2_task_raw2) if isinstance(l2_task_raw2, str) and l2_task_raw2 else {}
-        target_domains2 = l2_task2.get("target_domains", [])
-        if l2_fmt and target_domains2:
-            cards_text = self._format_consolidation_cards(target_domains2, {})
 
         if l2_fmt:
             user = (
