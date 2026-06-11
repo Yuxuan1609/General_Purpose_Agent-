@@ -279,7 +279,8 @@ class L2Agent(LayerAgent):
             f"[当前局面]\n{current}\n\n"
             f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
         )
-        return self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
+        return self._call_llm(system, user, schema=self.STAGE1_SCHEMA,
+                             tools=self._get_tools("l2"), layer="l2")
 
     def stage2(self, query: str, meta: str, state: dict,
                selected_nodes: list[dict], stage1_result: dict,
@@ -346,7 +347,8 @@ class L2Agent(LayerAgent):
 
         return self._call_llm(system, user,
                               schema=None if l2_fmt else self.STAGE2_SCHEMA,
-                              tools=tools if l2_fmt else None, layer="l2")
+                              tools=tools if l2_fmt else self._get_tools("l2"),
+                              layer="l2")
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
         all_cards = []

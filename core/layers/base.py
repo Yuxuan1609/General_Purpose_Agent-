@@ -65,6 +65,16 @@ class LayerAgent(ABC):
         """Attach a LayerInjector for tool calling capability."""
         self._injector = injector
 
+    def _get_tools(self, layer: str) -> list[dict] | None:
+        """Return tools from injector for the given layer, if available."""
+        if self._injector is None:
+            return None
+        getter = getattr(self._injector, "get_tools_for_layer", None)
+        if getter is None:
+            return None
+        tools = getter(layer)
+        return tools if tools else None
+
     def _call_llm(self, system: str, user: str,
                   schema: dict | None = None,
                   tools: list[dict] | None = None,

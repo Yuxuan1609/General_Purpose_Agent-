@@ -119,8 +119,8 @@ class L3Agent(LayerAgent):
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
-            f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度\n"
-            f"- L3（你）：管理 SKILL.md 技能，负责标准化流程执行\n\n"
+            f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
+            f"- L3（你）：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
             f"## 领域边界\n"
             f"你只管理 L3 技能（Skills / SKILL.md）。\n"
             f"不要修改 L1 的行为准则或 L2 的知识卡片。\n\n"
@@ -194,7 +194,7 @@ class L3Agent(LayerAgent):
                            [t["function"]["name"] for t in tools])
             schema = None
         else:
-            tools = None
+            tools = self._get_tools("l3")
             schema = self.EXECUTE_SCHEMA
         result = self._call_llm(system, user, schema=schema, tools=tools, layer="l3")
         # Normalize: consolidation mode returns {"reply": ...}, exec mode returns {"result": ...}

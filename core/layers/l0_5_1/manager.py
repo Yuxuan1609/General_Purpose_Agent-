@@ -198,7 +198,8 @@ class L1Agent(LayerAgent):
             static_context=f"[领域节点]\n{nodes_text}" if nodes_text else "",
         )
         user = self._build_user_context(state)
-        result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA)
+        result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA,
+                                tools=self._get_tools("l1"), layer="l1")
         return result
 
     def stage2(self, meta: str, state: dict,
@@ -240,7 +241,7 @@ class L1Agent(LayerAgent):
                            [t["function"]["name"] for t in tools])
             schema = None
         else:
-            tools = None
+            tools = self._get_tools("l1")
             schema = self.STAGE2_SCHEMA
         result = self._call_llm(system, user, schema=schema, tools=tools, layer="l1")
 
