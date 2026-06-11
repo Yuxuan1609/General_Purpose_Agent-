@@ -47,6 +47,29 @@ class L1Agent(LayerAgent):
         "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
     }
 
+    L1_DECISION_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean"},
+            "result": {"type": "string", "description": "最终决策文本"},
+            "queries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "向下层 L2 查询的问题"},
+                        "domains_hint": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "建议查询的领域",
+                        },
+                    },
+                },
+            },
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "reasoning"],
+    }
+
     # Consolidation tools — modifications via tool calls
     _L1_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
@@ -173,45 +196,22 @@ class L1Agent(LayerAgent):
             f"[对局历史]\n{history or '（无）'}"
         )
 
-    def stage1(self, meta: str, state: dict, domain_nodes: list[dict] | None = None) -> dict:
-        """Stage1: produce query + domain targeting.
+    def decide(self, meta: str, state: dict, history: list,
+               tools: list[dict] | None = None, layer: str = "l1") -> dict:
+        """Single decision step for L1 while loop.
 
-        Merges L2's domain-node selection into L1. Domain nodes injected into
-        system prompt (static context), not user prompt.
-        """
-        nodes = domain_nodes or []
-        nodes_text = "\n".join(
-            f"{i + 1}. {n.path if hasattr(n, 'path') else n['name']}\n"
-            f"   {n.description if hasattr(n, 'description') else n.get('description','')}"
-            for i, n in enumerate(nodes)
-        )
-        instruction = (
-            "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。\n"
-            "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
-            "你的 query 应结合本层的行为准则和任务目标，给出清晰的拆解任务交给 L2 层。\n\n"
-            "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 call_l2=false。\n"
-            "如果任务需要调用工具（web_search、terminal、read_file 等），必须下发给 L2/L3 执行，设置 call_l2=true。\n"
-            "从领域节点中选出最相关的 1-5 个节点。不需要领域知识时返回空的 domain_nodes（[]）。"
-        )
-        system = self._build_system_prompt(
-            instruction, meta,
-            static_context=f"[领域节点]\n{nodes_text}" if nodes_text else "",
-        )
-        user = self._build_user_context(state)
-        result = self._call_llm(system, user, schema=self.STAGE1_SCHEMA,
-                                tools=self._get_tools("l1"), layer="l1")
-        return result
-
-    def stage2(self, meta: str, state: dict,
-               l2_result: dict | None = None) -> dict:
-        """Stage2: integrate L2 knowledge and produce final decision.
-        For consolidation: uses tool calls to record modifications.
+        Consolidation mode (l1_output_format in state):
+          - Uses _L1_CONSOLIDATION_TOOLS, returns {done:True, result, ...}
+        Normal mode:
+          - Uses L1_DECISION_SCHEMA
         """
         l1_fmt = state.get("l1_output_format")
 
         instruction = (
-            "你的职责：基于【行为准则】整合下层返回的知识信息，做出最终决策。"
-            "在 rules_used 中列出本次推理中实际引用到的行为准则的 id。"
+            "你的职责：基于【行为准则】将任务拆解为下层需要协助的具体子任务。\n"
+            "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
+            "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 done=true 并给出 result。\n"
+            "如果任务需要调用工具或需要下层知识，设置 done=false 并通过 queries 下发子任务。\n"
         )
         if l1_fmt:
             instruction += (
@@ -219,20 +219,37 @@ class L1Agent(LayerAgent):
                 "不要修改 L2 知识卡片或 L3 技能。"
                 "使用工具 deprecate_l1_rule / create_l1_rule / modify_l1_rule 记录修改。"
             )
-        system = self._build_system_prompt(instruction, meta)
 
-        l2 = l2_result or {}
-        reply = l2.get("reply", "")
-        reasoning = l2.get("reasoning", "")
-        parts = []
-        if reply:
-            parts.append(f"L2回复: {reply}")
-        if reasoning:
-            parts.append(f"L2推理: {reasoning}")
-        response_text = "\n\n".join(parts) if parts else "（下层未返回信息）"
-        l1_task_text = state.get("l1_task", "")
-        l1_task_section = f"[L1 整理任务]\n{l1_task_text}\n\n" if l1_task_text else ""
-        user = f"{l1_task_section}{self._build_user_context(state)}\n\n[下层任务返回]\n{response_text}"
+        domain_nodes = state.get("domain_nodes", [])
+        nodes_text = ""
+        if domain_nodes:
+            lines = []
+            for i, n in enumerate(domain_nodes):
+                path = n.path if hasattr(n, 'path') else n.get('name', '?')
+                desc = n.description if hasattr(n, 'description') else n.get('description', '')
+                lines.append(f"{i + 1}. {path}\n   {desc}")
+            nodes_text = "\n".join(lines)
+
+        static_context = f"[领域节点]\n{nodes_text}" if nodes_text else ""
+        system = self._build_system_prompt(instruction, meta, static_context=static_context)
+
+        user_parts = [self._build_user_context(state)]
+        if history:
+            history_lines = []
+            for h in history:
+                q_text = h.get("query", "")
+                l2_reply = h.get("l2_reply", {})
+                reply_text = ""
+                if isinstance(l2_reply, dict):
+                    l1_part = l2_reply.get("l0_5_1", {})
+                    if isinstance(l1_part, dict):
+                        reply_text = l1_part.get("reply", "")
+                if not reply_text:
+                    reply_text = str(l2_reply)[:200]
+                history_lines.append(f"  Round {h.get('round', '?')}: query='{q_text}' → L2: {reply_text[:200]}")
+            if history_lines:
+                user_parts.append("[L2 历史返回]\n" + "\n".join(history_lines))
+        user = "\n\n".join(user_parts)
 
         if l1_fmt:
             self._setup_l1_consolidation()
@@ -241,10 +258,18 @@ class L1Agent(LayerAgent):
                            [t["function"]["name"] for t in tools])
             schema = None
         else:
-            tools = self._get_tools("l1")
-            schema = self.STAGE2_SCHEMA
-        result = self._call_llm(system, user, schema=schema, tools=tools, layer="l1")
+            tools = self._get_tools(layer)
+            schema = self.L1_DECISION_SCHEMA
 
+        result = self._call_llm(system, user, schema=schema, tools=tools, layer=layer)
+
+        if l1_fmt:
+            result = {
+                "done": True,
+                "result": result.get("reply", ""),
+                "reasoning": "",
+                "queries": [],
+            }
         return result
 
 
@@ -261,13 +286,14 @@ class L0_5_1Manager(LayerManager):
     def __init__(self, meta_driver, philosophy, auxiliary_llm=None,
                  downstream: LayerManager | None = None,
                  upward=None, downward=None,
-                 domain_registry=None):
+                 domain_registry=None, max_rounds=3):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._meta = meta_driver
         self._philosophy = philosophy
         self._agent = L1Agent(auxiliary_llm, philosophy) if auxiliary_llm else None
         self._registry = domain_registry
-        self._final_result: dict | None = None
+        self.max_rounds = max_rounds
+        self._l1_notify: dict | None = None
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -280,64 +306,82 @@ class L0_5_1Manager(LayerManager):
         else:
             data = msg
 
-        obs: TaskObservation = data
+        obs: TaskObservation = data if isinstance(data, TaskObservation) else TaskObservation(**data)
         meta = obs.meta
 
         if self._agent is None:
             logger.warning("L1Agent not initialized (no auxiliary_llm), skipping")
-            self._final_result = {"done": True, "result": "", "reasoning": "no agent"}
+            self._l1_notify = {"done": True, "result": "", "reasoning": "no agent"}
             return
 
-        for loop in range(1, L1Agent.MAX_LOOPS + 1):
-            logger.debug("── L1 Stage 1 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
-            domain_nodes = []
+        state = dict(obs.state or {})
+        history: list[dict] = []
+
+        for round_idx in range(1, self.max_rounds + 1):
+            logger.debug("── L1 decide [round %d/%d] ──", round_idx, self.max_rounds)
+
             if self._registry:
-                domain_nodes = self._registry.list_all()
-            stage1_result = self._agent.stage1(meta, obs.state,
-                                                domain_nodes=domain_nodes)
-            query_text = stage1_result.get("query", "")
-            selected_nodes = stage1_result.get("domain_nodes", [])
-            call_l2 = stage1_result.get("call_l2", True)
-            logger.debug("  query: %s", query_text)
-            logger.debug("  call_l2: %s", call_l2)
-            for n in selected_nodes:
-                logger.debug("    node: %s (score=%s)", n.get("name"), n.get("score"))
+                state["domain_nodes"] = self._registry.list_all()
 
-            need_l2 = call_l2 and bool(selected_nodes or query_text)
-            if self._downstream and need_l2:
-                # E3: pass data via LayerMessage payload, not obs.state mutation
-                q_msg = self._downward.wrap_query(
-                    payload={"obs": obs, "query": query_text,
-                             "selected_nodes": selected_nodes},
-                    source=self.name, target=self._downstream.name,
-                    trace_id=trace_id,
-                )
-                self._downstream.query(q_msg, trace_id)
-
-            # E3: read L2 results only if L2 was queried
-            if need_l2:
-                l2_result = self._downstream._result if self._downstream else {}
-            else:
-                l2_result = {}
-
-            logger.debug("── L1 Stage 2 [loop %d/%d] ──", loop, L1Agent.MAX_LOOPS)
-            result = self._agent.stage2(meta, obs.state,
-                                        l2_result=l2_result)
+            tools = self._agent._get_tools("l1") if self._agent else None
+            result = self._agent.decide(
+                meta=meta, state=state, history=history,
+                tools=tools, layer="l1",
+            )
             logger.debug("  result: done=%s result=%s",
                          result.get("done"), str(result.get("result", ""))[:200])
 
             if result.get("done"):
-                self._final_result = result
+                self._l1_notify = {
+                    "done": True,
+                    "result": result.get("result", ""),
+                    "reasoning": result.get("reasoning", ""),
+                }
                 return
 
-        # TODO: When MAX_LOOPS > 1, loop allows multi-round refinement.
-        # Use the last stage2 result (even if incomplete) rather than empty.
-        self._final_result = result.copy()
-        self._final_result["done"] = True
+            queries = result.get("queries", [])
+            if not queries:
+                self._l1_notify = {
+                    "done": True,
+                    "result": result.get("result", ""),
+                    "reasoning": result.get("reasoning", ""),
+                }
+                return
+
+            for q in queries:
+                sub_state = {
+                    **state,
+                    "query_context": q,
+                    "domains_hint": q.get("domains_hint", []),
+                }
+                sub_obs = TaskObservation(meta=q["query"], state=sub_state)
+                q_msg = self._downward.wrap_query(
+                    payload=sub_obs,
+                    source=self.name,
+                    target=self._downstream.name,
+                    trace_id=trace_id,
+                )
+                self._downstream.query(q_msg, trace_id)
+                l2_notify = self._downstream.collect_notify()
+                history.append({
+                    "round": round_idx,
+                    "query": q["query"],
+                    "l2_reply": l2_notify,
+                })
+                state[f"l2_round_{round_idx}"] = l2_notify
+
+        # Force terminate
+        logger.debug("── L1 force terminate (max_rounds=%d) ──", self.max_rounds)
+        force = self._agent._call_llm(
+            system=self._agent._build_system_prompt("force_terminate", meta),
+            user="鉴于已超过最大轮次，基于已有信息给出最终决策。",
+            layer="l1",
+        )
+        self._l1_notify = {"done": True, "result": str(force), "reasoning": "max_rounds"}
 
     def notify(self) -> Any:
-        if self._final_result:
-            result = dict(self._final_result)
+        if self._l1_notify:
+            result = dict(self._l1_notify)
             if self._agent:
                 mods = self._agent.get_pending_mods()
                 if mods:

@@ -13,13 +13,13 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 
 | 层 | 职责 |
 |----|------|
-| **L(0.5+1)** | 不可变宪法 + 可演化行为规则；含 L1Agent（两阶段 V-structure） |
-| **L2** | 概率性知识卡片；含 L2Agent（三阶段 V-structure） |
-| **L3** | SKILL.md 技能执行；domain 确定性匹配 + L3Agent（LLM 选择+执行） |
+| **L(0.5+1)** | 不可变宪法 + 可演化行为规则；含 L1Agent（while-loop decide） |
+| **L2** | 概率性知识卡片；含 L2Agent（while-loop decide） |
+| **L3** | SKILL.md 技能执行；domain 确定性匹配 + L3Agent（while-loop decide） |
 
 > **L4 已取消**。原计划作为静态知识存储层（L3 dispatch 目标），现已转化为两个共享机制：**KnowledgeCapability**（静态知识查询，所有层可调用）和 **ToolCapability**（工具系统，层可见 allowlist）。两者通过 `CapabilityRegistry` 统一注册，`LayerInjector` 注入各层 Agent 的多轮 tool call 循环。详见 [capability/](capability/)。
 
-每层 Manager 驱动 V-structure 循环：**Agent（LLM 决策）↔ Manager（编排/状态管理）↔ Comm Agent（确定性协议）**。
+每层 Manager 驱动 Agent while-loop 决策循环：**Agent（LLM 决策）↔ Manager（编排/状态管理）↔ Comm Agent（确定性协议）**。
 
 > **核心洞察**：Reflection 不需要独立的架构设施。将其建模为 **LearningEnv**（实现 `Environment` 接口的普通环境），与 GameEnv 共享 Executor + Layers + ToolUse。学习策略通过 `domain="learning"` 走现有链式通道，系统可以学到"如何学习"（自举）。
 
@@ -45,8 +45,8 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 
 ```
 Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
- 各层 Manager 驱动 V-structure Agent 循环
- RESPONSE 链返回 → NOTIFY → Executor 组装 prompt → LLM → action
+ 各层 Manager 驱动 Agent while-loop 循环
+ NOTIFY 链返回 → Executor 组装 prompt → LLM → action
  ExecutionRecord → pending/
 ```
 

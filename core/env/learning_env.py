@@ -48,40 +48,126 @@ def load_consolidation_spec(spec_path: Path | str | None = None) -> dict:
 # Per-layer output format — each layer checks its key in state and merges
 # the field schema into its JSON output. Field descriptions reference
 # the existing knowledge format for that layer.
-_L1_OUTPUT = {
-    "l1_modifications": [
-        {"target": "l1/<rule_id> (target for modify/deprecate; arbitrary name for create)",
-         "type": "update | create | deprecate",
-         "payload": {
-             "content": "string (full rule text, ~1-2 sentences matching existing L1 rule granularity)",
-             "reason": "string (why, citing specific execution record evidence)",
-         }},
-    ],
+_L1_OUTPUT: dict = {
+    "type": "object",
+    "properties": {
+        "response": {
+            "type": "object",
+            "properties": {
+                "result": {"type": "string"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["result", "reasoning"],
+        },
+        "notify": {
+            "type": "object",
+            "properties": {
+                "l1_modifications": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string"},
+                            "type": {"type": "string", "enum": ["update", "create", "deprecate"]},
+                            "payload": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                },
+                                "required": ["content", "reason"],
+                            },
+                        },
+                        "required": ["target", "type"],
+                    },
+                },
+            },
+        },
+    },
+    "required": ["response"],
 }
 
-_L2_OUTPUT = {
-    "l2_modifications": [
-        {"target": "l2/<card_id> (existing card id for update/deprecate; arbitrary id for create)",
-         "type": "update | create | deprecate",
-         "payload": {
-             "content": "string (full card content, matching existing KnowledgeCard granularity: domain-specific strategy tip)",
-             "reason": "string (why this change)",
-             "domain": "string (domain path, only for create, e.g. game/leduc)",
-             "confidence": "float 0.1-1.0 (only for create, default 0.5)",
-         }},
-    ],
+_L2_OUTPUT: dict = {
+    "type": "object",
+    "properties": {
+        "response": {
+            "type": "object",
+            "properties": {
+                "reply": {"type": "string"},
+                "cards": {"type": "array", "items": {"type": "string"}},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["reply", "reasoning"],
+        },
+        "notify": {
+            "type": "object",
+            "properties": {
+                "l2_modifications": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string"},
+                            "type": {"type": "string", "enum": ["update", "create", "deprecate"]},
+                            "payload": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                    "domain": {"type": "string"},
+                                    "confidence": {"type": "number"},
+                                },
+                                "required": ["content", "reason"],
+                            },
+                        },
+                        "required": ["target", "type"],
+                    },
+                },
+            },
+        },
+    },
+    "required": ["response"],
 }
 
-_L3_OUTPUT = {
-    "l3_modifications": [
-        {"target": "l3/<skill_name> (existing skill name for update/deprecate; new name for create)",
-         "type": "update | create | deprecate",
-         "payload": {
-             "content": "string (full SKILL.md content: YAML frontmatter + markdown body, matching existing skill format)",
-             "reason": "string (why this change)",
-             "domain": "string (domain path, only for create)",
-         }},
-    ],
+_L3_OUTPUT: dict = {
+    "type": "object",
+    "properties": {
+        "response": {
+            "type": "object",
+            "properties": {
+                "result": {"type": "string"},
+                "skills_used": {"type": "array", "items": {"type": "string"}},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["result", "reasoning"],
+        },
+        "notify": {
+            "type": "object",
+            "properties": {
+                "l3_modifications": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string"},
+                            "type": {"type": "string", "enum": ["update", "create", "deprecate"]},
+                            "payload": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                    "domain": {"type": "string"},
+                                },
+                                "required": ["content", "reason"],
+                            },
+                        },
+                        "required": ["target", "type"],
+                    },
+                },
+            },
+        },
+    },
+    "required": ["response"],
 }
 
 

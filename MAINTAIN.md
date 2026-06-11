@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-11 | **Agent While-Loop Design**：各层删除硬编码 stage1/stage2/stage3 流水线，统一为 `decide()` + Manager while 循环。L1Agent/L2Agent/L3Agent 新增 `decide()` 方法；L0_5_1Manager/L2Manager/L3Manager 的 `query()` 改为 while 循环，新增 `max_rounds` 配置。`LayerAgent` 新增 `decide()` 抽象方法。 |
 | 2026-06-08 | **Domain System Redesign**：新增 `core/domain_registry.py`（DomainNode dataclass + DomainRegistry 类）。所有可检索实体统一 `available_domains: list[str]` 字段。Registry 提供反向索引 + 双路召回（primary/explore）。L1/L2/L3 managers 接入 registry，废弃 `L2_DOMAIN_NODES` 硬编码。`Domain.level` 标记 deprecated。 |
 | 2026-06-07 | **Phase 3 实现**：新增 `capability/` 模块（Capability ABC + ToolCapability + KnowledgeCapability + LayerInjector）。`LayerAgent._call_llm()` 支持多轮 tool call 循环（role:"tool" 消息）。`LLMClient.chat()` 支持 tools 参数 + ToolCall.id。`LearningEnv` 新增 needs_consolidation/get_consolidation_level + consolidation.yaml spec。 |
 | 2026-06-05 | **Phase 2.3 清理**：删除所有旧 Reflection 系统 + `MetaDriver` 旧触发器。迁移 `ThresholdScorer`。 |
@@ -95,7 +96,8 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。DeepSeek JSON mode 统一调用 + 日志 | L1Agent, L2Agent | LLMClient.chat(json_mode=True) |
-| `LayerAgent._call_llm` | `(system, user, schema) → dict` | 注入 JSON schema 到 system prompt → LLM → json.loads 解析 | L1/L2 stage 方法 | LLMClient.chat() |
+| `LayerAgent._call_llm` | `(system, user, schema) → dict` | 注入 JSON schema 到 system prompt → LLM → json.loads 解析 → 失败时 fallback 到 `robust_parse`（markdown 代码块提取 + bracket 修复 + 语法修复） | L1/L2 stage 方法 | LLMClient.chat(), robust_parse() |
+| `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | — |
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
@@ -128,26 +130,23 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `L3Manager` | `__init__(skill_layer, downstream, upward, downward, auxiliary_llm)` | L3 层 Manager，包裹 SkillLayer + L3Agent | build_chain() | — |
-| `L3Manager.query` | `(msg, trace_id) → None` | 确定性匹配技能 → L3Agent(LLM) 选择+执行 → 存储结果 | L2Manager._propagate | SkillLayer.match(), L3Agent.execute() |
+| `L3Manager.query` | `(msg, trace_id) → None` | 确定性匹配技能 → while 循环 decide() 决策执行 | L2Manager._propagate | SkillLayer.match(), L3Agent.decide() |
 | `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
 | `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
 | `L3Agent` | `__init__(llm_client)` | L3 LLM Agent：基于匹配技能执行认知任务 | L3Manager.query() | — |
-| `L3Agent.execute` | `(meta, state) → dict{skills_used, result, reasoning}` | 选择相关技能 + 基于技能推理 + 产出执行结果 | L3Manager.query() | _call_llm() |
+| `L3Agent.decide` | `(meta, state, context, tools, layer) → dict{done, result, skills_used, reasoning}` | 单步决策：选择技能执行/完成 | L3Manager.query() | _call_llm() |
 
 ## core/layers/l2/manager.py (Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent | build_chain() | — |
-| `L2Manager.query` | `(msg, trace_id) → None` | 重写：驱动 V-structure 循环 (Stage1→Stage2→propagate→Stage3) | L0_5_1 DownwardComm | L2Agent.stage1/2/3(), _propagate() |
+| `L2Manager.query` | `(msg, trace_id) → None` | while 循环 + decide() → propagate queries_to_L3 → 收集 NOTIFY | L0_5_1 DownwardComm | L2Agent.decide(), _propagate(), collect_notify() |
 | `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
-| `L2Manager._enrich_cards` | `(obs, selected_nodes) → None` | 从 selected_nodes 提取知识卡片写入 obs.state["l2_cards"] | query() | FlexibleKnowledge.get_domain_cards() |
 | `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
-| `L2Agent` | `__init__(llm_client, knowledge, domain_nodes)` | L2 层 LLM Agent，三阶段 V-structure | L2Manager | — |
-| `L2Agent.stage1` | `(query, meta, state) → list[dict]` | 对 domain nodes 打分，选 top-5 | L2Manager.query() | _call_llm() |
-| `L2Agent.stage2` | `(query, meta, state, selected_nodes) → dict` | 筛选知识卡片(≤15)，判断是否调 L3 | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
-| `L2Agent.stage3` | `(query, meta, state, selected_nodes, stage2_result) → dict` | 整合 L3 响应 + 上下文 → 最终 NOTIFY | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
-| `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | stage2/stage3 | FlexibleKnowledge.get_domain_cards() |
+| `L2Agent` | `__init__(llm_client, knowledge, domain_nodes)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
+| `L2Agent.decide` | `(query, meta, state, context, tools, layer) → dict{done, reply, selected_nodes, selected_cards, queries_to_L3, reasoning}` | 单步决策：选择节点/查询L3/完成 | L2Manager.query() | _get_cards_for_nodes(), _call_llm() |
+| `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | decide() | FlexibleKnowledge.get_domain_cards() |
 | `L2_DOMAIN_NODES` | `list[dict{name, description}]` | 硬编码 seed 领域节点 (game/leduc, game/doudizhu) | L2Agent.stage1 | — |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
@@ -155,12 +154,11 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream, upward, downward)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
-| `L0_5_1Manager.query` | `(msg, trace_id) → None` | 重写：驱动 V-structure 循环 (Stage1→传给L2→Stage2) | Executor / 上层 | L1Agent.stage1(), downward.wrap_query(), L1Agent.stage2() |
+| `L0_5_1Manager.query` | `(msg, trace_id) → None` | while 循环调用 decide() → propagate queries 到 L2 → 收集 NOTIFY | Executor / 上层 | self._agent.decide(), self._downward.wrap_query(), collect_notify() |
 | `L0_5_1Manager.notify` | `() → dict` | 返回 `{done, result, reasoning}` 或 `{status:"ok"}` | collect_notify() | — |
 | `L0_5_1Manager.process` | `(data) → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | LayerManager.query() | — |
-| `L1Agent` | `__init__(llm_client, philosophy)` | L1 层 LLM Agent，两阶段 V-structure | L0_5_1Manager | — |
-| `L1Agent.stage1` | `(meta, state) → str` | 判断"需要从下层获取什么知识" → query text | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
-| `L1Agent.stage2` | `(meta, state) → dict{done, result, reasoning}` | 整合 L2 知识卡片 + 行为准则 → 最终决策 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
+| `L1Agent` | `__init__(llm_client, philosophy)` | L1 层 LLM Agent，while-loop 决策 | L0_5_1Manager | — |
+| `L1Agent.decide` | `(meta, state, history, tools, layer) → dict{done, result, queries, reasoning}` | 单步决策：判断完成/下发子查询 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm() |
 | `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
 | `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
 
@@ -371,6 +369,12 @@
 | R3 | 工具挂载由 Agent 层自主决定（Environment 只设 state 信号） |
 | R4 | 持久化由 Executor 执行，Environment 只设 enable_learning 标志位 |
 | R5 | Layer feedback 通过 state 字段注入，不走旁路 |
+
+## core/json_repair.py — 2026-06-11 集成
+
+| 函数 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|------|------|------|-----------|---------|
+| `robust_parse` | `(text: str, schema: dict\|None) → dict` | 多层容错 JSON 解析：T0 直接解析 → T1 markdown 代码块提取 → T2 bracket 修复 → T3 语法修复 → T4 schema 字段级提取 | `LayerAgent._call_llm()` | `_try_json_loads`, `_extract_json_block`, `_bracket_repair`, `_syntax_repair`, `_schema_salvage` |
 
 ## config/layers/consolidation.yaml — Phase 3 新增
 

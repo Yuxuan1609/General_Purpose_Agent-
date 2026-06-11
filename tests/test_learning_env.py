@@ -314,12 +314,12 @@ class TestBuildTaskObservation:
         learning_env.reset("learn from leduc games")
         obs = learning_env.build_task_observation()
         fmt = obs.state["l1_output_format"]
-        assert "l1_modifications" in fmt
-        items = fmt["l1_modifications"]
-        assert isinstance(items, list)
-        assert items[0]["type"].startswith("update")
-        assert "l2_modifications" in obs.state["l2_output_format"]
-        assert "l3_modifications" in obs.state["l3_output_format"]
+        assert "properties" in fmt
+        assert "notify" in fmt["properties"]
+        assert "l1_modifications" in fmt["properties"]["notify"]["properties"]
+        assert "response" in fmt["properties"]
+        assert "l2_output_format" in obs.state
+        assert "l3_output_format" in obs.state
 
     def test_returns_none_before_reset(self, learning_env):
         obs = learning_env.build_task_observation()

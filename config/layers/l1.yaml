@@ -1,6 +1,9 @@
 # L1 — Philosophy Layer 配置
 # 行为规则种子与容量控制
 
+# 每层 Manager while 循环最大轮次
+max_rounds: 3
+
 # 种子行为规则（Agent 启动时注入，可经 L0.5 审批后修改）
 seed_rules:
   - "面对不确定信息时优先搜索验证，不要直接假设答案"
@@ -10,7 +13,7 @@ seed_rules:
 
 # 容量控制
 max_rules: 20
-  max_rule_length: 300
+max_rule_length: 300
 
 # 规则持久化路径（运行时数据，非配置）
 rules_path: data/layers/l1_rules.json

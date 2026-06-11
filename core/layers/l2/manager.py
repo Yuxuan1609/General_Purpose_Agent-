@@ -71,16 +71,45 @@ class L2Agent(LayerAgent):
     MAX_NODES = 5
     MAX_CARDS = 15
 
-    STAGE1_SCHEMA = {
-        "cards": ["string (筛选后的知识卡片内容)"],
-        "call_l3": "boolean",
-        "l3_task": "string (需要L3执行的任务，call_l3=false时可为空)",
-        "reasoning": "string (推理过程)",
-    }
-    STAGE2_SCHEMA = {
-        "reply": "string (对【上层查询】的最终回复)",
-        "cards": ["string (精选知识卡片内容)"],
-        "reasoning": "string (综合推理过程)",
+    L2_DECISION_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean"},
+            "reply": {"type": "string", "description": "回复上层查询的结论"},
+            "selected_nodes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "score": {"type": "number"},
+                    },
+                },
+            },
+            "selected_cards": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "card_id": {"type": "string"},
+                        "domain": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                },
+            },
+            "queries_to_L3": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {"type": "string", "description": "目标领域"},
+                        "task": {"type": "string", "description": "委托 L3 执行的技能任务"},
+                    },
+                },
+            },
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "reasoning"],
     }
 
     # Consolidation tools — modifications via tool calls
@@ -238,81 +267,56 @@ class L2Agent(LayerAgent):
             result += f"\n\n[L2 修改结果确认]\n{fb}"
         return result
 
-    def stage1(self, query: str, meta: str, state: dict,
-               selected_nodes: list[dict]) -> dict:
-        """Decompose: filter cards from selected nodes, decide L3 delegation.
+    def decide(self, query: str, meta: str, state: dict, context: dict,
+               tools: list[dict] | None = None, layer: str = "l2") -> dict:
+        """Single decision step for L2 while loop.
 
-        Lower layer: L3 — matches and executes skills per L2's task description.
+        Consolidation mode (l2_output_format in state):
+          - Uses _L2_CONSOLIDATION_TOOLS, returns {done:True, reply, ...}
+        Normal mode:
+          - Uses L2_DECISION_SCHEMA
         """
-        cards = self._get_cards_for_nodes(selected_nodes)
-        node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
-        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else (
-            "⚠️ 当前所选领域暂无知识卡片。你是这个领域的第一位探索者，请根据上层 query 和可用工具来完成任务。" if selected_nodes else "（无相关卡片）"
-        )
+        l2_fmt = state.get("l2_output_format")
+        selected_nodes = context.get("selected_nodes", [])
+        candidate_cards = context.get("candidate_cards", [])
+        l3_results = context.get("l3_results", [])
 
-        current = state.get("current", "")
-        is_consolidation = "l2_output_format" in state
+        # Build cards display
+        cards_text = ""
+        if candidate_cards:
+            lines = []
+            for c in candidate_cards:
+                domain = c.get("domain", c.domain.path if hasattr(c, 'domain') else '')
+                content = c.get("content", c.content if hasattr(c, 'content') else str(c))
+                lines.append(f"[{domain}] {content}")
+            cards_text = "\n".join(lines)
+        elif selected_nodes:
+            cards = self._get_cards_for_nodes(selected_nodes)
+            node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
+            cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else (
+                "⚠️ 当前所选领域暂无知识卡片。" if selected_nodes else "（无相关卡片）"
+            )
+        else:
+            cards_text = "（无相关卡片）"
+
+        l3_text = ""
+        if l3_results:
+            parts = []
+            for l3r in l3_results:
+                r = l3r.get("l3", {})
+                if isinstance(r, dict) and r.get("result"):
+                    parts.append(f"L3: {r['result'][:200]}")
+            l3_text = "\n".join(parts) if parts else "（L3 未返回信息）"
+
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
-            "需要 L3 时输出 call_l3=true 和 l3_task（一句话任务描述）；否则 call_l3=false。\n\n"
-            "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
+            "当信息充分时设置 done=true 并给出 reply。\n"
+            "当需要更多信息时：\n"
+            "  - 通过 selected_nodes 选择相关领域节点\n"
+            "  - 通过 queries_to_L3 向 L3 下发技能任务\n"
+            "  - 后续轮次中你会收到 L3 的执行结果\n"
             "注意：你负责任务的部分执行和拆解下发，不做最终决策。"
-        )
-        system = self._build_system_prompt(instruction, meta)
-        nodes_section = self._format_domain_nodes(selected_nodes)
-
-        # Inject l2_task criteria if present
-        l2_task_raw = state.get("l2_task", "")
-        l2_task = json.loads(l2_task_raw) if isinstance(l2_task_raw, str) and l2_task_raw else {}
-        l2_task_section = ""
-        if is_consolidation and l2_task.get("criteria"):
-            l2_task_section = f"[L2 整理任务]\n{l2_task.get('criteria', '')}\n\n"
-        user = (
-            f"[上层查询]\n{query}\n\n"
-            f"{nodes_section}"
-            f"{l2_task_section}"
-            f"[学习数据]\n{self._build_learning_section(state)}\n\n"
-            f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
-        ) if state.get("l1_output_format") else (
-            f"[上层查询]\n{query}\n\n"
-            f"{nodes_section}"
-            f"{l2_task_section}"
-            f"[当前局面]\n{current}\n\n"
-            f"[知识卡片 ({len(cards)} 张)]\n{cards_text}"
-        )
-        return self._call_llm(system, user, schema=self.STAGE1_SCHEMA,
-                             tools=self._get_tools("l2"), layer="l2")
-
-    def stage2(self, query: str, meta: str, state: dict,
-               selected_nodes: list[dict], stage1_result: dict,
-               l3_skills: list[dict] | None = None,
-               l3_result: dict | None = None) -> dict:
-        """Integrate: combine cards + L3 skills → final NOTIFY reply.
-        Only sees L3's result + reasoning, not L3's modifications.
-        """
-        l2_fmt = state.get("l2_output_format")
-
-        cards = self._get_cards_for_nodes(selected_nodes)
-        node_scores = {n.get("name", ""): n.get("score", 0) for n in selected_nodes}
-        cards_text = self._format_cards_with_relevance(cards, node_scores) if cards else (
-            "⚠️ 当前所选领域暂无知识卡片。你是这个领域的第一位探索者，请根据上层 query 和可用工具来完成任务。" if selected_nodes else "（无相关卡片）"
-        )
-
-        skills = l3_skills or []
-        l3 = l3_result or {}
-        l3_reply = l3.get("result", "")
-        l3_reasoning = l3.get("reasoning", "")
-        parts = []
-        if l3_reply:
-            parts.append(f"L3执行结果: {l3_reply}")
-        if l3_reasoning:
-            parts.append(f"L3推理: {l3_reasoning}")
-        l3_text = "\n".join(parts) if parts else "（L3 未返回信息）"
-
-        instruction = (
-            "你的职责：基于上层拆解的任务和筛选出的知识卡片，整合 L3 返回的执行结果，"
-            "给出最终答复。"
         )
         if l2_fmt:
             instruction += (
@@ -320,39 +324,40 @@ class L2Agent(LayerAgent):
                 "不要修改 L1 行为准则或 L3 技能。"
                 "使用工具 deprecate_l2_card / create_l2_card / modify_l2_card 记录修改。"
             )
+
         system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
 
+        user = (
+            f"[上层查询]\n{query}\n\n"
+            f"{nodes_section}"
+            f"[学习数据]\n{self._build_learning_section(state)}\n\n"
+            f"[知识卡片]\n{cards_text}\n\n"
+            f"[L3 返回]\n{l3_text if l3_text else '（无）'}"
+        )
+
         if l2_fmt:
-            user = (
-                f"[上层查询]\n{query}\n\n"
-                f"{nodes_section}"
-                f"[学习数据]\n{self._build_learning_section(state)}\n\n"
-                f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
-                f"[L3 返回]\n{l3_text}\n\n"
-                f"[Stage1 决策]\n"
-                f"call_l3: {stage1_result.get('call_l3', False)}\n"
-                f"l3_task: {stage1_result.get('l3_task', '')}"
-            )
             self._setup_l2_consolidation()
             tools = self._L2_CONSOLIDATION_TOOLS
             self._log.debug("  consolidation tools: %s",
                            [t["function"]["name"] for t in tools])
             schema = None
         else:
-            current = state.get("current", "")
-            user = (
-                f"[上层查询]\n{query}\n\n"
-                f"{nodes_section}"
-                f"[当前局面]\n{current}\n\n"
-                f"[知识卡片 ({len(cards)} 张)]\n{cards_text}\n\n"
-                f"[L3 返回]\n{l3_text}"
-            )
+            schema = self.L2_DECISION_SCHEMA
 
-        return self._call_llm(system, user,
-                              schema=None if l2_fmt else self.STAGE2_SCHEMA,
-                              tools=tools if l2_fmt else self._get_tools("l2"),
-                              layer="l2")
+        result = self._call_llm(system, user, schema=schema, tools=tools, layer=layer)
+
+        if l2_fmt:
+            result = {
+                "done": True,
+                "reply": result.get("reply", ""),
+                "selected_nodes": [],
+                "selected_cards": [],
+                "queries_to_L3": [],
+                "reasoning": "",
+            }
+
+        return result
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
         all_cards = []
@@ -392,13 +397,14 @@ class L2Manager(LayerManager):
 
     def __init__(self, knowledge, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None):
+                 domain_registry=None, max_rounds=3):
         super().__init__("l2", downstream, upward=upward, downward=downward)
         self._knowledge = knowledge
         self._agent = L2Agent(auxiliary_llm, knowledge) if auxiliary_llm else None
         self._registry = domain_registry
-        self._result: dict | None = None
-        self._cards: list[dict] = []   # E3: local storage, not obs.state
+        self.max_rounds = max_rounds
+        self._l2_notify: dict | None = None
+        self._cards: list[dict] = []
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -411,7 +417,6 @@ class L2Manager(LayerManager):
         else:
             data = msg
 
-        # E3: payload is a composite dict {obs, query, selected_nodes} or TaskObservation directly
         if isinstance(data, dict):
             obs = data.get("obs")
             query: str = data.get("query", "")
@@ -422,7 +427,6 @@ class L2Manager(LayerManager):
             selected_nodes = []
         meta = obs.meta if obs else ""
 
-        # Enrich selected_nodes with correlation scores from domain registry
         if self._registry and selected_nodes:
             for n in selected_nodes:
                 name = n.get("name", n.get("path", ""))
@@ -433,67 +437,67 @@ class L2Manager(LayerManager):
         if self._agent is None:
             logger.warning("L2Agent not initialized (no auxiliary_llm), skipping")
             self._cards = []
-            self._result = {"reply": "", "cards": [], "reasoning": "no agent"}
+            self._l2_notify = {"reply": "", "cards": [], "reasoning": "no agent"}
             self._propagate(obs, trace_id)
             return
 
-        # ═══ Stage 1: Card Filter + L3 Decision (Decompose) ═══
-        logger.debug("  ═══ L2 Stage 1 — Card Filter ═══")
-        stage1_result = self._agent.stage1(query, meta, obs.state, selected_nodes)
-        if not isinstance(stage1_result, dict):
-            logger.warning("L2 stage1 returned non-dict: %s", type(stage1_result))
-            stage1_result = {"cards": [], "call_l3": False, "l3_task": "",
-                             "reasoning": "invalid response format"}
-        logger.debug("  ── Stage 1 结果 ──")
-        logger.debug("    call_l3: %s", stage1_result.get("call_l3"))
-        logger.debug("    cards: %d 张", len(stage1_result.get("cards", [])))
-        logger.debug("    l3_task: %s",
-                     str(stage1_result.get("l3_task", ""))[:120])
-        logger.debug("")
+        state = dict(obs.state) if obs and obs.state else {}
+        context: dict = {
+            "history": [],
+            "selected_nodes": selected_nodes,
+            "candidate_cards": [],
+            "l3_results": [],
+        }
 
-        # E3: store cards locally — use L1's selected_nodes for domain targeting
-        if self._registry and obs and selected_nodes:
-            node_domains = [n.get("name", "") for n in selected_nodes if n.get("name")]
-            if node_domains:
-                all_ids = self._registry.get_items_for_domains("l2", node_domains)
-                if all_ids:
-                    self._cards = self._build_cards_from_ids(all_ids)
-                else:
-                    self._cards = self._build_cards(selected_nodes)
-            else:
-                self._cards = self._build_cards(selected_nodes)
-        else:
-            self._cards = self._build_cards(selected_nodes)
+        for round_idx in range(1, self.max_rounds + 1):
+            logger.debug("── L2 decide [round %d/%d] ──", round_idx, self.max_rounds)
 
-        # Propagate to L3 only when needed
-        # TODO: When L2→L3 multi-round is enabled, loop here to refine l3_task
-        # based on L3's output (similar to L1 MAX_LOOPS). Currently single-shot.
-        call_l3 = stage1_result.get("call_l3", False)
-        if call_l3:
-            l3_task = stage1_result.get("l3_task", "")
-            self._propagate(obs, trace_id, l3_task=l3_task,
-                            selected_nodes=selected_nodes)
+            tools = self._agent._get_tools("l2") if self._agent else None
+            result = self._agent.decide(
+                query=query, meta=meta, state=state,
+                context=context, tools=tools, layer="l2",
+            )
+            logger.debug("  result: done=%s reply=%s",
+                         result.get("done"), str(result.get("reply", ""))[:200])
 
-        # E3: L3 skills from downstream manager, not obs.state
-        l3_skills = getattr(self._downstream, '_matched_skills', []) if (self._downstream and call_l3) else []
-        l3_result = self._downstream._result if (self._downstream and call_l3) else {}
+            if result.get("done"):
+                cards = result.get("selected_cards", [])
+                self._cards = cards
+                self._l2_notify = {
+                    "reply": result.get("reply", ""),
+                    "cards": cards,
+                    "reasoning": result.get("reasoning", ""),
+                }
+                return
 
-        # ═══ Stage 2: Notify — integrate L3 + final reply (Integrate) ═══
-        logger.debug("  ═══ L2 Stage 2 — Notify ═══")
-        final = self._agent.stage2(query, meta, obs.state, selected_nodes,
-                                    stage1_result, l3_skills=l3_skills,
-                                    l3_result=l3_result)
-        logger.debug("  ── Stage 2 结果 ──")
-        logger.debug("    reply: %s", str(final.get("reply", ""))[:200])
-        logger.debug("    cards: %d 张", len(final.get("cards", [])))
-        logger.debug("    reasoning: %s", str(final.get("reasoning", ""))[:200])
-        logger.debug("")
+            if result.get("selected_nodes"):
+                context["selected_nodes"] = result["selected_nodes"]
+                context["candidate_cards"] = self._agent._get_cards_for_nodes(
+                    result["selected_nodes"]
+                )
 
-        # NOTIFY enrichment: cards_used as summary
-        cards = final.pop("cards", [])  # remove full cards from notify
-        final["cards_used"] = [str(c)[:100] for c in cards[:5]]
+            for q in result.get("queries_to_L3", []):
+                sub_obs = TaskObservation(
+                    meta=q["task"],
+                    state={**state, "domain": q.get("domain", "")},
+                )
+                self._propagate(sub_obs, trace_id)
+                l3_notify = self._downstream.collect_notify()
+                context["l3_results"].append(l3_notify)
+                context["history"].append({"round": round_idx, "query_to_L3": q})
 
-        self._result = final
+        # Force terminate
+        logger.debug("── L2 force terminate (max_rounds=%d) ──", self.max_rounds)
+        force_reply = self._agent._call_llm(
+            system=self._agent._build_system_prompt("force_terminate", obs.meta if obs else ""),
+            user="基于已有卡片和上下文，给出最终回复。",
+            layer="l2",
+        )
+        self._l2_notify = {
+            "reply": str(force_reply),
+            "cards": context.get("candidate_cards", []),
+            "reasoning": "max_rounds",
+        }
 
     def _propagate(self, obs, trace_id: str, l3_task: str = "",
                    selected_nodes: list[dict] | None = None) -> None:
@@ -541,8 +545,8 @@ class L2Manager(LayerManager):
         return cards
 
     def notify(self) -> Any:
-        if self._result:
-            result = dict(self._result)
+        if self._l2_notify:
+            result = dict(self._l2_notify)
             if self._agent:
                 mods = self._agent.get_pending_mods()
                 if mods:

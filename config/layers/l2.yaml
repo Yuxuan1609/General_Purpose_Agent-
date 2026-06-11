@@ -1,6 +1,9 @@
 # L2 — Flexible Knowledge Layer 配置
 # 知识卡片系统参数：激活计算、衰减率、反馈步长、容量限制
 
+# 每层 Manager while 循环最大轮次
+max_rounds: 3
+
 # 容量限制（软约束 — 写入 Manager prompt，超限时向上请求拆解）
 limits:
   max_cards_per_query: 10     # 每次 QUERY 返回的最多卡片数

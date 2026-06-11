@@ -36,10 +36,15 @@ class L3Agent(LayerAgent):
     Output: {skills_used, result, reasoning}
     """
 
-    EXECUTE_SCHEMA = {
-        "skills_used": ["string (本次使用的技能名称)"],
-        "result": "string (基于技能的任务执行结果)",
-        "reasoning": "string (技能选择和执行的推理过程)",
+    L3_DECISION_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean"},
+            "result": {"type": "string", "description": "技能执行结果"},
+            "skills_used": {"type": "array", "items": {"type": "string"}},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "reasoning"],
     }
 
     # Consolidation tools — modifications via tool calls
@@ -128,25 +133,32 @@ class L3Agent(LayerAgent):
             f"[Meta]\n{meta}"
         )
 
-    def execute(self, meta: str, state: dict,
-                matched_skills: list[dict] | None = None,
-                l3_task: str = "") -> dict:
-        l3_fmt = state.get("l3_output_format") if state else None
+    def decide(self, meta: str, state: dict, context: dict,
+               tools: list[dict] | None = None, layer: str = "l3") -> dict:
+        """Single decision step for L3 while loop.
+        
+        Consolidation mode (l3_output_format in state):
+          - Uses _L3_CONSOLIDATION_TOOLS, returns {done:True, result, ...}
+        Normal mode:
+          - Uses L3_DECISION_SCHEMA
+        """
+        l3_fmt = state.get("l3_output_format")
+        matched_skills = context.get("matched_skills", [])
+        l3_task = context.get("l3_task", "")
 
-        current = state.get("current", "") if state else ""
-        skills = matched_skills or []
+        current = state.get("current", "")
         skills_text = "\n".join(
             f"## {s.get('name', '')}: {s.get('description', '')}"
             f"\n  used={s.get('use_count', 0)} last={str(s.get('last_used', ''))[:10]}"
             f" useful=+{s.get('usefulness', 0)} mislead={s.get('misleading', 0)}"
             f"{chr(10) + '  comment: ' + s['comment'] if s.get('comment') else ''}"
             f"\n{_strip_frontmatter(s.get('content', '')[:800])}"
-            for s in skills
-        ) if skills else "（无匹配技能）"
+            for s in matched_skills
+        ) if matched_skills else "（无匹配技能）"
 
         learning_data = ""
         if l3_fmt:
-            units = state.get("learning_units", []) if state else []
+            units = state.get("learning_units", [])
             if isinstance(units, list) and units:
                 recs = []
                 for u in units:
@@ -154,16 +166,17 @@ class L3Agent(LayerAgent):
                     if l3_r:
                         recs.append(f"[{u.get('index','?')}] L3: {l3_r[:200]}")
                 if recs:
-                    learning_data = f"[学习数据]\n" + "\n".join(recs) + "\n\n"
-        fb = (state or {}).get("feedback", "")
-        l3_fb = (state or {}).get("l3_feedback", "")
+                    learning_data = "[学习数据]\n" + "\n".join(recs) + "\n\n"
+        fb = state.get("feedback", "")
+        l3_fb = state.get("l3_feedback", "")
         if l3_fb:
             fb = f"{fb}\n{l3_fb}" if fb else l3_fb
         fb_section = f"[L3 修改结果确认]\n{fb}\n\n" if fb else ""
 
         instruction = (
-            "你的核心任务是完成 L2 下发的 l3_task，Meta 提供任务整体背景。\n"
-            "选择相关技能并基于技能内容执行任务。"
+            "你的核心任务是完成 L2 下发的任务，Meta 提供任务整体背景。\n"
+            "选择相关技能并基于技能内容执行任务。\n"
+            "当任务完成时设置 done=true 并给出 result。"
         )
         if l3_fmt:
             instruction += (
@@ -172,17 +185,12 @@ class L3Agent(LayerAgent):
                 "使用工具 deprecate_l3_skill / create_l3_skill / modify_l3_skill 记录修改。"
             )
         system = self._build_system_prompt(instruction, meta)
-        query_section = f"[上层查询]\n完成 L2 下发的 l3_task：{l3_task}\n\n" if l3_task else ""
-        l3_task_raw = state.get("l3_task", "")
-        l3_task_data = json.loads(l3_task_raw) if isinstance(l3_task_raw, str) and l3_task_raw else {}
-        l3_task_section = ""
-        if l3_task_data.get("criteria"):
-            l3_task_section = f"[L3 整理任务]\n{l3_task_data.get('criteria', '')}\n\n"
+        query_section = f"[上层查询]\n完成 L2 下发的任务：{l3_task}\n\n" if l3_task else ""
+
         user = (
             f"{fb_section}"
             f"{learning_data}"
             f"{query_section}"
-            f"{l3_task_section}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
@@ -194,12 +202,18 @@ class L3Agent(LayerAgent):
                            [t["function"]["name"] for t in tools])
             schema = None
         else:
-            tools = self._get_tools("l3")
-            schema = self.EXECUTE_SCHEMA
-        result = self._call_llm(system, user, schema=schema, tools=tools, layer="l3")
-        # Normalize: consolidation mode returns {"reply": ...}, exec mode returns {"result": ...}
-        if l3_fmt and result.get("reply") and not result.get("result"):
-            result["result"] = result["reply"]
+            schema = self.L3_DECISION_SCHEMA
+
+        result = self._call_llm(system, user, schema=schema, tools=tools, layer=layer)
+
+        if l3_fmt:
+            result = {
+                "done": True,
+                "result": result.get("reply", result.get("result", "")),
+                "skills_used": [],
+                "reasoning": "",
+            }
+
         return result
 
 
@@ -215,14 +229,15 @@ class L3Manager(LayerManager):
 
     def __init__(self, skill_layer, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None):
+                 domain_registry=None, max_rounds=3):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
         self._agent = L3Agent(auxiliary_llm) if auxiliary_llm else None
         self._registry = domain_registry
+        self.max_rounds = max_rounds
         self._matched: list[str] = []
-        self._matched_skills: list[dict] = []  # E3: local storage, not obs.state
-        self._result: dict | None = None
+        self._matched_skills: list[dict] = []
+        self._l3_notify: dict | None = None
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -235,7 +250,6 @@ class L3Manager(LayerManager):
         else:
             data = msg
 
-        # E3: payload is a composite dict {obs, ...} or TaskObservation directly
         if isinstance(data, dict):
             obs = data.get("obs")
             l3_task = data.get("l3_task", "")
@@ -247,8 +261,7 @@ class L3Manager(LayerManager):
         session = obs.session if obs else {}
         domain_path = session.get("domain", "general")
 
-        # Deterministic: domain-based skill matching
-        # Merge domains from L1's selected_nodes with session hints
+        # Deterministic: domain-based skill matching (unchanged)
         node_domains = [n.get("name", "") for n in selected_nodes if n.get("name")]
         domains_hint = session.get("domains_hint", [domain_path])
         if node_domains:
@@ -261,12 +274,10 @@ class L3Manager(LayerManager):
             self._matched_skills = self._skill_layer.get_skills_by_ids(skill_ids)
             self._matched = [s["name"] for s in self._matched_skills]
         else:
-            # Fallback to old domain-based matching
             try:
                 domain = Domain(domain_path, "specific")
             except Exception:
                 domain = Domain("general", "general")
-
             matched = self._skill_layer.match(domain)
             self._matched = [s.name for s in matched]
             self._matched_skills = []
@@ -282,24 +293,48 @@ class L3Manager(LayerManager):
                 })
         logger.debug("── L3 (match) ──")
         logger.debug("  domain: %s → %d skills", domain_path, len(self._matched))
-        for i, name in enumerate(self._matched):
-            desc = next((s.get("description", "") for s in self._matched_skills if s.get("name") == name), "")
-            logger.debug("    [skill %d] %s | %s", i + 1, name, desc)
 
-        # LLM Agent: select relevant skills + execute
-        if self._agent:
-            logger.debug("── L3 Agent ──")
+        if not self._agent:
+            logger.warning("L3Agent not initialized (no auxiliary_llm), skipping")
+            self._l3_notify = {
+                "skills_matched": len(self._matched),
+                "skills_used": [],
+                "result": "",
+                "reasoning": "no agent",
+            }
+            return
+
+        state = dict(obs.state) if obs and obs.state else {}
+        context: dict = {
+            "matched_skills": self._matched_skills,
+            "l3_task": l3_task,
+            "history": [],
+        }
+
+        for round_idx in range(1, self.max_rounds + 1):
+            logger.debug("── L3 decide [round %d/%d] ──", round_idx, self.max_rounds)
+
+            tools = self._agent._get_tools("l3") if self._agent else None
             meta = l3_task or (obs.meta if obs else "")
-            result = self._agent.execute(meta, obs.state if obs else {},
-                                          matched_skills=self._matched_skills,
-                                          l3_task=l3_task)
-            logger.debug("  skills_used: %s", result.get("skills_used"))
-            logger.debug("  result: %s", str(result.get("result", ""))[:200])
-            self._result = result
+            result = self._agent.decide(
+                meta=meta, state=state, context=context,
+                tools=tools, layer="l3",
+            )
+            logger.debug("  result: done=%s result=%s",
+                         result.get("done"), str(result.get("result", ""))[:200])
+
+            if result.get("done"):
+                self._l3_notify = {
+                    "skills_matched": len(self._matched),
+                    "skills_used": result.get("skills_used", []),
+                    "result": result.get("result", ""),
+                    "reasoning": result.get("reasoning", ""),
+                }
+                break
+
+            context["history"].append({"round": round_idx, "result": result})
 
         # Propagate downstream (L4, reserved)
-        # TODO: When L3→L4 multi-round is enabled, loop here for iterative
-        # query-refinement (same pattern as L1 MAX_LOOPS). Currently single-shot.
         if self._downstream:
             q_msg = self._downward.wrap_query(
                 payload={"obs": obs}, source=self.name,
@@ -308,15 +343,11 @@ class L3Manager(LayerManager):
             self._downstream.query(q_msg, trace_id)
 
     def notify(self) -> Any:
-        result: dict = {"status": "ok", "layer": "l3", "skills_matched": len(self._matched)}
-        if self._result:
-            result.update({
-                "skills_used": self._result.get("skills_used", []),
-                "result": self._result.get("result", ""),
-                "reasoning": self._result.get("reasoning", ""),
-            })
-        if self._agent:
-            mods = self._agent.get_pending_mods()
-            if mods:
-                result["l3_modifications"] = mods
-        return result
+        if self._l3_notify:
+            result = dict(self._l3_notify)
+            if self._agent:
+                mods = self._agent.get_pending_mods()
+                if mods:
+                    result["l3_modifications"] = mods
+            return result
+        return {"status": "ok", "layer": "l3", "skills_matched": len(self._matched)}

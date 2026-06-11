@@ -184,12 +184,27 @@ class LayerAgent(ABC):
                     return {"_raw": text, "_type": type(parsed).__name__}
                 return parsed
             except json.JSONDecodeError:
-                self._log.warning("JSON parse failed, raw text returned")
+                from core.json_repair import robust_parse
+                self._log.debug("JSON parse failed, trying robust_parse")
+                repaired = robust_parse(text, schema)
+                if repaired:
+                    return repaired
+                self._log.warning("robust_parse also failed, returning raw")
                 return {"_raw": text}
 
         # Max turns exceeded
         self._log.warning("Max tool call turns (%d) exceeded", self.MAX_TOOL_TURNS)
         return {"_raw": "max_tool_turns", "_error": "tool call loop exceeded"}
+
+
+    @abstractmethod
+    def decide(self, **kwargs) -> dict:
+        """Single decision step for Manager while-loop.
+
+        Each layer Agent implements this with its own schema.
+        Manager calls this in a while loop, checking `done` in return value.
+        """
+        ...
 
 
 class LayerManager(ABC):
