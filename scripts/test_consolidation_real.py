@@ -208,8 +208,8 @@ def main():
                     domain_registry=reg)
     seed_knowledge(fk, phil, sl)
 
-    # Load consolidation test fixtures
-    loaded = _load_fixtures(fk, phil, sl, PROJECT_ROOT / "tests" / "fixtures")
+    # Fixtures disabled — use seed knowledge only
+    loaded = {"l1_count": 0, "l2_count": 0, "l3_count": 0}
     _write_log(env_log, "Knowledge state (pre-consolidation)",
                f"L1 rules: {len(phil.all_rules())}\n"
                + "\n".join(f"  [{r.id}] [{r.source}] {r.content[:100]}" for r in phil.all_rules())
