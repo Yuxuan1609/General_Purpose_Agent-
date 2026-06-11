@@ -149,11 +149,10 @@ class LearningEnv(Environment):
         self._done = False
 
         learning_units = self._build_learning_units(records)
-        obs_text = self._format_observation(learning_units, domain)
-
-        self._current_observation = obs_text
-        self._enriched_units = learning_units  # for build_task_observation
-        return EnvState(observation=obs_text)
+        self._enriched_units = learning_units
+        review = self._build_per_layer_review(learning_units, domain)
+        self._current_observation = review["meta"]
+        return EnvState(observation=review["meta"])
 
     def step(self, action: str) -> EnvStep:
         parsed = self._parse_notify_layers(action)
@@ -224,18 +223,21 @@ class LearningEnv(Environment):
         if not self._current_observation:
             return None
 
-        # Per-layer design: each layer reads state.learning_units directly.
-        # L1's query to L2 carries task decomposition, not raw data.
-        # L2's l3_task to L3 carries operation description, not raw data.
+        units = getattr(self, '_enriched_units', self._pending_records)
+        review = self._build_per_layer_review(units, self._base_domain)
+
         return TaskObservation(
-            meta=self._current_observation,
+            meta=review["meta"],
             state={
-                "current": self._current_observation,
+                "current": review["meta"],
                 "history": "",
-                "learning_units": getattr(self, '_enriched_units', self._pending_records),
+                "learning_units": units,
                 "l1_output_format": _L1_OUTPUT,
                 "l2_output_format": _L2_OUTPUT,
                 "l3_output_format": _L3_OUTPUT,
+                "l1_task": review["l1_task"],
+                "l2_task": review["l2_task"],
+                "l3_task": review["l3_task"],
                 "feedback": self._shared_feedback,
                 "l1_feedback": self._layer_feedback.get("l1", ""),
                 "l2_feedback": self._layer_feedback.get("l2", ""),
@@ -790,11 +792,70 @@ class LearningEnv(Environment):
             })
         return units
 
-    def _format_observation(self, units: list[dict], domain: str) -> str:
-        return (
-            f"从以下 {len(units)} 条 {domain} 执行记录中分析策略缺陷和改进机会。"
-            f"同时反思本次学习策略是否有效。"
+    def _build_per_layer_review(self, units: list[dict], domain: str) -> dict:
+        """Aggregate LLM1 enrichment into per-layer review.
+
+        LLM1 outputs per-record l1/l2/l3_reasoning.
+        We aggregate these into layer-specific summaries — no judgment, only grouping.
+        """
+        l1_notes = [(u["index"], u["l1_reasoning"])
+                     for u in units if u.get("l1_reasoning")]
+        l2_notes = [(u["index"], u["l2_reasoning"])
+                     for u in units if u.get("l2_reasoning")]
+        l3_notes = [(u["index"], u["l3_reasoning"])
+                     for u in units if u.get("l3_reasoning")]
+
+        l1_has = bool(l1_notes)
+        l2_has = bool(l2_notes)
+        l3_has = bool(l3_notes)
+
+        meta = (
+            f"## Learning Task — {domain}\n\n"
+            f"从 {len(units)} 条执行记录中学习。\n\n"
+            f"- **L1 Rules**: {'review needed.' if l1_has else 'no review needed.'}\n"
+            f"- **L2 Cards**: {'review needed.' if l2_has else 'no review needed.'}\n"
+            f"- **L3 Skills**: {'review needed.' if l3_has else 'no review needed.'}\n\n"
+            f"Layer agents should read above to decide whether to query downstream layers. "
+            f"Each layer has its own task in state with detailed criteria."
         )
+
+        l1_task = (
+            f"## L1 Learning Task\n\n"
+            f"基于以下执行记录分析行为准则是否存在缺陷或改进机会。\n\n"
+            f"### 相关记录\n" +
+            "\n".join(f"[{i}] {r[:300]}" for i, r in l1_notes if r) if l1_notes else "（无）" +
+            f"\n\n### Judgment Criteria\n"
+            f"- **deprecate**: rules that were irrelevant or harmful in these games\n"
+            f"- **modify**: refine a rule that was helpful but could be improved\n"
+            f"- **create**: new cross-domain methodology discovered\n\n"
+            f"Use tools: deprecate_l1_rule / create_l1_rule / modify_l1_rule"
+        )
+
+        l2_task = json.dumps({
+            "criteria": (
+                f"### Context\n{domain} game records. "
+                f"{len(l2_notes)} card-related observations.\n\n"
+                f"### Judgment Criteria\n"
+                f"- **create**: new strategic pattern, create a knowledge card\n"
+                f"- **modify**: existing card needs update based on results\n"
+                f"- **deprecate**: card was used but ineffective\n\n"
+                f"Use tools: deprecate_l2_card / create_l2_card / modify_l2_card"
+            ),
+        }, ensure_ascii=False)
+
+        l3_task = json.dumps({
+            "criteria": (
+                f"### Context\n{domain} game records. "
+                f"{len(l3_notes)} skill-related observations.\n\n"
+                f"### Judgment Criteria\n"
+                f"- **create**: compile patterns into a reusable skill\n"
+                f"- **modify**: update existing skill\n"
+                f"- **deprecate**: skill was misleading or unused\n\n"
+                f"Use tools: deprecate_l3_skill / create_l3_skill / modify_l3_skill"
+            ),
+        }, ensure_ascii=False)
+
+        return {"meta": meta, "l1_task": l1_task, "l2_task": l2_task, "l3_task": l3_task}
 
     # ── utilities ────────────────────────────────────────────────────────
 
