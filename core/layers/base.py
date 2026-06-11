@@ -177,12 +177,15 @@ class LayerAgent(ABC):
 
             if schema is None:
                 return {"reply": text, "reasoning": ""}
-            from core.json_repair import robust_parse
-            parsed = robust_parse(text, schema)
-            if not isinstance(parsed, dict):
-                self._log.warning("Expected JSON object, got %s", type(parsed).__name__)
-                return {"_raw": text, "_type": type(parsed).__name__}
-            return parsed
+            try:
+                parsed = json.loads(text)
+                if not isinstance(parsed, dict):
+                    self._log.warning("Expected JSON object, got %s", type(parsed).__name__)
+                    return {"_raw": text, "_type": type(parsed).__name__}
+                return parsed
+            except json.JSONDecodeError:
+                self._log.warning("JSON parse failed, raw text returned")
+                return {"_raw": text}
 
         # Max turns exceeded
         self._log.warning("Max tool call turns (%d) exceeded", self.MAX_TOOL_TURNS)
