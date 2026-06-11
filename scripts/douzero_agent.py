@@ -451,19 +451,47 @@ class DouZeroCognitiveAgent:
             f"可选出牌：\n" + "\n".join(legal_lines)
         )
 
-        history_lines = []
-        played = infoset.played_cards or {}
-        for pos, cards in played.items():
-            if cards:
-                history_lines.append(
-                    f"{POSITION_CN.get(pos, pos)}已出: {cards_to_str(cards)}"
-                )
-        history_text = "\n".join(history_lines) if history_lines else ""
+        history_text = self._format_play_history(infoset)
 
         return {
             "current": current_text,
             "history": history_text,
         }
+
+    def _format_play_history(self, infoset) -> str:
+        """Format card_play_action_seq as per-round play record for all players."""
+        seq = getattr(infoset, "card_play_action_seq", None)
+        if not seq:
+            return ""
+
+        pos_order = ["landlord", "landlord_down", "landlord_up"]
+        pos_idx = 0
+        last_played_idx = 0
+        consecutive_passes = 0
+        round_num = 1
+        lines = []
+
+        for cards in seq:
+            pos = pos_order[pos_idx]
+            pos_cn = POSITION_CN.get(pos, pos)
+
+            if cards:
+                action_str = cards_to_str(cards)
+                consecutive_passes = 0
+                last_played_idx = pos_idx
+            else:
+                action_str = "过"
+                consecutive_passes += 1
+
+            lines.append(f"[第{round_num}轮] {pos_cn}: {action_str}")
+            pos_idx = (pos_idx + 1) % len(pos_order)
+
+            if consecutive_passes >= 2:
+                round_num += 1
+                consecutive_passes = 0
+                pos_idx = last_played_idx
+
+        return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════
