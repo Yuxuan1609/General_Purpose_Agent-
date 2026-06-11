@@ -74,12 +74,7 @@ def _try_json_loads(text: str):
 
 def _extract_json_block(text: str) -> str | None:
     """Extract JSON from markdown fences or surrounding text noise."""
-    # Strip ```json ... ``` fences
-    m = re.search(r'```(?:json)?\s*(.+?)\s*```', text, re.DOTALL)
-    if m:
-        return m.group(1).strip()
-
-    # Find outermost { } or [ ] pair
+    # Tier 1a: find outermost { } or [ ] pair — handles leading/trailing noise
     for opener, closer in [('{', '}'), ('[', ']')]:
         start = text.find(opener)
         if start < 0:
@@ -97,6 +92,11 @@ def _extract_json_block(text: str) -> str | None:
                     break
         if end > start:
             return text[start:end + 1]
+
+    # Tier 1b: Strip ```json ... ``` fences (fallback if no bracket found)
+    m = re.search(r'```(?:json)?\s*(.+?)```', text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
 
     return None
 
