@@ -8,10 +8,9 @@ from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l0_5_1")
 
-# TODO: Future tool-use integration — load ToolRegistry into L1Agent and inject
-#       tool definitions into stage prompts. Current Leduc/DouZero game context
-#       does not require tool calls; reserved for general task scenarios.
-#       See: core/tools/registry.py (ToolRegistry), core/llm_client.py (LLMClient.chat tools param)
+# Tools are mounted on L1Agent via LayerInjector.set_injector() (see chain_factory).
+# L1 does NOT call tools directly — it delegates tool-requiring tasks to L2/L3.
+# When consolidation is triggered, L1 uses its own consolidation tools (DictInjector).
 
 
 class L1Agent(LayerAgent):
@@ -128,12 +127,13 @@ class L1Agent(LayerAgent):
         extra = f"\n{static_context}\n" if static_context else ""
         return (
             f"## 认知层架构\n"
-            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策\n"
-            f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度\n"
-            f"- L3：管理 SKILL.md 技能，负责标准化流程执行\n\n"
+            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。不直接调用工具。\n"
+            f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
+            f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
             f"## 领域边界\n"
             f"你只管理 L1 行为准则（Philosophy Rules）。\n"
-            f"不要修改 L2 的知识卡片或 L3 的技能。\n\n"
+            f"不要修改 L2 的知识卡片或 L3 的技能。\n"
+            f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 call_l2=true 下发给 L2/L3 执行。\n\n"
             f"## 指令\n{instruction}\n\n"
             f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
@@ -190,6 +190,7 @@ class L1Agent(LayerAgent):
             "拆解时思考：已有信息能完成什么、还差什么子任务或信息、所需材料是否可以由下层提供。\n\n"
             "你的 query 应结合本层的行为准则和任务目标，给出清晰的拆解任务交给 L2 层。\n\n"
             "如果任务完全可以在 L1 层独立完成（无需 L2/L3 协助），设置 call_l2=false。\n"
+            "如果任务需要调用工具（web_search、terminal、read_file 等），必须下发给 L2/L3 执行，设置 call_l2=true。\n"
             "从领域节点中选出最相关的 1-5 个节点。不需要领域知识时返回空的 domain_nodes（[]）。"
         )
         system = self._build_system_prompt(
