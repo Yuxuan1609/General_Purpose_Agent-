@@ -14,8 +14,8 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
-from core.skill_layer import SkillLayer
-from core.layers import build_chain as _build
+    from core.skill_layer import SkillLayer
+    from core.layers import build_chain as _build
 
     if data_root is None:
         data_root = Path(__file__).resolve().parent.parent
