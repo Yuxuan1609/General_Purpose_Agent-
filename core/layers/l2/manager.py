@@ -241,14 +241,6 @@ class L2Agent(LayerAgent):
         instruction = (
             "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
             "你的局部任务是思考：核心任务怎么完成、还差什么要素。\n\n"
-        )
-        if is_consolidation:
-            instruction += (
-                "【整理任务】这是知识库整理任务。你负责审查 L2 知识卡片。\n"
-                "L3 层也需要审查其技能——必须设置 call_l3=true，"
-                "l3_task 描述 L3 需要审查的 domain。\n\n"
-            )
-        instruction += (
             "需要 L3 时输出 call_l3=true 和 l3_task（一句话任务描述）；否则 call_l3=false。\n\n"
             "示例：手牌K，对手翻牌前加注 → call_l3=true, l3_task=翻牌前持有K时是否加注。\n"
             "注意：你负责任务的部分执行和拆解下发，不做最终决策。"

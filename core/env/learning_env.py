@@ -296,17 +296,44 @@ class LearningEnv(Environment):
         level = self.get_consolidation_level()
         level_info = spec.get("consolidation_levels", {}).get(level, {}) if spec else {}
 
-        # ── meta: clear task description with trigger info ──
-        triggered = sorted(set(l2_triggers.keys()) | set(l3_triggers.keys()))
-        domain_list = ", ".join(triggered)
+        # ── meta: per-layer review — states what each layer should review ──
         meta_lines = [
             "## Knowledge Consolidation Task",
-            "",
-            f"**Level {level}**: {level_info.get('label', '整理')}.",
-            f"Triggered domains: {domain_list}.",
-            "All three layers must participate — each layer has its own sub-task in state.",
+            f"Level {level} — {level_info.get('label', '整理')}.",
             "",
         ]
+
+        # L1 review
+        if l1_rules and hasattr(l1_rules, 'all_rules'):
+            rule_count = len([r for r in l1_rules.all_rules() if r.source == "l1"])
+            if rule_count > 0:
+                meta_lines.append(f"- **L1 Rules**: {rule_count} rule(s) to review. "
+                                  f"Check for duplicates, domain-specific content, vague rules.")
+        else:
+            meta_lines.append("- **L1 Rules**: no review needed.")
+
+        # L2 review
+        if l2_triggers:
+            meta_lines.append(f"- **L2 Cards**: review needed. "
+                              f"Triggered domains: {', '.join(sorted(l2_triggers.keys()))}.")
+        else:
+            meta_lines.append("- **L2 Cards**: no review needed.")
+
+        # L3 review
+        if l3_triggers:
+            meta_lines.append(f"- **L3 Skills**: review needed. "
+                              f"Triggered domains: {', '.join(sorted(l3_triggers.keys()))}.")
+        else:
+            meta_lines.append("- **L3 Skills**: no review needed.")
+
+        meta_lines.append("")
+        meta_lines.append("Each layer has its own sub-task details in state. "
+                          "Layer agents should read meta above to decide whether to query downstream layers.")
+
+        # Per-domain detail (informational)
+        if l2_triggers:
+            meta_lines.append("")
+            meta_lines.append("### L2 Cards — triggered domains")
         if l2_triggers:
             meta_lines.append("### L2 Cards — triggered domains")
             for domain, count in sorted(domain_counts.items()):
