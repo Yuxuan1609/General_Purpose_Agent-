@@ -225,12 +225,13 @@ class LearningEnv(Environment):
 
         units = getattr(self, '_enriched_units', self._pending_records)
         review = self._build_per_layer_review(units, self._base_domain)
+        history = self._build_conversation_history(units)
 
         return TaskObservation(
             meta=review["meta"],
             state={
                 "current": review["meta"],
-                "history": "",
+                "history": history,
                 "learning_units": units,
                 "l1_output_format": _L1_OUTPUT,
                 "l2_output_format": _L2_OUTPUT,
@@ -774,6 +775,25 @@ class LearningEnv(Environment):
                 "l3_reasoning": enrich.get("l3_reasoning", ""),
             })
         return units
+
+    def _build_conversation_history(self, units: list[dict]) -> str:
+        records = self._pending_records
+        if not records:
+            return "（无历史记录）"
+        lines = []
+        for rec in records:
+            obs = rec.get("observation", {})
+            state = obs.get("state", {}) if isinstance(obs, dict) else {}
+            user_input = state.get("current", "")
+            notify = rec.get("notify_layers", {})
+            l1 = notify.get("l0_5_1", {})
+            model_reply = l1.get("result", "")
+            if user_input:
+                lines.append(f"[用户]: {str(user_input)[:300]}")
+            if model_reply:
+                lines.append(f"[模型]: {str(model_reply)[:300]}")
+            lines.append("---")
+        return "\n".join(lines)
 
     def _build_learning_units_heuristic(self, records: list[dict]) -> list[dict]:
         units = []

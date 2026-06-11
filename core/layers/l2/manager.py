@@ -160,11 +160,13 @@ class L2Agent(LayerAgent):
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
         extra = f"\n{static_context}\n" if static_context else ""
+        domains_text = self._format_all_domains()
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
-            f"- L2（你）：管理概率性知识卡片，负责相关知识检索与技能调度\n"
-            f"- L3：管理 SKILL.md 技能，负责标准化流程执行\n\n"
+            f"- L2（你）：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
+            f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
+            f"## 领域总览\n{domains_text}\n\n"
             f"## 领域边界\n"
             f"你只管理 L2 知识卡片（Knowledge Cards）。\n"
             f"不要修改 L1 的行为准则或 L3 的技能。\n\n"
@@ -172,6 +174,16 @@ class L2Agent(LayerAgent):
             f"[Meta]\n{meta}\n"
             f"{extra}"
         )
+
+    def _format_all_domains(self) -> str:
+        if not self._nodes:
+            return "（无已注册领域）"
+        lines = []
+        for n in self._nodes:
+            name = n.get("name", n.get("path", "?"))
+            desc = n.get("description", "")
+            lines.append(f"- **{name}**：{desc}")
+        return "\n".join(lines)
 
     def _format_domain_nodes(self, nodes: list[dict]) -> str:
         if not nodes:

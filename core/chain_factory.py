@@ -55,6 +55,11 @@ def _mount_tools(chain, data_root: Path):
     for layer in _iter_layers(chain):
         if layer._agent is not None:
             layer._agent.set_injector(injector)
+            tool_names = [t["function"]["name"] for t in injector.get_tools_for_layer(layer.name)]
+            import logging
+            logging.getLogger("chain_factory").info(
+                "[%s] tools: %s", layer.name, ", ".join(tool_names) if tool_names else "(none)"
+            )
 
 
 def _iter_layers(root):
