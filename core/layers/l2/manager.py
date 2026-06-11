@@ -443,7 +443,7 @@ class L2Manager(LayerManager):
             selected_nodes: list[dict] = data.get("selected_nodes", [])
         else:
             obs = data
-            query = ""
+            query = obs.meta if obs else ""
             selected_nodes = []
         meta = obs.meta if obs else ""
 
