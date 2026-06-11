@@ -199,7 +199,9 @@ class L3Agent(LayerAgent):
         if l3_fmt:
             self._setup_l3_consolidation()
             decide_tool = self._schema_to_tool(
-                "l3_decide", "输出 L3 执行结果",
+                "l3_decide",
+                "【必选】最终决策工具。你必须使用此 tool 输出 L3 的执行结果，不得直接输出文本。"
+                "先完成必要的技能执行和工具调用，最后调用此 tool 给出结构化结果。",
                 {
                     "type": "object",
                     "properties": {
@@ -223,10 +225,12 @@ class L3Agent(LayerAgent):
             }
             return result
 
-        # Normal mode: decision schema as a strict tool
+        # Normal mode: decision schema as a capture tool
         base_tools = self._get_tools(layer) or []
         decide_tool = self._schema_to_tool(
-            "l3_decide", "输出 L3 执行结果",
+            "l3_decide",
+            "【必选】最终决策工具。你必须使用此 tool 输出 L3 的执行结果，不得直接输出文本。"
+            "先完成必要的技能执行和工具调用，最后调用此 tool 给出结构化结果。",
             self.L3_DECISION_SCHEMA,
         )
         all_tools = base_tools + [decide_tool]

@@ -338,7 +338,9 @@ class L2Agent(LayerAgent):
         if l2_fmt:
             self._setup_l2_consolidation()
             decide_tool = self._schema_to_tool(
-                "l2_decide", "输出 L2 决策结果",
+                "l2_decide",
+                "【必选】最终决策工具。你必须使用此 tool 输出 L2 的决策结果，不得直接输出文本。"
+                "先完成必要的知识查询和工具调用，最后调用此 tool 给出结构化决策。",
                 {
                     "type": "object",
                     "properties": {
@@ -363,10 +365,12 @@ class L2Agent(LayerAgent):
             }
             return result
 
-        # Normal mode: decision schema as a strict tool
+        # Normal mode: decision schema as a capture tool
         base_tools = self._get_tools(layer) or []
         decide_tool = self._schema_to_tool(
-            "l2_decide", "输出 L2 决策结果，含节点选择与 L3 查询",
+            "l2_decide",
+            "【必选】最终决策工具。你必须使用此 tool 输出 L2 的决策结果，不得直接输出文本。"
+            "先完成必要的知识查询和工具调用，最后调用此 tool 给出结构化决策。",
             self.L2_DECISION_SCHEMA,
         )
         all_tools = base_tools + [decide_tool]
