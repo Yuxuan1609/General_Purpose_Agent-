@@ -510,14 +510,15 @@ class LearningEnv(Environment):
             logger.warning("Cannot parse action as JSON, no LLM fallback")
             return {}
 
-        try:
-            parsed = json.loads(action)
-        except json.JSONDecodeError:
+        from core.json_repair import robust_parse
+        parsed = robust_parse(action)
+        if not isinstance(parsed, dict):
+            parsed = {}
+
+        if not parsed.get("l0_5_1") and not parsed.get("l2") and not parsed.get("l3"):
             if self._pre_llm:
                 return self._parse_notify_llm(action)
-            return {}
-
-        if not isinstance(parsed, dict):
+            logger.warning("Parsed JSON lacks notify layer keys")
             return {}
 
         result = {}
