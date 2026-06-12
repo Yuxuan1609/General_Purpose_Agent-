@@ -73,3 +73,58 @@ class TestKBDomain:
         assert d.parent == "coding"
         assert d.doc_count == 0
         assert d.neighbors == {}
+
+
+class TestKnowledgeBase:
+    @classmethod
+    def setup_class(cls):
+        cls.kb = None
+
+    def setup_method(self):
+        from core.knowledge.knowledge_base import KnowledgeBase
+        self.kb = KnowledgeBase(":memory:")
+
+    def test_add_and_get(self):
+        from core.knowledge.models import KnowledgeDoc
+        doc = KnowledgeDoc(domain="test/d1", title="T1", content="Hello world")
+        self.kb.add(doc)
+        retrieved = self.kb.get(doc.id)
+        assert retrieved is not None
+        assert retrieved.title == "T1"
+        assert retrieved.content == "Hello world"
+
+    def test_get_nonexistent(self):
+        assert self.kb.get("nonexist") is None
+
+    def test_update(self):
+        from core.knowledge.models import KnowledgeDoc
+        doc = KnowledgeDoc(domain="test/d1", title="Original", content="Old content")
+        self.kb.add(doc)
+        self.kb.update(doc.id, title="Updated", content="New content")
+        updated = self.kb.get(doc.id)
+        assert updated.title == "Updated"
+        assert updated.content == "New content"
+
+    def test_update_nonexistent(self):
+        self.kb.update("nonexist", title="X")
+        assert self.kb.get("nonexist") is None
+
+    def test_delete(self):
+        from core.knowledge.models import KnowledgeDoc
+        doc = KnowledgeDoc(domain="test/d1", title="ToDelete", content="...")
+        self.kb.add(doc)
+        assert self.kb.get(doc.id) is not None
+        self.kb.delete(doc.id)
+        assert self.kb.get(doc.id) is None
+
+    def test_delete_nonexistent(self):
+        self.kb.delete("nonexist")
+        assert True
+
+    def test_search_empty(self):
+        results = self.kb.search("anything")
+        assert results == []
+
+    def test_list_domains_empty(self):
+        domains = self.kb.list_domains()
+        assert domains == []
