@@ -13,8 +13,17 @@ _TOOL_CONFIG_PATH = Path("config/tools.yaml")
 def _load_tool_config() -> dict:
     global _TOOL_CONFIG
     if _TOOL_CONFIG is None:
-        with open(_TOOL_CONFIG_PATH, encoding="utf-8") as f:
-            _TOOL_CONFIG = yaml.safe_load(f)
+        try:
+            with open(_TOOL_CONFIG_PATH, encoding="utf-8") as f:
+                _TOOL_CONFIG = yaml.safe_load(f)
+        except (FileNotFoundError, yaml.YAMLError) as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to load %s: %s. Using empty config.", _TOOL_CONFIG_PATH, e
+            )
+            _TOOL_CONFIG = {}
+    if _TOOL_CONFIG is None:
+        _TOOL_CONFIG = {}
     return _TOOL_CONFIG
 
 
@@ -96,7 +105,9 @@ class ToolCapability(Capability):
                 error=f"Tool '{tool_name}' not allowed for layer '{layer}'",
             )
 
-        effective_timeout = timeout or _get_tool_timeout(tool_name)
+        # Priority: LLM arg.timeout > dispatch timeout > config timeout
+        arg_timeout = tool_args.get("timeout") if isinstance(tool_args, dict) else None
+        effective_timeout = arg_timeout or timeout or _get_tool_timeout(tool_name)
 
         try:
             raw = self._registry.dispatch(tool_name, tool_args, timeout=effective_timeout)
@@ -111,11 +122,7 @@ class ToolCapability(Capability):
                 capability_name="tool", layer=layer, success=True,
                 data=parsed if isinstance(parsed, dict) else {"result": parsed},
             )
-        except json.JSONDecodeError:
-            return CapabilityResult(
-                capability_name="tool", layer=layer, success=True,
-                data={"raw": ""},
-            )
+
         except Exception as e:
             cfg = _load_fallback_config(tool_name)
             fb = _build_fallback(cfg) if cfg else None
