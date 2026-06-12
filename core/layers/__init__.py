@@ -13,9 +13,6 @@ def build_chain(meta_driver, philosophy, flexible_knowledge, skill_layer,
 
     Each layer is wired with UpwardComm + DownwardComm for LayerMessage protocol.
     Returns the root (L0.5+1 Manager) which has L2 and L3 wired in.
-
-    Phase 2a: L2's domain nodes are injected into L1 to merge L2 stage1
-    (node selection) into L1's stage1 call.
     """
     from core.layers.l3.upward_comm import UpwardComm as L3Upward
     from core.layers.l3.downward_comm import DownwardComm as L3Downward
@@ -39,5 +36,4 @@ __all__ = ["LayerManager", "LayerAgent", "UpwardComm", "DownwardComm",
            "AgentPacket",
            "L0_5_1Manager", "L2Manager", "L3Manager", "build_chain"]
 
-# DEPRECATED: L2_DOMAIN_NODES — import directly from core.layers.l2.manager for backward compat
-from core.layers.l2.manager import L2_DOMAIN_NODES
+

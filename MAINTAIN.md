@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-12 | **Cleanup**：删除 `L2_DOMAIN_NODES` 硬编码节点列表（已由 DomainRegistry 替代）；删除 `STAGE1_SCHEMA`/`STAGE2_SCHEMA`/`L1_DECISION_SCHEMA`（已被 capture_tools 替代）；删除 `KnowledgeCard.boost`/`penalize` 条目（方法不存在）；清理各层 stage1/stage2 旧注释。 |
 | 2026-06-12 | **Capture-Tool Strict Mode**：L1/L2/L3 decide() 改用 capture_tool 模式（l1_query/l1_report, l2_query/l2_report, l3_continue/l3_report），LLM 通过 tool_call 输出结构化结果替代 JSON-in-prompt。新增 `DictInjector`（轻量工具注入器）、`_schema_to_tool()`。`_call_llm` 新增 `capture_tools` 参数。 |
 | 2026-06-11 | **Agent While-Loop Design**：各层删除硬编码 stage 流水线，统一为 `decide()` + Manager while 循环。L1Agent/L2Agent/L3Agent 新增 `decide()` 方法；L0_5_1Manager/L2Manager/L3Manager 的 `query()` 改为 while 循环，新增 `max_rounds` 配置。`LayerAgent` 新增 `decide()` 抽象方法。 |
 | 2026-06-08 | **Domain System Redesign**：新增 `core/domain_registry.py`（DomainNode dataclass + DomainRegistry 类）。所有可检索实体统一 `available_domains: list[str]` 字段。Registry 提供反向索引 + 双路召回（primary/explore）。L1/L2/L3 managers 接入 registry，废弃 `L2_DOMAIN_NODES` 硬编码。`Domain.level` 标记 deprecated。 |
@@ -151,11 +152,10 @@
 | `L2Manager.query` | `(msg, trace_id) → None` | while 循环 + decide() → propagate queries_to_L3 → 收集 NOTIFY | L0_5_1 DownwardComm | L2Agent.decide(), _propagate(), collect_notify() |
 | `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
 | `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
-| `L2Agent` | `__init__(llm_client, knowledge, domain_nodes)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
+| `L2Agent` | `__init__(llm_client, knowledge)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
 | `L2Agent.decide` | `(query, meta, state, context, tools, layer) → dict{done, reply, selected_nodes, selected_cards, queries_to_L3, reasoning}` | 单步决策：通过 capture_tool（l2_query/l2_report）输出；`l2_output_format` 时用 consolidation 工具。 | L2Manager.query() | _get_cards_for_nodes(), _call_llm(), _schema_to_tool() |
 | `L2Agent._setup_l2_consolidation` | `() → None` | 注册 deprecate/create/modify L2 卡片的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
 | `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | decide() | FlexibleKnowledge.get_domain_cards() |
-| `L2_DOMAIN_NODES` | `list[dict{name, description}]` | 硬编码 seed 领域节点 (game/leduc, game/doudizhu) | L2Agent.stage1 | — |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
 
@@ -227,8 +227,6 @@
 | `FlexibleKnowledge.add_card` | `(content, domain, confidence, source) → KnowledgeCard` | 新增卡片（仅内存） | seed, L2Manager | — |
 | `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片 | L2Manager | — |
 | `FlexibleKnowledge.modify_card` | `(card_id, new_content) → KnowledgeCard\|None` | 修改卡片内容 | L2Manager | — |
-| `KnowledgeCard.boost` | `() → None` | **TODO: 机制待定，勿在反射中使用** | — | — |
-| `KnowledgeCard.penalize` | `() → None` | **TODO: 机制待定，勿在反射中使用** | — | — |
 
 ## core/skill_layer.py (已有，层内部使用)
 

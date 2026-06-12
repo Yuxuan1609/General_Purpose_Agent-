@@ -20,55 +20,11 @@ class L1Agent(LayerAgent):
     User prompt carries the current situation + history (dynamic per-step).
     Output uses DeepSeek JSON mode with predefined schemas.
 
-    Phase 2a: L2's domain node selection is merged into L1 stage1.
     Task goal is provided by the communication script via the meta field
     (not hardcoded here).
     """
 
     MAX_LOOPS = 1
-    # TODO: Increase MAX_LOOPS to enable multi-round L1→L2 and L2→L3 queries.
-    # The architecture supports iterative refinement: L1 can re-query L2 with
-    # adjusted questions, and L2 can re-query L3 with refined tasks.
-    # Currently disabled — single-shot only.
-
-    STAGE1_SCHEMA = {
-        "query": "string (需要下层根据领域知识完成的任务。可附上基于【行为准则】的完成建议，给出可直接使用的相关准则整合。注意下层看不到完整的【行为准则】)",
-        "call_l2": "boolean (是否需要查询下层 L2 知识库，true/false)",
-        "domain_nodes": [
-            {"name": "string (从领域节点列表中选出的节点路径，如 game/leduc)",
-             "score": "float (该节点与当前决策的相关度分数，0.0-1.0)",
-             "reason": "string (选择该节点的理由，一短句)"}
-        ],
-    }
-    STAGE2_SCHEMA = {
-        "done": "boolean (true/false)",
-        "result": "string (最终决策)",
-        "reasoning": "string (推理过程)",
-        "rules_used": ["string (本次决策中实际引用的行为准则的id，如 l1_001)"],
-    }
-
-    L1_DECISION_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "done": {"type": "boolean"},
-            "result": {"type": "string", "description": "最终决策文本"},
-            "queries": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "向下层 L2 查询的问题"},
-                        "domains_hint": {
-                            "type": "array", "items": {"type": "string"},
-                            "description": "建议查询的领域",
-                        },
-                    },
-                },
-            },
-            "reasoning": {"type": "string"},
-        },
-        "required": ["done", "reasoning"],
-    }
 
     # Consolidation tools — modifications via tool calls
     _L1_CONSOLIDATION_TOOLS: list[dict] = [

@@ -43,7 +43,7 @@ class Executor:
     def execute(self, obs: TaskObservation) -> dict:
         """Execute one action cycle through the cognitive chain.
 
-        Phase 2: L1's stage2 produces the final decision. Executor uses it directly;
+        L1's decide() produces the final decision. Executor uses it directly;
         LLM fallback only when L1 doesn't output a valid result.
         """
         session = obs.session or {}
@@ -59,8 +59,8 @@ class Executor:
         self._root.query(msg, trace_id)
         notify_layers = self._root.collect_notify()
 
-        # Phase 2: Use L1's result as the final action.
-        # L1Agent.stage2 returns {done, result, reasoning} via NOTIFY.
+        # Use L1's result as the final action.
+        # L1's decide() returns {done, result, reasoning} via NOTIFY.
         # Executor formats output without substantive reasoning.
         # TODO: Future complex tasks may need an extra LLM formatting call.
         l1_notify = notify_layers.get("l0_5_1", {})

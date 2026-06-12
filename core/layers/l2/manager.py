@@ -10,62 +10,14 @@ from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l2")
 
-# Domain nodes — manually seeded. Each node represents a semantic domain
-# with name (matching L2 card domain path) and a ~100-char description.
-# TODO: Unified node design (schema, persistence, auto-generation) to be
-#       finalized in a future session. For now, manually maintained.
-# DEPRECATED: will be removed; use DomainRegistry.list_all() instead
-L2_DOMAIN_NODES = [
-    {
-        "name": "game/leduc",
-        "description": (
-            "Leduc Hold'em简化版德州扑克，2人对局，牌面K/Q/J各两种花色，"
-            "翻牌前和翻牌后两轮下注阶段，最大2次加注/轮。配对比单张高，"
-            "同牌型比牌面大小和花色。行动: call/raise/fold/check。"
-        ),
-    },
-    {
-        "name": "game/doudizhu",
-        "description": (
-            "斗地主3人卡牌游戏，54张牌含大小王，1地主vs2农民。牌型包括单张、对子、"
-            "三张、顺子、连对、飞机、炸弹、火箭。地主先出牌，农民配合顶牌，先出完胜。"
-        ),
-    },
-    {
-        "name": "learning/reflect",
-        "description": (
-            "学习反思域。消费执行记录，分析策略问题、成功/失败模式，"
-            "基于工作反馈提出各层知识改进建议。"
-            "子域包括 learning/compile 和 learning/verify。"
-        ),
-    },
-    {
-        "name": "learning/consolidate",
-        "description": (
-            "知识整理域。管理知识库容量的维护操作：检测超限、合并相似条目、"
-            "归档低活跃内容、标记过时条目。L2 cards 软上限 25/硬上限 30，"
-            "L3 skills 软上限 15/硬上限 20。使用 deprecate > delete 策略保证可回滚。"
-        ),
-    },
-]
-
-
 class L2Agent(LayerAgent):
-    """L2 LLM Agent — three-stage V-structure processing.
+    """L2 LLM Agent — while-loop decision via capture_tool mode.
 
-    Stage 1 (Node Selection):
-        LLM scores domain nodes by relevance to L1's query.
-        (Placeholder) Graph expansion via KnowledgeGraph.spread_activation().
+    decide() is called by L2Manager's while loop. Two output tools:
+      - l2_query: delegate subtask to L3
+      - l2_report: deliver final answer to upper layer
 
-    Stage 2 (Card Filter + L3 Decision):
-        Retrieve cards from selected nodes → LLM filters ≤15 relevant.
-        LLM decides whether to consult L3.
-
-    Stage 3 (NOTIFY):
-        Integrate L3 response + previous context → final notify output.
-        Same pattern as L1's notify: reply to query + cards + reasoning.
-
-    Output uses DeepSeek JSON mode with predefined schemas.
+    Consolidation mode uses l2_report with DictInjector handlers.
     """
 
     MAX_NODES = 5
@@ -184,18 +136,15 @@ class L2Agent(LayerAgent):
     def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None):
         super().__init__(llm_client, logger)
         self._knowledge = knowledge
-        self._nodes = domain_nodes or L2_DOMAIN_NODES
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
         extra = f"\n{static_context}\n" if static_context else ""
-        domains_text = self._format_all_domains()
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
             f"- L2（你）：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
             f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
-            f"## 领域总览\n{domains_text}\n\n"
             f"## 领域边界\n"
             f"你只管理 L2 知识卡片（Knowledge Cards）。\n"
             f"不要修改 L1 的行为准则或 L3 的技能。\n\n"
@@ -203,16 +152,6 @@ class L2Agent(LayerAgent):
             f"[Meta]\n{meta}\n"
             f"{extra}"
         )
-
-    def _format_all_domains(self) -> str:
-        if not self._nodes:
-            return "（无已注册领域）"
-        lines = []
-        for n in self._nodes:
-            name = n.get("name", n.get("path", "?"))
-            desc = n.get("description", "")
-            lines.append(f"- **{name}**：{desc}")
-        return "\n".join(lines)
 
     def _format_domain_nodes(self, nodes: list[dict]) -> str:
         if not nodes:
@@ -470,12 +409,10 @@ class L2Agent(LayerAgent):
 class L2Manager(LayerManager):
     """L2 Manager — wraps FlexibleKnowledge + L2Agent.
 
-    Overrides query() to drive V-structure:
-      Stage1 (node selection) → Stage2 (card filter + L3 decision)
-      → enrich obs.state → propagate to L3.
+    Overrides query() to drive while-loop:
+      decide() → propagate queries to L3 → collect NOTIFY.
 
     NOTIFY goes to both upper layer (L1) and Executor.
-    TODO: Content may differ per target.
     """
 
     def __init__(self, knowledge, downstream: LayerManager | None = None,

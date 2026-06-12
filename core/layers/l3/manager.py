@@ -30,8 +30,7 @@ class L3Agent(LayerAgent):
     """L3 LLM Agent — skill-based task execution.
 
     Currently single-stage (combining find + execute per user's spec).
-    TODO: Future split into stage1 (find relevant skills) + stage2 (execute).
-
+    
     Input: task context + matched skills
     Output: {skills_used, result, reasoning}
     """

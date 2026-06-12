@@ -93,15 +93,12 @@
 **现状：**
 - Orchestrator 横向分层（Task Decomposer → Task Runner(s) → Meta Learner）**标记为 TODO，代码未实现**
 - 当前每层的 V-structure 循环 `MAX_LOOPS=1`——单次查询后直接决策，无多轮追问
-- `PROPOSAL` / `APPROVAL` / `REJECTION` 三种消息类型**代码已定义但从未使用**
 - 任务划分职责硬编码在 prompt 中，未在架构层面显式约束
 
 **缺口：**
 1. 每层缺少独立的持续循环
 2. 无 Hermes 式的 `while step(): observe → decide → act` 内部循环
 3. L1→L2、L2→L3 之间无多轮对话能力
-4. PROPOSAL/APPROVAL/REJECTION 未启用，下层无法向上层主动提案
-5. 任务划分职责未在代码中显式约束
 
 **目标设计：**
 ```
@@ -111,9 +108,7 @@
 │    1. observe: 从上层 QUERY + 本层 data 构建观察  │
 │    2. plan:    本层 Agent 决定"需要什么信息"       │
 │    3. delegate: 需要下层信息 → QUERY 到下层       │
-│    4. propose:  需要上层变更 → PROPOSAL 到上层     │
-│    5. decide:   信息充分 → 产出 NOTIFY             │
-│    6. review:   收到 REJECTION → 回到 step 2       │
+│    4. decide:   信息充分 → 产出 NOTIFY             │
 │  限制: max_rounds=N, 超时=T, token_budget=B       │
 └─────────────────────────────────────────────────┘
 ```
@@ -124,13 +119,12 @@
 |------|------------|----|-----|
 | **决策粒度** | 宏观任务目标 | 中观策略选择 | 微观操作执行 |
 | **持有的知识** | 行为准则（抽象原则） | 经验卡片（具体策略） | 技能模板（标准化流程） |
-| **可发起的消息类型** | QUERY, APPROVAL, REJECTION | QUERY, PROPOSAL, NOTIFY | PROPOSAL, NOTIFY |
+| **可发起的消息类型** | QUERY | QUERY, NOTIFY | NOTIFY |
 | **循环终止条件** | stage2 输出 done=true | 信息充分 / 无需 L3 | 技能执行完毕 |
 | **多轮追问** | 可追问 L2 | 可追问 L3 | — |
 
 **关键变更点：**
 - 将 `MAX_LOOPS` 从 1 提升到可配置值（如 3）
-- 启用 `PROPOSAL` / `APPROVAL` / `REJECTION` 消息流
 - 每层 Manager 从被动 `process()` 改为主动 `run_loop()`
 - 新增 `Orchestrator` 实现类
 - **Stage1 工具挂载**：当前仅 stage2 在 consolidation 时挂载工具（deprecate/create/modify）。Hermes 循环下，stage1 也需要挂载工具（如 `todo` 分步跟踪、`knowledge_query` 查卡片），实现多轮拆解-反馈-调整。
