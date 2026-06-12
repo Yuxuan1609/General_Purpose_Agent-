@@ -9,6 +9,10 @@ class CapabilityResult:
     """Unified return type for all capability invocations.
 
     Flows through LayerMessage back to the calling layer's user prompt.
+    On failure, fallback dict contains structured hints for the Agent:
+      retry: str | None (e.g. "可重试最多 2 次")
+      degrade: list[dict] | None (e.g. [{"tool": "...", "hint": "..."}])
+      default: str (always present on failure)
     """
     capability_name: str
     layer: str
@@ -16,6 +20,7 @@ class CapabilityResult:
     data: Any = None
     error: str = ""
     metadata: dict = field(default_factory=dict)
+    fallback: dict | None = None
 
 
 class Capability(ABC):
