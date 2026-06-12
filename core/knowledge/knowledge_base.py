@@ -92,6 +92,8 @@ class KnowledgeBase:
         ]
 
     def save(self) -> None:
+        if self._storage_path == ":memory:":
+            return
         import json
         from pathlib import Path
         p = Path(self._storage_path)
