@@ -118,6 +118,7 @@ class LayerAgent(ABC):
         use_json_mode = bool(schema) and not tools and not capture_tools
 
         for turn in range(1, self.MAX_TOOL_TURNS + 1):
+            self._log.debug("  ── turn %d/%d (messages=%d) ──", turn, self.MAX_TOOL_TURNS, len(messages))
             resp = self._llm.chat(
                 messages=messages,
                 json_mode=use_json_mode,
@@ -125,6 +126,8 @@ class LayerAgent(ABC):
             )
 
             if resp.has_tool_calls and self._injector and layer:
+                tool_names = [tc.function.name for tc in resp.tool_calls]
+                self._log.debug("  ├─ tool_calls (%d): %s", len(tool_names), ", ".join(tool_names))
                 assistant_msg: dict = {
                     "role": "assistant",
                     "content": resp.text or None,
@@ -164,31 +167,39 @@ class LayerAgent(ABC):
 
                 # Execute remaining tools
                 for tc in executable_calls:
+                    self._log.debug("  ├─ call  : %s(%s) id=%s",
+                                   tc.function.name,
+                                   tc.function.arguments[:400],
+                                   tc.id)
                     raw = self._injector.execute_tool_call(
                         layer, tc.function.name,
                         tc.function.arguments,
                     )
                     if raw.success:
                         result_content = raw.data
-                        result_str = str(raw.data.get("result", "") if isinstance(raw.data, dict) else raw.data)[:200]
+                        result_str = str(raw.data.get("result", "") if isinstance(raw.data, dict) else raw.data)[:800]
                     else:
                         result_content = {"error": raw.error}
                         fb = getattr(raw, 'fallback', None)
                         if fb:
                             result_content.update(fb)
                         result_str = raw.error
-                    self._log.debug("  tool %s → %s", tc.function.name,
-                                   str(result_str)[:120])
+                    self._log.debug("  └─ result (success=%s, id=%s): %s",
+                                   raw.success, tc.id, str(result_str)[:800])
+                    serialized = json.dumps(result_content, ensure_ascii=False)
+                    self._log.debug("     → role:tool content (%d chars): %s",
+                                   len(serialized), serialized[:500])
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": json.dumps(result_content, ensure_ascii=False),
+                        "content": serialized,
                     })
                 continue  # next turn
 
-            # No tool calls → final answer (fallback — shouldn't fire when capture_tools is set)
+            # No tool calls → final answer
             text = resp.text if hasattr(resp, 'text') else str(resp)
-            self._log.debug("  ═══ response (turn %d) ═══\n%s", turn, _indent(text, 4))
+            self._log.debug("  ── final answer (turn %d, messages=%d) ──\n%s",
+                           turn, len(messages), _indent(text[:500], 4))
 
             if capture_tools or schema is None:
                 return {"reply": text, "reasoning": ""}
@@ -207,9 +218,33 @@ class LayerAgent(ABC):
                 self._log.warning("robust_parse also failed, returning raw")
                 return {"_raw": text}
 
-        # Max turns exceeded
-        self._log.warning("Max tool call turns (%d) exceeded", self.MAX_TOOL_TURNS)
-        return {"_raw": "max_tool_turns", "_error": "tool call loop exceeded"}
+        # Max turns exceeded — give LLM one final chance to summarize from accumulated tool results
+        self._log.warning("Max tool call turns (%d) exceeded, messages=%d — asking for summary",
+                         self.MAX_TOOL_TURNS, len(messages))
+        try:
+            messages.append({"role": "user", "content": "[系统] 你已达到工具调用次数上限，不可以再调用工具。请基于对话中已获取的信息，直接以纯文本形式给出最终答案。"})
+            resp = self._llm.chat(messages=messages, json_mode=False, tools=None)
+            text = resp.text if hasattr(resp, 'text') else str(resp)
+            self._log.debug("  ── forced summary (messages=%d) ──\n%s",
+                           len(messages), _indent(text[:800], 4))
+            if capture_tools:
+                return {"done": True, "reply": text, "reasoning": ""}
+            if schema is None:
+                return {"reply": text, "reasoning": ""}
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+                return {"_raw": text, "_type": type(parsed).__name__}
+            except json.JSONDecodeError:
+                from core.json_repair import robust_parse
+                repaired = robust_parse(text, schema)
+                if repaired:
+                    return repaired
+                return {"_raw": text}
+        except Exception:
+            self._log.warning("Final summary call also failed")
+            return {"_raw": "max_tool_turns", "_error": "tool call loop exceeded"}
 
 
     @staticmethod

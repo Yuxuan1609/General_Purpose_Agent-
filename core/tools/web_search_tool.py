@@ -1,7 +1,11 @@
 """Web search tool using DuckDuckGo (no API key required)."""
 import json
 import logging
-from typing import Optional
+import time
+
+# Suppress ddgs library HTTP request logging
+for _lib in ("ddgs", "duckduckgo_search", "primp", "curl_cffi"):
+    logging.getLogger(_lib).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +18,16 @@ def register_web_search_tool(registry):
         max_results = int((args or {}).get("max_results", 5))
 
         try:
-            from duckduckgo_search import DDGS
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
+            try:
+                from ddgs import DDGS
+            except ImportError:
+                from duckduckgo_search import DDGS
+            for attempt in range(3):
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(query, max_results=max_results))
+                if results:
+                    break
+                time.sleep(1.0)
             formatted = []
             for r in results:
                 formatted.append({
@@ -27,7 +38,7 @@ def register_web_search_tool(registry):
             return json.dumps(formatted, ensure_ascii=False)
         except ImportError:
             return json.dumps({
-                "error": "duckduckgo_search not installed. Run: pip install duckduckgo_search"
+                "error": "ddgs not installed. Run: pip install ddgs"
             })
         except Exception as e:
             logger.debug("Web search failed: %s", e)

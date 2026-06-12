@@ -2,7 +2,7 @@
 # 行为规则种子与容量控制
 
 # 每层 Manager while 循环最大轮次
-max_rounds: 3
+max_rounds: 5
 
 # 种子行为规则（Agent 启动时注入，可经 L0.5 审批后修改）
 seed_rules:

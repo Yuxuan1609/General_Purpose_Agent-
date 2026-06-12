@@ -214,7 +214,7 @@ class L1Agent(LayerAgent):
             "1. 如果你需要 L2 层的策略知识才能做出决策 → 调用【l1_query】工具下发查询\n"
             "2. 如果你已经掌握了足够信息，可以独立做出最终决策 → 调用【l1_report】工具汇报结果\n"
             "3. 禁止以文本方式直接输出JSON或回复，必须调用以上两个工具之一！\n\n"
-            "l1_query：向下查询，done固定为false，列出需要L2回答的具体问题\n"
+            "l1_query：向下查询，done固定为false。每次只能提交一个问题，收到L2回复后如仍需补充再发起下一次查询。\n"
             "l1_report：向上汇报，done固定为true，给出最终决策和理由\n"
         )
         if l1_fmt:
@@ -252,8 +252,8 @@ class L1Agent(LayerAgent):
                     if isinstance(l1_part, dict):
                         reply_text = l1_part.get("reply", "")
                 if not reply_text:
-                    reply_text = str(l2_reply)[:200]
-                history_lines.append(f"  Round {h.get('round', '?')}: query='{q_text}' → L2: {reply_text[:200]}")
+                    reply_text = str(l2_reply)
+                history_lines.append(f"  Round {h.get('round', '?')}: query='{q_text}' → L2: {reply_text[:50000]}")
             if history_lines:
                 user_parts.append("[L2 历史返回]\n" + "\n".join(history_lines))
         user = "\n\n".join(user_parts)
@@ -291,13 +291,14 @@ class L1Agent(LayerAgent):
         query_tool = self._schema_to_tool(
             "l1_query",
             "【特殊工具：向下查询】当需要下层L2的策略知识辅助决策时使用。"
-            "写清楚需要查询的具体问题和目标领域。禁止以文本方式直接回复！",
+            "每次只提交一个问题，收到回复后再决定是否继续查询。禁止以文本方式直接回复！",
             {
                 "type": "object",
                 "properties": {
                     "done": {"type": "boolean", "const": False},
                     "queries": {
                         "type": "array",
+                        "maxItems": 1,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -356,6 +357,7 @@ class L0_5_1Manager(LayerManager):
         self._registry = domain_registry
         self.max_rounds = max_rounds
         self._l1_notify: dict | None = None
+        self._l2_history: list[dict] = []
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -377,6 +379,9 @@ class L0_5_1Manager(LayerManager):
             return
 
         state = dict(obs.state or {})
+        # Clear L2 history on new executor trace (no context_history in state means fresh input)
+        if "context_history" not in state:
+            self._l2_history.clear()
         history: list[dict] = []
 
         for round_idx in range(1, self.max_rounds + 1):
@@ -391,7 +396,7 @@ class L0_5_1Manager(LayerManager):
                 tools=tools, layer="l1",
             )
             logger.debug("  result: done=%s result=%s",
-                         result.get("done"), str(result.get("result", ""))[:200])
+                         result.get("done"), str(result.get("result", ""))[:2000])
 
             if result.get("done"):
                 self._l1_notify = {
@@ -415,6 +420,7 @@ class L0_5_1Manager(LayerManager):
                     **state,
                     "query_context": q,
                     "domains_hint": q.get("domains_hint", []),
+                    "context_history": list(self._l2_history),
                 }
                 sub_obs = TaskObservation(meta=q["query"], state=sub_state)
                 q_msg = self._downward.wrap_query(
@@ -431,12 +437,44 @@ class L0_5_1Manager(LayerManager):
                     "l2_reply": l2_notify,
                 })
                 state[f"l2_round_{round_idx}"] = l2_notify
+                # Record L2 round into context history for next L2 call
+                l2_reply_text = ""
+                if isinstance(l2_notify, dict):
+                    l2_part = l2_notify.get("l2", {})
+                    if isinstance(l2_part, dict):
+                        l2_reply_text = l2_part.get("reply", "")
+                if not l2_reply_text:
+                    l2_reply_text = str(l2_notify)
+                self._l2_history.append({
+                    "query": q["query"][:200],
+                    "reply": l2_reply_text[:2000],
+                })
 
-        # Force terminate
+        # Force terminate — inject accumulated L2 history so LLM has context
         logger.debug("── L1 force terminate (max_rounds=%d) ──", self.max_rounds)
+        history_text = ""
+        if history:
+            lines = []
+            for h in history:
+                q_text = h.get("query", "")
+                l2_reply = h.get("l2_reply", {})
+                reply_text = ""
+                if isinstance(l2_reply, dict):
+                    l1_part = l2_reply.get("l0_5_1", {})
+                    if isinstance(l1_part, dict):
+                        reply_text = l1_part.get("reply", "")
+                if not reply_text:
+                    reply_text = str(l2_reply)
+                lines.append(f"查询: {q_text}\nL2回复: {reply_text[:50000]}")
+            history_text = "\n\n".join(lines)
+        user_text = (
+            f"鉴于已超过最大轮次，基于已有信息给出最终决策。\n\n"
+            f"[已完成的查询与回复]\n{history_text}" if history_text
+            else "鉴于已超过最大轮次，基于已有信息给出最终决策。"
+        )
         force = self._agent._call_llm(
             system=self._agent._build_system_prompt("force_terminate", meta),
-            user="鉴于已超过最大轮次，基于已有信息给出最终决策。",
+            user=user_text,
             layer="l1",
         )
         self._l1_notify = {"done": True, "result": str(force), "reasoning": "max_rounds"}

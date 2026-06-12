@@ -304,16 +304,18 @@ class L2Agent(LayerAgent):
             for l3r in l3_results:
                 r = l3r.get("l3", {})
                 if isinstance(r, dict) and r.get("result"):
-                    parts.append(f"L3: {r['result'][:200]}")
+                    parts.append(f"L3: {r['result'][:50000]}")
             l3_text = "\n".join(parts) if parts else "（L3 未返回信息）"
 
         instruction = (
-            "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n\n"
+            "你的核心任务是完成上层 query，Meta 提供任务整体背景。\n"
+            "你有最多 5 轮工具调用次数，用完会自动截断并要求你总结。\n"
+            "请在前 3-4 轮集中收集信息，最后 1-2 轮务必调用 l2_report 输出结论。\n\n"
             "*** 输出规则（极其重要）***\n"
             "1. 如果你需要 L3 的技能来执行具体任务 → 调用【l2_query】工具下发任务\n"
             "2. 如果你已经掌握了足够信息，可以回复上层查询 → 调用【l2_report】工具输出结论\n"
             "3. 禁止以文本方式直接输出JSON或回复，必须调用以上两个工具之一！\n\n"
-            "l2_query：向下调度，done固定为false，含 selected_nodes 节点选择和 queries_to_L3 任务列表\n"
+            "l2_query：向下调度，done固定为false。每次只下发一个技能任务。\n"
             "l2_report：向上回复，done固定为true，含 reply 最终结论"
         )
         if l2_fmt:
@@ -325,8 +327,20 @@ class L2Agent(LayerAgent):
         system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
 
+        # Build context history from previous L2 calls (within same executor trace)
+        context_text = ""
+        ctx_history = state.get("context_history", [])
+        if ctx_history:
+            lines = []
+            for i, h in enumerate(ctx_history):
+                lines.append(f"第{i+1}次查询: {h.get('query', '')[:300]}")
+                lines.append(f"第{i+1}次结果摘要: {h.get('reply', '')[:500]}")
+            context_text = "\n".join(lines)
+
+        ctx_section = f"[本轮上下文]\n{context_text}\n\n" if context_text else ""
         user = (
             f"[上层查询]\n{query}\n\n"
+            f"{ctx_section}"
             f"{nodes_section}"
             f"[学习数据]\n{self._build_learning_section(state)}\n\n"
             f"[知识卡片]\n{cards_text}\n\n"
@@ -474,6 +488,7 @@ class L2Manager(LayerManager):
         self.max_rounds = max_rounds
         self._l2_notify: dict | None = None
         self._cards: list[dict] = []
+        self._l3_history: list[dict] = []
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -511,62 +526,50 @@ class L2Manager(LayerManager):
             return
 
         state = dict(obs.state) if obs and obs.state else {}
+        # Clear L3 history on new executor trace (no context_history in state)
+        if "context_history" not in state:
+            self._l3_history.clear()
         context: dict = {
-            "history": [],
             "selected_nodes": selected_nodes,
             "candidate_cards": [],
             "l3_results": [],
         }
 
-        for round_idx in range(1, self.max_rounds + 1):
-            logger.debug("── L2 decide [round %d/%d] ──", round_idx, self.max_rounds)
-
-            tools = self._agent._get_tools("l2") if self._agent else None
-            result = self._agent.decide(
-                query=query, meta=meta, state=state,
-                context=context, tools=tools, layer="l2",
-            )
-            logger.debug("  result: done=%s reply=%s",
-                         result.get("done"), str(result.get("reply", ""))[:200])
-
-            if result.get("done"):
-                cards = result.get("selected_cards", [])
-                self._cards = cards
-                self._l2_notify = {
-                    "reply": result.get("reply", ""),
-                    "cards": cards,
-                    "reasoning": result.get("reasoning", ""),
-                }
-                return
-
-            if result.get("selected_nodes"):
-                context["selected_nodes"] = result["selected_nodes"]
-                context["candidate_cards"] = self._agent._get_cards_for_nodes(
-                    result["selected_nodes"]
-                )
-
-            for q in result.get("queries_to_L3", []):
-                sub_obs = TaskObservation(
-                    meta=q["task"],
-                    state={**state, "domain": q.get("domain", "")},
-                )
-                self._propagate(sub_obs, trace_id)
-                l3_notify = self._downstream.collect_notify()
-                context["l3_results"].append(l3_notify)
-                context["history"].append({"round": round_idx, "query_to_L3": q})
-
-        # Force terminate
-        logger.debug("── L2 force terminate (max_rounds=%d) ──", self.max_rounds)
-        force_reply = self._agent._call_llm(
-            system=self._agent._build_system_prompt("force_terminate", obs.meta if obs else ""),
-            user="基于已有卡片和上下文，给出最终回复。",
-            layer="l2",
+        tools = self._agent._get_tools("l2") if self._agent else None
+        result = self._agent.decide(
+            query=query, meta=meta, state=state,
+            context=context, tools=tools, layer="l2",
         )
+        logger.debug("  result: done=%s reply=%s",
+                     result.get("done"), str(result.get("reply", ""))[:2000])
+
+        cards = result.get("selected_cards", [])
+        self._cards = cards
         self._l2_notify = {
-            "reply": str(force_reply),
-            "cards": context.get("candidate_cards", []),
-            "reasoning": "max_rounds",
+            "reply": result.get("reply", ""),
+            "cards": cards,
+            "reasoning": result.get("reasoning", ""),
         }
+
+        for q in result.get("queries_to_L3", []):
+            sub_obs = TaskObservation(
+                meta=q["task"],
+                state={
+                    **state, "domain": q.get("domain", ""),
+                    "context_history": list(self._l3_history),
+                },
+            )
+            self._propagate(sub_obs, trace_id)
+            l3_notify = self._downstream.collect_notify()
+            l3_result_text = ""
+            if isinstance(l3_notify, dict):
+                l3_part = l3_notify.get("l3", {})
+                if isinstance(l3_part, dict):
+                    l3_result_text = l3_part.get("result", "")
+            self._l3_history.append({
+                "query": q["task"][:200],
+                "reply": l3_result_text[:1000],
+            })
 
     def _propagate(self, obs, trace_id: str, l3_task: str = "",
                    selected_nodes: list[dict] | None = None) -> None:

@@ -85,8 +85,27 @@ Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
 
 ### 环境要求
 
-- Python >= 3.11
+- Python >= 3.10
 - DeepSeek API Key（或其他 OpenAI 兼容端点）
+- **推荐 WSL2（Windows 用户）** — `terminal` 工具在 Linux 环境下行为正常，Windows 原生 cmd 命令与 Linux 工具链不兼容
+
+### WSL 运行（Windows 推荐）
+
+```powershell
+# 1. 进入 WSL，直接使用 Windows 侧的项目目录（/mnt/c/ 挂载，实时同步）
+wsl
+cd /mnt/c/Users/micha/PycharmProjects/cognitive-agent
+
+# 2. 安装依赖（pip 包是 Linux 二进制，需 WSL 侧独立安装）
+pip install pyyaml pytest ddgs
+
+# 3. 设置 API Key
+export DEEPSEEK_API_KEY=your-key-here
+
+# 4. 运行
+python3 main.py "test query"
+python3 -m pytest tests/ -v
+```
 
 ### 安装
 
@@ -254,7 +273,7 @@ cognitive-agent/
 | 阶段 | 状态 |
 |------|------|
 | Phase 1 — Execute 链路 | ✅ 已完成 |
-| Phase 1.5 — Comm Agent + LayerMessage + V-structure | ✅ 已完成 |
+| Phase 1.5 — Comm Agent + LayerMessage + Agent while-loop design | ✅ 已完成 |
 | Phase 2.1 — LearningEnv 骨架 | ✅ 已完成 |
 | Phase 2.2 — 接入游戏循环 + 双域激活 | ✅ 已完成 |
 | Phase 2.3 — 清理旧代码 + 元学习轨 | ✅ 已完成 |

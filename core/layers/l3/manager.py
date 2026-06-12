@@ -190,10 +190,22 @@ class L3Agent(LayerAgent):
         system = self._build_system_prompt(instruction, meta)
         query_section = f"[上层查询]\n完成 L2 下发的任务：{l3_task}\n\n" if l3_task else ""
 
+        # Build context history from previous L3 calls (within same executor trace)
+        context_text = ""
+        ctx_history = state.get("context_history", [])
+        if ctx_history:
+            lines = []
+            for i, h in enumerate(ctx_history):
+                lines.append(f"第{i+1}次请求: {h.get('query', '')[:300]}")
+                lines.append(f"第{i+1}次结果: {h.get('reply', '')[:500]}")
+            context_text = "\n".join(lines)
+
+        ctx_section = f"[本轮上下文]\n{context_text}\n\n" if context_text else ""
         user = (
             f"{fb_section}"
             f"{learning_data}"
             f"{query_section}"
+            f"{ctx_section}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )
@@ -355,31 +367,23 @@ class L3Manager(LayerManager):
         context: dict = {
             "matched_skills": self._matched_skills,
             "l3_task": l3_task,
-            "history": [],
         }
 
-        for round_idx in range(1, self.max_rounds + 1):
-            logger.debug("── L3 decide [round %d/%d] ──", round_idx, self.max_rounds)
+        tools = self._agent._get_tools("l3") if self._agent else None
+        meta = l3_task or (obs.meta if obs else "")
+        result = self._agent.decide(
+            meta=meta, state=state, context=context,
+            tools=tools, layer="l3",
+        )
+        logger.debug("  result: done=%s result=%s",
+                     result.get("done"), str(result.get("result", ""))[:2000])
 
-            tools = self._agent._get_tools("l3") if self._agent else None
-            meta = l3_task or (obs.meta if obs else "")
-            result = self._agent.decide(
-                meta=meta, state=state, context=context,
-                tools=tools, layer="l3",
-            )
-            logger.debug("  result: done=%s result=%s",
-                         result.get("done"), str(result.get("result", ""))[:200])
-
-            if result.get("done"):
-                self._l3_notify = {
-                    "skills_matched": len(self._matched),
-                    "skills_used": result.get("skills_used", []),
-                    "result": result.get("result", ""),
-                    "reasoning": result.get("reasoning", ""),
-                }
-                break
-
-            context["history"].append({"round": round_idx, "result": result})
+        self._l3_notify = {
+            "skills_matched": len(self._matched),
+            "skills_used": result.get("skills_used", []),
+            "result": result.get("result", ""),
+            "reasoning": result.get("reasoning", ""),
+        }
 
         # Propagate downstream (L4, reserved)
         if self._downstream:

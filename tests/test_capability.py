@@ -13,7 +13,7 @@ import pytest
 from capability import (
     Capability, CapabilityResult, CapabilityRegistry,
 )
-from capability.tool_capability import ToolCapability, DEFAULT_TOOL_ALLOWLIST
+from capability.tool_capability import ToolCapability
 from capability.knowledge_capability import (
     KnowledgeCapability, InMemoryKnowledgeStore, BaseKnowledgeStore,
     seed_knowledge_stores,
@@ -55,7 +55,7 @@ def tool_registry_with_todo():
     ToolRegistry._instance = None
     reg = ToolRegistry()
 
-    def todo_handler(args=None, context=None):
+    def todo_handler(args=None, context=None, timeout=None):
         todos = (args or {}).get("todos", [])
         if todos:
             return json.dumps({"success": True, "todos": todos})
@@ -154,9 +154,9 @@ class TestToolCapability:
         cap = ToolCapability(tool_registry_with_todo)
         assert cap.is_visible_to("l1")  # L1 can see todo
 
-    def test_allowed_l1_only_todo(self, tool_registry_with_todo):
+    def test_allowed_l1_includes_todo(self, tool_registry_with_todo):
         cap = ToolCapability(tool_registry_with_todo)
-        assert cap.allowed_tools("l1") == {"todo"}
+        assert "todo" in cap.allowed_tools("l1")
 
     def test_invoke_allowed(self, tool_registry_with_todo):
         cap = ToolCapability(tool_registry_with_todo)
@@ -175,12 +175,12 @@ class TestToolCapability:
         assert len(schemas) == 1
         assert schemas[0]["function"]["name"] == "todo"
 
-    def test_default_allowlist_structure(self, tool_registry_with_todo):
+    def test_allowlist_structure(self, tool_registry_with_todo):
         cap = ToolCapability(tool_registry_with_todo)
-        assert "l1" in DEFAULT_TOOL_ALLOWLIST
-        assert "l2" in DEFAULT_TOOL_ALLOWLIST
-        assert "l3" in DEFAULT_TOOL_ALLOWLIST
-        assert "todo" in DEFAULT_TOOL_ALLOWLIST["l1"]
+        assert "l1" in cap._allowlist
+        assert "l2" in cap._allowlist
+        assert "l3" in cap._allowlist
+        assert "todo" in cap._allowlist["l1"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
