@@ -98,7 +98,23 @@ Agent 拿到结果后，看到 meta 中有 `parent: "doc_abc"` 和 `children: ["
 
 ### 与 L2/L3 DomainRegistry 的关系
 
--待定
+**共享命名规范，独立演进**：
+
+- KB domain 和 Agent DomainRegistry 不合并树、不共享存储
+- Domain path 命名规范一致：`game/leduc/preflop`、`coding/python/async`
+- Agent 使用 KB domain 时**优先复用已有 domain**——通过 `knowledge_list_domains` 浏览目录，选择最匹配的已有 domain 而非随意新建
+
+```
+Agent 任务: "帮我写个 Python asyncio 示例"
+    │
+    ├── knowledge_list_domains("coding/")
+    │       → 看到 coding/python, coding/python/async, ...
+    ├── 选择 coding/python/async（已有，直接复用）
+    ├── knowledge_query(query, domain="coding/python/async")
+    ├── 后续想加新文档也挂在这个 domain 下（不新建 coding/python_asyncio）
+    └── 若发现两边 domain 指向同一事物但名称不同
+        → knowledge_sync_domain 提示可对齐（非强制）
+```
 
 
 
