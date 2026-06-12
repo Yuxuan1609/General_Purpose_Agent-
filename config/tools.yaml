@@ -1,0 +1,53 @@
+# Tool system configuration — allowlist, timeout, fallback
+# Priority: LLM arg timeout > tool config timeout > default_timeout
+
+default_timeout: 30
+
+tools:
+  terminal:
+    timeout: 30
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 2
+      degrade:
+        - tool: read_file
+          hint: "终端不可用时可尝试 read_file 读取目标文件"
+        - tool: grep
+          hint: "终端不可用时可尝试 grep 搜索文件内容"
+
+  web_search:
+    timeout: 15
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 2
+      degrade:
+        - tool: knowledge_query
+          hint: "网络搜索不可用时可尝试 knowledge_query 查询本地知识库"
+
+  read_file:
+    timeout: 10
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 1
+      degrade: []
+
+  grep:
+    timeout: 10
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 1
+      degrade: []
+
+  todo:
+    timeout: 5
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 1
+      degrade: []
+
+  knowledge_query:
+    timeout: 10
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 1
+      degrade: []
