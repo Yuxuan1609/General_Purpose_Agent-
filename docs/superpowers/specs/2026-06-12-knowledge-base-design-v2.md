@@ -4,10 +4,8 @@
 
 ## 核心理念
 
-- **Domain 树是唯一组织维度**——不预设抽象层/粒度层/信任层，树的深度自动体现粒度
 - **Meta 由 Agent 自维护**——预定义最小骨架（domain, id），其余字段 Agent 按需演化
 - **两阶段检索**——txtai embeddings+BM25 粗筛，LLM 读 meta 精排
-- **与 L2/L3 共享 domain 命名规范**——不共享存储，但 domain path 命名一致
 
 ## Meta 设计
 
@@ -59,25 +57,25 @@ depends_on: "python>=3.6"
     │
     ▼
 Stage 1: 粗筛 (txtai)
-    ├── embeddings.search(query, limit=20)      语义相似 → 20 条
-    ├── scoring.bm25.search(query, limit=20)    关键词匹配 → 20 条
+    ├── embeddings.search(query, limit=5)      语义相似 → 5 条
+    ├── scoring.bm25.search(query, limit=5)    关键词匹配 → 5 条
     └── 合并去重 → SQL 过滤 (可选: domain 限定)
-        输出: top-20 候选文档 (id, title, content[:200], meta)
+        输出: top-5 候选文档 (id, title, content[:200], meta)
     │
     ▼
 Stage 2: 精排 (Agent LLM)
-    输入: [原始查询, top-20 的 meta 摘要]
+    输入: [原始查询, top-5 的 meta 摘要]
     LLM 判断:
       - 文档类型是否匹配查询意图？(FAQ 还是 reference？)
       - 复杂度是否适合当前上下文？
       - 是否有 parent/children 关系可追溯更深或更浅的知识？
       - related 链接是否比当前结果更相关？
-    输出: top-5 最终结果 (含排序理由)
+    输出: top-K 最终结果 (含排序理由)
     │
     ▼
 返回结果 + meta 上下文
     Agent 可以:
-      - 直接使用 top-5 中的内容
+      - 直接使用 top-K 中的内容
       - 沿 parent/children/related 链继续探索
       - 发现知识缺口后通过 knowledge_add 补充
 ```
@@ -87,7 +85,7 @@ Stage 2: 精排 (Agent LLM)
 - 向量搜索擅长"语义相近"，但不懂"这个查询需要 example 还是 reference"
 - 关键字搜索擅长精确匹配，但对同义表达盲区大
 - LLM 读 meta 可以做出语义判断——"查询者看起来是新手，advanced 的文档应该降权"
-- parent/children/related 这类图关系，传统检索无法利用，LLM 可以
+- parent/children/related 这类复合的类图关系，传统检索无法利用，LLM 可以
 
 ### Agent 自主探索路径
 
@@ -100,28 +98,9 @@ Agent 拿到结果后，看到 meta 中有 `parent: "doc_abc"` 和 `children: ["
 
 ### 与 L2/L3 DomainRegistry 的关系
 
-- **独立存储，共享命名规范**
-- Domain path 格式一致：`game/leduc/preflop`、`coding/python/async`
-- Agent 可通过 `knowledge_sync_domain` 工具双向同步 domain 名称
-- KB 的 domain 树由文档的 `domain` 字段自动构建——有文档就有那个 domain
+-待定
 
-### Domain 树的自增长
 
-```
-当前树（从文档 meta 自动聚合）:
-  game/
-    leduc/          ← 3 篇文档
-    doudizhu/       ← 2 篇文档
-  coding/
-    python/         ← 15 篇文档
-      async/        ← 5 篇文档
-    javascript/     ← 8 篇文档
-
-Agent 看到 domain 列表 → 发现 coding/python 有 15 篇但 coding/golang 是空的
-→ Agent 判断: "这个 domain 有缺口，我应该补充一些 Golang 的参考文档"
-```
-
-没有文档就没有 domain——和 L2/L3 的 `DomainRegistry` 手动建节点不同，KB 的 domain 是惰性生长的。
 
 ## Agent 维护工具（CRUD + meta）
 
