@@ -64,13 +64,19 @@ class ToolRegistry:
                 if e.check_fn is None or e.check_fn()
             ]
 
-    def dispatch(self, name: str, args: dict, context: dict | None = None) -> str:
+    def dispatch(self, name: str, args: dict, context: dict | None = None,
+                 timeout: int | None = None) -> str:
         with self._lock:
             entry = self._entries.get(name)
         if entry is None:
             return json.dumps({"error": f"Tool '{name}' not found"})
         try:
-            result = entry.handler(args, context) if context else entry.handler(args)
+            kwargs = {"args": args}
+            if context is not None:
+                kwargs["context"] = context
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            result = entry.handler(**kwargs)
             if isinstance(result, str):
                 return result
             return json.dumps(result)
