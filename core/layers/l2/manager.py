@@ -448,6 +448,14 @@ class L2Manager(LayerManager):
             selected_nodes = []
         meta = obs.meta if obs else ""
 
+        if not selected_nodes:
+            state_src = data.get("state", {}) if isinstance(data, dict) else {}
+            domains_hint = state_src.get("domains_hint", [])
+            if not domains_hint and obs and obs.state:
+                domains_hint = obs.state.get("domains_hint", [])
+            if domains_hint:
+                selected_nodes = [{"name": d, "score": 1.0} for d in domains_hint]
+
         if self._registry and selected_nodes:
             for n in selected_nodes:
                 name = n.get("name", n.get("path", ""))
