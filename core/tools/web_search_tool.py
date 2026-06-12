@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_web_search_tool(registry):
-    def handler(args=None, context=None):
+    def handler(args=None, timeout=30):
         query = (args or {}).get("query", "")
         if not query:
             return json.dumps({"error": "No query provided"})

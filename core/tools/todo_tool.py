@@ -30,7 +30,7 @@ _store = TodoStore()
 
 
 def register_todo_tool(registry):
-    def handler(args=None, context=None):
+    def handler(args=None, timeout=5):
         todos = (args or {}).get("todos")
         if todos:
             updated = _store.update(todos)

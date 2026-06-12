@@ -41,7 +41,7 @@ def _validate_path(path_str: str) -> Path:
 
 
 def register_read_file(registry):
-    def handler(args=None, context=None):
+    def handler(args=None, timeout=10):
         path_str = (args or {}).get("path", "")
         if not path_str:
             return json.dumps({"error": "No path provided"})
@@ -110,7 +110,7 @@ def register_read_file(registry):
 
 
 def register_grep(registry):
-    def handler(args=None, context=None):
+    def handler(args=None, timeout=10):
         pattern = (args or {}).get("pattern", "")
         if not pattern:
             return json.dumps({"error": "No pattern provided"})
