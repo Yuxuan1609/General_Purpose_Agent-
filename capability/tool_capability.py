@@ -1,39 +1,58 @@
 from __future__ import annotations
 import json
+import yaml
 from typing import Any
+from pathlib import Path
 
 from capability import Capability, CapabilityResult
 
-# Default per-layer tool visibility.
-# L1:     lightweight tracking only
-# L2:     tracking + safe system inspection
-# L3:     full tool access (execution-layer privileges)
-DEFAULT_TOOL_ALLOWLIST: dict[str, set[str]] = {
-    "l1": {"todo"},
-    "l2": {"todo", "terminal", "web_search", "read_file", "grep", "tool_proposal"},
-    "l3": {"todo", "terminal", "web_search", "read_file", "grep", "tool_proposal"},
-}
+_TOOL_CONFIG: dict | None = None
+_TOOL_CONFIG_PATH = Path("config/tools.yaml")
+
+
+def _load_tool_config() -> dict:
+    global _TOOL_CONFIG
+    if _TOOL_CONFIG is None:
+        with open(_TOOL_CONFIG_PATH, encoding="utf-8") as f:
+            _TOOL_CONFIG = yaml.safe_load(f)
+    return _TOOL_CONFIG
+
+
+def _load_fallback_config(name: str) -> dict | None:
+    cfg = _load_tool_config()
+    tool = cfg.get("tools", {}).get(name)
+    if tool:
+        return tool.get("fallback")
+    return None
+
+
+def _get_tool_timeout(name: str) -> int:
+    cfg = _load_tool_config()
+    default = cfg.get("default_timeout", 30)
+    return cfg.get("tools", {}).get(name, {}).get("timeout", default)
+
+
+def _get_allowlist() -> dict[str, set[str]]:
+    cfg = _load_tool_config()
+    allowlist: dict[str, set[str]] = {}
+    for name, tool in cfg.get("tools", {}).items():
+        for layer in tool.get("allowlist", []):
+            allowlist.setdefault(layer, set()).add(name)
+    return allowlist
 
 
 class ToolCapability(Capability):
     """Wraps ToolRegistry as a Capability with per-layer access control.
 
     Access control granularity: per-tool per-layer.
-    Each tool name in the allowlist is independently checked.
-
-    Example:
-        allowlist = {
-    "l1": {"todo", "create_domain"},
-            "l2": {"todo", "terminal"},
-            "l3": {"todo", "terminal", "web_search"},
-        }
+    Config loaded from config/tools.yaml.
     """
 
     name = "tool"
 
     def __init__(self, registry, allowlist: dict[str, set[str]] | None = None):
         self._registry = registry
-        self._allowlist = allowlist or DEFAULT_TOOL_ALLOWLIST
+        self._allowlist = allowlist or _get_allowlist()
 
     # ── Capability ABC ──────────────────────────────────────────────
 
@@ -66,7 +85,7 @@ class ToolCapability(Capability):
             },
         }
 
-    def invoke(self, layer: str, args: dict) -> CapabilityResult:
+    def invoke(self, layer: str, args: dict, timeout: int | None = None) -> CapabilityResult:
         tool_name = args.get("name", "")
         tool_args = args.get("args", {})
 
@@ -77,8 +96,10 @@ class ToolCapability(Capability):
                 error=f"Tool '{tool_name}' not allowed for layer '{layer}'",
             )
 
+        effective_timeout = timeout or _get_tool_timeout(tool_name)
+
         try:
-            raw = self._registry.dispatch(tool_name, tool_args)
+            raw = self._registry.dispatch(tool_name, tool_args, timeout=effective_timeout)
             if isinstance(raw, str):
                 try:
                     parsed = json.loads(raw)
@@ -96,9 +117,11 @@ class ToolCapability(Capability):
                 data={"raw": ""},
             )
         except Exception as e:
+            cfg = _load_fallback_config(tool_name)
+            fb = _build_fallback(cfg) if cfg else None
             return CapabilityResult(
                 capability_name="tool", layer=layer, success=False,
-                error=str(e),
+                error=str(e), fallback=fb,
             )
 
     # ── public helpers ──────────────────────────────────────────────
@@ -108,9 +131,31 @@ class ToolCapability(Capability):
 
         Unlike get_schema() which returns a single meta-schema, this returns
         individual tool schemas for direct injection into LLM tools parameter.
+        Each schema includes an optional 'timeout' parameter.
         """
         allowed = self._allowlist.get(layer, set())
-        return self._registry.get_definitions(requested=allowed)
+        schemas = self._registry.get_definitions(requested=allowed)
+        for s in schemas:
+            params = s.get("function", {}).get("parameters", {}).get("properties", {})
+            if "timeout" not in params:
+                name = s.get("function", {}).get("name", "")
+                default_timeout = _get_tool_timeout(name)
+                params["timeout"] = {
+                    "type": "integer",
+                    "description": f"Optional timeout in seconds (default: {default_timeout})",
+                }
+        return schemas
 
     def allowed_tools(self, layer: str) -> set[str]:
         return self._allowlist.get(layer, set())
+
+
+def _build_fallback(cfg: dict) -> dict:
+    fb: dict = {}
+    if cfg.get("max_retries", 0) > 0:
+        fb["retry"] = f"可重试最多 {cfg['max_retries']} 次"
+    degrades = cfg.get("degrade", [])
+    if degrades:
+        fb["degrade"] = degrades
+    fb["default"] = "该工具暂时不可用，请尝试其他可用工具或调整查询方式重试"
+    return fb
