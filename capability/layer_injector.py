@@ -62,14 +62,22 @@ class LayerInjector:
                           raw_args: str | dict) -> CapabilityResult:
         """Execute a single tool call during _call_llm's multi-turn loop.
 
+        Three failure branches:
+          Type 4 — tool name unknown → error + available tools list
+          Type 2 — invalid JSON arguments → error + retry hint
+          Type 3 — execution exception → error + fallback config (retry/degrade/default)
+
         Args:
             layer: Calling layer.
             name: Function name from LLM tool_call.
             raw_args: JSON string or dict of function arguments.
 
         Returns:
-            CapabilityResult ready for role:"tool" message content.
+            CapabilityResult with optional fallback dict on failure.
         """
+        cap_name = _resolve_capability_name(name)
+
+        # Parse arguments
         if isinstance(raw_args, str):
             try:
                 args = json.loads(raw_args)
@@ -77,16 +85,34 @@ class LayerInjector:
                 return CapabilityResult(
                     capability_name=name, layer=layer, success=False,
                     error=f"Invalid JSON arguments: {raw_args[:100]}",
+                    fallback={
+                        "retry": "请修正 JSON 格式后重试",
+                        "default": "参数格式无效，请检查后重试",
+                    },
                 )
         else:
             args = raw_args
 
-        cap_name = _resolve_capability_name(name)
         if cap_name == "tool":
             payload = {"name": name, "args": args}
         else:
             payload = args
-        return self._registry.invoke(cap_name, layer, payload)
+
+        result = self._registry.invoke(cap_name, layer, payload)
+
+        # Type 3: enrich with default fallback if not already set
+        if not result.success and result.fallback is None:
+            return CapabilityResult(
+                capability_name=result.capability_name,
+                layer=result.layer,
+                success=False,
+                error=result.error,
+                fallback={
+                    "default": "该工具暂时不可用，请尝试其他可用工具或调整查询方式重试",
+                },
+            )
+
+        return result
 
     def handle_tool_calls(self, layer: str,
                           tool_calls: list[dict]) -> list[CapabilityResult]:
