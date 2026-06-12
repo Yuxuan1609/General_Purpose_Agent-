@@ -34,6 +34,28 @@
 4. **Domain 修复**：利用 txtai 的图能力重建 domain 索引和跨域关联，修复 L1→L2 断链
 5. **反思工具备案**：明确 consolidation 工具的重检结论，不在此次改动中动代码
 
+## KB 职责边界
+
+**三层角色对应**：KB = 语法库（基础参考），L3 = 实现路径（标准化流程），L2 = 经验（柔性判断）。
+
+**KB 只做存储+检索，智能全归 Agent**：
+
+```
+KB 职责（薄封装层）：
+  ├── 增：存储文档 + 自动索引到向量/图/SQL
+  ├── 删：移除文档 + 清理索引
+  ├── 改：更新文档 + re-index
+  ├── 查：语义/关键词/混合搜索，支持 domain 过滤
+  └── 轻量维护：LLM 辅助自动打 tag、建议 domain 分类
+
+归 Agent 负责（不在 KB 代码中）：
+  ├── 质量评估 → Agent 对比查询结果自行判断
+  ├── 知识缺口 → Agent 对比 KB 和 L2/L3 知识自行发现
+  ├── 知识合成 → Agent 用 LLM 多轮推理自行总结
+  ├── 内容过时检测 → Agent 浏览 timestamp 自行判断
+  └── 跨域分析 → Agent 利用搜索结果自行推理关联
+```
+
 ## 方案：基于 txtai 核心代码二次开发
 
 ### 为什么选 txtai
@@ -128,13 +150,15 @@ Domain 图由 txtai 的 `Graph` 模块自动构建和更新：
 
 ## Tool 接口
 
-### knowledge_query — 查询知识库（已有 schema，替换后端实现）
+Agent 通过 4 个标准化 CRUD tool 操作 KB。所有智能判断（质量、缺口、合成、验证）由 Agent 在 while-loop 中自行完成。
+
+### knowledge_query — 查询
 
 ```yaml
 # 输入
 query: "Python 列表推导式的语法"
-domain: "coding/python"  # 可选，限定领域
-search_type: "semantic"  # "semantic" | "keyword" | "hybrid"
+domain: "coding/python"      # 可选，限定领域
+search_type: "hybrid"        # "semantic" | "keyword" | "hybrid"
 top_k: 5
 
 # 输出
@@ -142,47 +166,54 @@ results:
   - id: "doc_abc123"
     domain: "coding/python"
     title: "列表推导式"
-    content: "..."  # 截断至 500 字符
+    content: "..."           # 截断至 500 字符
     score: 0.92
     source: "manual"
+    tags: ["python", "syntax"]
 ```
 
-### knowledge_add — 写入知识（新增 tool）
+### knowledge_add — 新增文档
 
 ```yaml
 # 输入
 domain: "coding/python"
 title: "Python 列表推导式"
-content: "# 列表推导式\n\n[表达式 for 项 in 可迭代对象 if 条件]\n\n..."
-tags: ["python", "list", "syntax"]
+content: "# 列表推导式\n\n..."   # Markdown
+tags: ["python", "list", "syntax"]  # 可选，KB 会自动 LLM 补 tag
 
 # 输出
 status: "ok"
 doc_id: "doc_abc123"
 ```
 
-### knowledge_sync_domain — 同步 domain（新增 tool）
+### knowledge_update — 更新文档
 
 ```yaml
 # 输入
-action: "rename"  # "rename" | "merge" | "suggest"
-source_domain: "coding/python"
-target_domain: "coding/python_programming"
-# agent_domain: "coding/pythonprogramming"  # Agent DomainRegistry 侧的名称
+doc_id: "doc_abc123"
+content: "# 列表推导式\n\n..."   # 新内容（Markdown）
+title: "Python 列表推导式"       # 可选
+tags: ["python", "syntax"]       # 可选
 
 # 输出
-status: "ok"  # 或 "conflict" 带建议列表
+status: "ok"
 ```
 
-### knowledge_list_domains — 列出领域
+### knowledge_delete — 删除文档
 
 ```yaml
+# 输入
+doc_id: "doc_abc123"
+
 # 输出
-domains:
-  - path: "coding/python"
-    doc_count: 15
-    neighbors: { "coding/javascript": 0.7, "coding/golang": 0.5 }
+status: "ok"
 ```
+
+### 轻量 LLM 维护（非 Agent tool，KB 内部自动触发）
+
+- **自动 tag**：新增文档时，KB 用一次 LLM 调用分析 content，生成 3-5 个 tag
+- **domain 建议**：新增文档时，KB 用一次 LLM 调用分析 content，建议 domain 分类（如果未指定）
+- **domain 同步**：Agent 调用 `knowledge_sync_domain` 做 domain 重命名/合并
 
 ## CLI 管理
 
@@ -208,9 +239,8 @@ python -m cognitive_agent.kb export
 `KnowledgeBase` ↔ `DomainRegistry` 的半平行同步机制：
 
 1. **独立存储**：各自维护 domain 树，互不依赖
-2. **相似度提示**：txtai Graph 自动发现 `coding/python` 和 `coding/pythonprogramming` 相似度 > 0.8 → 存入 domain 的 `neighbors` 字段
-3. **Agent 主动同步**：Agent 发现两边 domain 名称不一致时，调用 `knowledge_sync_domain` 做 rename/merge
-4. **索引共享**：KB 的 domain 图可作为 Agent `DomainRegistry` 的参照——`DomainRegistry.retrieve_from_root()` 在领域节点为空时 fallback 到 KB 的 domain 列表
+2. **Agent 主动同步**：Agent 发现两边 domain 名称不一致时，调用 `knowledge_sync_domain` 做 rename/merge（该 tool 操作 KB 的 domain 元数据，不涉及智能判断）
+3. **KB 内部域间发现**：txtai Graph 维护 domain 间相似度（文档内容驱动的向量距离），Agent 可通过 `knowledge_query` 的搜索结果中看到相关 domain，自行决定是否进一步探索
 
 ## 反思段工具重检结论
 
@@ -224,24 +254,26 @@ python -m cognitive_agent.kb export
 
 ## 实施阶段
 
-### Phase 1：txtai 核心定制 + KnowledgeBase 原型
+### Phase 1：txtai 核心定制 + KnowledgeBase 原型 + 4 个 CRUD tool
 
 - fork txtai 需要的 7 个核心模块到 `vendor/txtai_core/`
 - 移除 HuggingFace 依赖，适配 DeepSeek embedding API
 - 简化 database 到 SQLite-only
-- 实现 `core/knowledge/knowledge_base.py` 封装层
-- 实现 `knowledge_query` / `knowledge_add` 两个 tool
+- 实现 `core/knowledge/knowledge_base.py`：`add()` / `get()` / `update()` / `delete()` / `search()`
+- 实现 4 个 tool handler：`knowledge_query` / `knowledge_add` / `knowledge_update` / `knowledge_delete`
+- KB 内部 LLM 自动 tag（加文档时用一次 LLM 调用生成 tags）
 
-### Phase 2：Domain 图 + 同步机制
+### Phase 2：Domain 索引修复 + domain 同步
 
-- 构建 KnowledgeBase 内部的 domain 图（基于 txtai Graph）
-- 实现 `knowledge_list_domains` / `knowledge_sync_domain` tool
+- 构建 KB 内部 domain 图（基于 txtai Graph）
+- 实现 `knowledge_sync_domain` tool（domain 重命名/合并）
 - 修复 `DomainRegistry._reverse_index` 读取端：L2Manager 用 indexed 检索替代 O(n) 扫描
 - 修复 L1→L2 `selected_nodes` 断链：L2Manager.query() 读取 `domains_hint`
+- KB 内部 LLM 辅助 domain 分类建议（新增文档时可选自动推断 domain）
 
 ### Phase 3：CLI + 批量导入
 
-- 实现 `python -m cognitive_agent.kb` CLI
+- 实现 `python -m cognitive_agent.kb` CLI（add/search/update/delete/list）
 - 支持从现有 `data/layers/knowledge/` 的 `.md` 文件批量导入
 - 支持导出索引到 JSON
 
@@ -256,17 +288,17 @@ python -m cognitive_agent.kb export
 ### 新增文件
 
 - `core/knowledge/__init__.py`
-- `core/knowledge/knowledge_base.py` — KnowledgeBase 主类
-- `core/knowledge/tools.py` — knowledge_query/add/sync_domain/list_domains tool handlers
+- `core/knowledge/knowledge_base.py` — KnowledgeBase 主类（CRUD + search + LLM tag）
+- `core/knowledge/tools.py` — knowledge_query/add/update/delete/sync_domain tool handlers
 - `core/knowledge/cli.py` — CLI 入口
 - `vendor/txtai_core/` — txtai 核心 fork（7 个模块）
 
 ### 修改文件
 
-- `core/tools/registry.py` — 注册 knowledge_add, knowledge_sync_domain, knowledge_list_domains
-- `core/capability/` — 或 `core/knowledge/` 内注册 tool schemas
+- `core/tools/registry.py` — 注册 5 个 knowledge_* tools
+- `core/capability/` — 注册 tool schemas 到 LayerInjector
 - `core/layers/l2/manager.py` — 修复 domains_hint 读取；使用 DomainRegistry 索引检索
-- `core/domain_registry.py` — 修复 `_reverse_index` 读取端；新增 `retrieve_from_root`
+- `core/domain_registry.py` — 修复 `_reverse_index` 读取端
 
 ### 不受影响
 
