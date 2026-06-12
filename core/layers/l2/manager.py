@@ -133,9 +133,11 @@ class L2Agent(LayerAgent):
             "modify_l2_card": modify_l2_card,
         })
 
-    def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None):
+    def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None,
+                 domain_registry=None):
         super().__init__(llm_client, logger)
         self._knowledge = knowledge
+        self._registry = domain_registry
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
@@ -382,6 +384,13 @@ class L2Agent(LayerAgent):
         return result
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
+        if self._registry:
+            domains = [n.get("name", "") for n in nodes if n.get("name")]
+            card_ids = self._registry.get_items_for_domains("l2", domains)
+            if card_ids:
+                card_id_set = set(card_ids)
+                return [c for c in self._knowledge.cards if c.id in card_id_set]
+
         all_cards = []
         seen = set()
         for node in nodes:
@@ -420,7 +429,7 @@ class L2Manager(LayerManager):
                  domain_registry=None, max_rounds=3):
         super().__init__("l2", downstream, upward=upward, downward=downward)
         self._knowledge = knowledge
-        self._agent = L2Agent(auxiliary_llm, knowledge) if auxiliary_llm else None
+        self._agent = L2Agent(auxiliary_llm, knowledge, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
         self.max_rounds = max_rounds
         self._l2_notify: dict | None = None
