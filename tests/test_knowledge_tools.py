@@ -65,3 +65,31 @@ class TestKnowledgeTools:
         result = json.loads(knowledge_delete(self.kb, doc_id=doc.id))
         assert result["status"] == "ok"
         assert self.kb.get(doc.id) is None
+
+    def test_knowledge_sync_domain_rename(self):
+        from core.knowledge.tools import knowledge_sync_domain
+        kb = KnowledgeBase(":memory:")
+        kb.add(KnowledgeDoc(domain="coding/python", title="T", content="C"))
+        kb.add(KnowledgeDoc(domain="coding/python", title="T2", content="C2"))
+        result = json.loads(knowledge_sync_domain(
+            kb,
+            action="rename",
+            source_domain="coding/python",
+            target_domain="coding/python_programming",
+        ))
+        assert result["status"] == "ok"
+        domains = kb.list_domains()
+        paths = [d["path"] for d in domains]
+        assert "coding/python_programming" in paths
+        assert "coding/python" not in paths
+        results = kb.search("T", domain="coding/python_programming")
+        assert len(results) == 2
+
+    def test_knowledge_sync_domain_list(self):
+        from core.knowledge.tools import knowledge_sync_domain
+        kb = KnowledgeBase(":memory:")
+        kb.add(KnowledgeDoc(domain="a/b", title="X", content="Y"))
+        result = json.loads(knowledge_sync_domain(kb, action="list", source_domain=""))
+        assert len(result["domains"]) >= 1
+        paths = [d["path"] for d in result["domains"]]
+        assert "a/b" in paths

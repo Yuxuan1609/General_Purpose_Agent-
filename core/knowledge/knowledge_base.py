@@ -134,6 +134,22 @@ class KnowledgeBase:
                 neighbors=d.get("neighbors", {}),
             )
 
+    def rename_domain(self, old_path: str, new_path: str) -> int:
+        """Rename a domain and all its documents. Returns count of affected docs."""
+        count = 0
+        prefix = old_path + "/"
+        for doc in list(self._docs.values()):
+            if doc.domain == old_path or doc.domain.startswith(prefix):
+                doc.domain = doc.domain.replace(old_path, new_path, 1)
+                count += 1
+        if old_path in self._domains:
+            domain = self._domains.pop(old_path)
+            domain.path = new_path
+            parent = "/".join(new_path.split("/")[:-1]) or None
+            domain.parent = parent
+            self._domains[new_path] = domain
+        return count
+
     def _ensure_domain(self, domain_path: str) -> KBDomain:
         if domain_path not in self._domains:
             parent = "/".join(domain_path.split("/")[:-1]) or None

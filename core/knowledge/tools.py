@@ -43,3 +43,17 @@ def knowledge_delete(kb, doc_id: str) -> str:
     kb.delete(doc_id)
     kb.save()
     return json.dumps({"status": "ok"}, ensure_ascii=False)
+
+
+def knowledge_sync_domain(kb, action: str, source_domain: str,
+                           target_domain: str = "") -> str:
+    if action == "rename":
+        if not target_domain:
+            return json.dumps({"status": "error", "reason": "target_domain required"}, ensure_ascii=False)
+        kb.rename_domain(source_domain, target_domain)
+        kb.save()
+        return json.dumps({"status": "ok"}, ensure_ascii=False)
+    elif action == "list":
+        return json.dumps({"domains": kb.list_domains()}, ensure_ascii=False)
+    else:
+        return json.dumps({"status": "error", "reason": f"unknown action: {action}"}, ensure_ascii=False)
