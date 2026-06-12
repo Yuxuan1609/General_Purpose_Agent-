@@ -91,6 +91,47 @@ class KnowledgeBase:
             for d in self._domains.values()
         ]
 
+    def save(self) -> None:
+        import json
+        from pathlib import Path
+        p = Path(self._storage_path)
+        p.mkdir(parents=True, exist_ok=True)
+        data = {
+            "docs": {did: d.to_dict() for did, d in self._docs.items()},
+            "domains": {
+                dpath: {
+                    "path": d.path,
+                    "parent": d.parent,
+                    "description": d.description,
+                    "doc_count": d.doc_count,
+                    "neighbors": d.neighbors,
+                }
+                for dpath, d in self._domains.items()
+            },
+        }
+        (p / "kb.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def load(self) -> None:
+        import json
+        from pathlib import Path
+        p = Path(self._storage_path) / "kb.json"
+        if not p.exists():
+            return
+        data = json.loads(p.read_text(encoding="utf-8"))
+        self._docs = {
+            did: KnowledgeDoc.from_dict(d)
+            for did, d in data.get("docs", {}).items()
+        }
+        self._domains = {}
+        for dpath, d in data.get("domains", {}).items():
+            self._domains[dpath] = KBDomain(
+                path=d["path"],
+                parent=d.get("parent"),
+                description=d.get("description", ""),
+                doc_count=d.get("doc_count", 0),
+                neighbors=d.get("neighbors", {}),
+            )
+
     def _ensure_domain(self, domain_path: str) -> KBDomain:
         if domain_path not in self._domains:
             parent = "/".join(domain_path.split("/")[:-1]) or None

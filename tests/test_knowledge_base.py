@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -128,3 +129,37 @@ class TestKnowledgeBase:
     def test_list_domains_empty(self):
         domains = self.kb.list_domains()
         assert domains == []
+
+
+class TestKnowledgeBasePersistence:
+    def setup_method(self):
+        from core.knowledge.knowledge_base import KnowledgeBase
+        self.tmpdir = tempfile.mkdtemp()
+        self.kb = KnowledgeBase(self.tmpdir)
+
+    def test_save_and_load(self):
+        from core.knowledge.models import KnowledgeDoc
+        d1 = KnowledgeDoc(domain="a/b", title="Doc1", content="Content 1", tags=["t1"])
+        d2 = KnowledgeDoc(domain="a/c", title="Doc2", content="Content 2", tags=["t2"])
+        self.kb.add(d1)
+        self.kb.add(d2)
+        self.kb.save()
+
+        from core.knowledge.knowledge_base import KnowledgeBase
+        kb2 = KnowledgeBase(self.tmpdir)
+        kb2.load()
+        assert kb2.get(d1.id) is not None
+        assert kb2.get(d2.id) is not None
+        retrieved = kb2.get(d1.id)
+        assert retrieved.title == "Doc1"
+        assert retrieved.tags == ["t1"]
+        domains = kb2.list_domains()
+        assert len(domains) == 2
+
+    def test_load_nonexistent(self):
+        from core.knowledge.knowledge_base import KnowledgeBase
+        import os
+        nonexistent = os.path.join(self.tmpdir, "does_not_exist")
+        kb2 = KnowledgeBase(nonexistent)
+        kb2.load()
+        assert len(kb2.list_domains()) == 0
