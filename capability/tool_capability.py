@@ -107,7 +107,12 @@ class ToolCapability(Capability):
 
         # Priority: LLM arg.timeout > dispatch timeout > config timeout
         arg_timeout = tool_args.get("timeout") if isinstance(tool_args, dict) else None
-        effective_timeout = arg_timeout or timeout or _get_tool_timeout(tool_name)
+        if arg_timeout is not None:
+            effective_timeout = arg_timeout
+        elif timeout is not None:
+            effective_timeout = timeout
+        else:
+            effective_timeout = _get_tool_timeout(tool_name)
 
         try:
             raw = self._registry.dispatch(tool_name, tool_args, timeout=effective_timeout)
