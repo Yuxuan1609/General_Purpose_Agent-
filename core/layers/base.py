@@ -173,6 +173,9 @@ class LayerAgent(ABC):
                         result_str = str(raw.data.get("result", "") if isinstance(raw.data, dict) else raw.data)[:200]
                     else:
                         result_content = {"error": raw.error}
+                        fb = getattr(raw, 'fallback', None)
+                        if fb:
+                            result_content.update(fb)
                         result_str = raw.error
                     self._log.debug("  tool %s → %s", tc.function.name,
                                    str(result_str)[:120])
