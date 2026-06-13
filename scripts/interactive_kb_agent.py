@@ -323,25 +323,26 @@ class SubAgentLoop:
             "type": "function",
             "function": {
                 "name": "kb_phase1_done",
-                "description": "End search phase. Report findings, coverage, and whether meta review is needed.",
+                "description": "End search phase. Report findings and suggestions.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "findings": {"type": "array", "items": {"type": "object"}},
-                        "coverage": {
-                            "type": "object",
-                            "properties": {
-                                "match_level": {"type": "string", "enum": ["direct", "partial", "none"]},
-                                "gaps": {"type": "array", "items": {"type": "string"}},
-                            },
-                            "required": ["match_level"],
+                        "findings": {
+                            "type": "array",
+                            "description": "Documents found. Each: {doc_id, title, relevance, confidence, note}",
+                            "items": {"type": "object"},
+                        },
+                        "suggestions": {
+                            "type": "array",
+                            "description": "For the main agent. Each: {action: add|fix_meta|search_external, topic, reason, priority}",
+                            "items": {"type": "object"},
                         },
                         "needs_meta_review": {
                             "type": "boolean",
-                            "description": "True if any retrieved docs have wrong/missing meta that should be fixed in Phase 2",
+                            "description": "True if any retrieved docs need meta fixes (missing level, wrong type, etc.)",
                         },
                     },
-                    "required": ["findings", "coverage", "needs_meta_review"],
+                    "required": ["findings", "suggestions", "needs_meta_review"],
                 },
             },
         },
@@ -368,7 +369,8 @@ meta 字段说明：
 注意：
 - 本阶段只做检索和阅读，不修改 meta
 - 如果你发现检索到的文档 meta 有缺陷（缺 level、type 不对等），
-  设置 needs_meta_review=true，第二阶段会专门处理"""
+  设置 needs_meta_review=true，第二阶段会专门处理
+- kb_search 会自动去重（已见过的 doc 不会重复返回），域不存在时会有提示"""
 
     # ── Phase 2: Meta Review ──
     PHASE2_TOOLS = [
@@ -436,11 +438,13 @@ meta schema：
         self._trace = trace
         self._kb_get_count = 0
         self._search_count = 0
+        self._seen_ids: set[str] = set()
         self._phase1_messages: list[dict] = []
 
     def run(self, query: str, domain: str | None = None) -> dict:
         self._kb_get_count = 0
         self._search_count = 0
+        self._seen_ids = set()
         self._phase1_messages = []
 
         # ── Phase 1: Search ──
@@ -454,7 +458,6 @@ meta schema：
         # ── Build final report ──
         return {
             "findings": phase1.get("findings", []),
-            "coverage": phase1.get("coverage", {"match_level": "none"}),
             "suggestions": phase1.get("suggestions", []),
             "meta_changes_made": meta_changes,
         }
@@ -504,23 +507,47 @@ meta schema：
             messages.extend(tool_results)
 
         self._phase1_messages = messages
-        return {"findings": [], "coverage": {"match_level": "none"}, "needs_meta_review": False}
+        return {"findings": [], "suggestions": [], "needs_meta_review": False}
 
     def _dispatch_phase1(self, name: str, args: dict) -> dict:
         if name == "kb_search":
             self._search_count += 1
             if self._search_count > self.MAX_SEARCHES:
-                return {"error": f"max {self.MAX_SEARCHES} searches reached"}
+                return {"error": f"max {self.MAX_SEARCHES} searches reached, use kb_phase1_done to finish"}
+            domain = args.get("domain")
             results = self._kb.search(**args)
-            for r in results:
+            # System-side dedup: filter out already-seen IDs
+            new_results = [r for r in results if r["id"] not in self._seen_ids]
+            deduped = len(results) - len(new_results)
+            for r in new_results:
                 doc = self._kb.get(r["id"])
                 r["meta"] = doc.meta if doc else {}
-            return {"results": results, "count": len(results)}
+            hint = ""
+            if len(new_results) == 0:
+                domains = [d["path"] for d in self._kb.list_domains()]
+                if domain and domain not in domains:
+                    avail = ", ".join(domains) if domains else "(empty)"
+                    hint = f" | domain '{domain}' not found. Available: {avail}"
+                elif domain:
+                    hint = f" | 0 results in '{domain}'. Try broader query or different domain."
+                else:
+                    hint = " | 0 results. Try different query terms."
+            return {
+                "results": new_results,
+                "count": len(new_results),
+                "deduped": deduped,
+                "hint": hint,
+                "all_domains": [d["path"] for d in self._kb.list_domains()],
+            }
         if name == "kb_get":
             self._kb_get_count += 1
             if self._kb_get_count > self.MAX_KB_GET:
                 return {"status": "limit_exceeded", "reason": f"max {self.MAX_KB_GET} kb_get"}
-            doc = self._kb.get(args["doc_id"])
+            doc_id = (args.get("doc_id") or "").strip()
+            if not doc_id:
+                return {"status": "error", "reason": "empty doc_id"}
+            self._seen_ids.add(doc_id)
+            doc = self._kb.get(doc_id)
             return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
         return {"error": f"unknown: {name}"}
 

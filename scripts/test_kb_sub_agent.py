@@ -61,23 +61,25 @@ class SubAgentLoop:
             "type": "function",
             "function": {
                 "name": "kb_phase1_done",
-                "description": "End search phase. Report findings + coverage + whether meta review needed.",
+                "description": "End search phase. Report findings and suggestions.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "findings": {"type": "array", "items": {"type": "object"}},
-                        "coverage": {
-                            "type": "object",
-                            "properties": {
-                                "match_level": {"type": "string", "enum": ["direct", "partial", "none"]},
-                                "gaps": {"type": "array", "items": {"type": "string"}},
-                            },
-                            "required": ["match_level"],
+                        "findings": {
+                            "type": "array",
+                            "description": "Documents found",
+                            "items": {"type": "object"},
                         },
-                        "suggestions": {"type": "array", "items": {"type": "object"}},
-                        "needs_meta_review": {"type": "boolean"},
+                        "suggestions": {
+                            "type": "array",
+                            "description": "For main agent: {action, topic, reason, priority}",
+                            "items": {"type": "object"},
+                        },
+                        "needs_meta_review": {
+                            "type": "boolean",
+                        },
                     },
-                    "required": ["findings", "coverage", "needs_meta_review"],
+                    "required": ["findings", "suggestions", "needs_meta_review"],
                 },
             },
         },
@@ -99,7 +101,7 @@ meta 字段：
 3. 不够好 → 换关键词 refine kb_search (最多 3 轮)
 4. 完成 → kb_phase1_done
 
-注意：本阶段只检索不修改 meta。如发现 meta 有缺陷，设 needs_meta_review=true。"""
+注意：本阶段只检索不修改 meta。如发现 meta 有缺陷，设 needs_meta_review=true。kb_search 自动去重，0 结果时有域提示。"""
 
     PHASE2_TOOLS = [
         {
@@ -161,11 +163,13 @@ meta schema: type(reference|tutorial|example|faq), level(beginner|intermediate|a
         self._trace = trace
         self._kb_get_count = 0
         self._search_count = 0
+        self._seen_ids: set[str] = set()
         self._phase1_messages: list[dict] = []
 
     def run(self, query: str, context: str = "") -> dict:
         self._kb_get_count = 0
         self._search_count = 0
+        self._seen_ids = set()
         self._phase1_messages = []
 
         phase1 = self._run_phase1(query, context)
@@ -175,7 +179,6 @@ meta schema: type(reference|tutorial|example|faq), level(beginner|intermediate|a
 
         return {
             "findings": phase1.get("findings", []),
-            "coverage": phase1.get("coverage", {"match_level": "none"}),
             "suggestions": phase1.get("suggestions", []),
             "meta_changes_made": meta_changes,
         }
@@ -227,22 +230,42 @@ meta schema: type(reference|tutorial|example|faq), level(beginner|intermediate|a
             messages.extend(tool_results)
 
         self._phase1_messages = messages
-        return {"findings": [], "coverage": {"match_level": "none"}, "needs_meta_review": False}
+        return {"findings": [], "suggestions": [], "needs_meta_review": False}
 
     def _dispatch_phase1(self, name: str, args: dict) -> dict:
         if name == "kb_search":
             self._search_count += 1
             if self._search_count > self.MAX_SEARCHES:
-                return {"error": f"max {self.MAX_SEARCHES} searches"}
+                return {"error": f"max {self.MAX_SEARCHES} searches, use kb_phase1_done"}
+            domain = args.get("domain")
             results = self._kb.search(**args)
-            for r in results:
+            new_results = [r for r in results if r["id"] not in self._seen_ids]
+            deduped = len(results) - len(new_results)
+            for r in new_results:
                 doc = self._kb.get(r["id"])
                 r["meta"] = doc.meta if doc else {}
-            return {"results": results, "count": len(results)}
+            hint = ""
+            if len(new_results) == 0:
+                domains = [d["path"] for d in self._kb.list_domains()]
+                if domain and domain not in domains:
+                    hint = f" | domain '{domain}' not found. Available: {', '.join(domains)}"
+                elif domain:
+                    hint = f" | 0 results in '{domain}'. Try broader query."
+                else:
+                    hint = " | 0 results. Try different query terms."
+            return {
+                "results": new_results, "count": len(new_results),
+                "deduped": deduped, "hint": hint,
+                "all_domains": [d["path"] for d in self._kb.list_domains()],
+            }
         if name == "kb_get":
             self._kb_get_count += 1
             if self._kb_get_count > self.MAX_KB_GET:
                 return {"status": "limit_exceeded"}
+            doc_id = (args.get("doc_id") or "").strip()
+            if not doc_id:
+                return {"status": "error", "reason": "empty doc_id"}
+            self._seen_ids.add(doc_id)
             doc = self._kb.get(args["doc_id"])
             return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
         return {"error": f"unknown: {name}"}
@@ -455,10 +478,8 @@ def main():
     # Validations
     print("\n--- Validations ---")
     assert "findings" in report, "Missing findings"
-    assert "coverage" in report, "Missing coverage"
     assert "suggestions" in report, "Missing suggestions"
     print(f"  findings: {len(report.get('findings', []))} docs reported")
-    print(f"  coverage.match_level: {report['coverage'].get('match_level')}")
     print(f"  suggestions: {len(report.get('suggestions', []))}")
     print(f"  meta_changes_made: {len(report.get('meta_changes_made', []))}")
 
