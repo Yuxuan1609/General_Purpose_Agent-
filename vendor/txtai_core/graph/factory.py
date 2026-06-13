@@ -5,7 +5,6 @@ Factory module
 from ..util import Resolver
 
 from .networkx import NetworkX
-from .rdbms import RDBMS
 
 
 class GraphFactory:
@@ -32,8 +31,6 @@ class GraphFactory:
         # Create graph instance
         if backend == "networkx":
             graph = NetworkX(config)
-        elif backend == "rdbms":
-            graph = RDBMS(config)
         else:
             graph = GraphFactory.resolve(backend, config)
 

@@ -7,7 +7,6 @@ import os
 from tempfile import TemporaryDirectory
 
 from .tar import Tar
-from .zip import Zip
 
 
 class Archive:
@@ -36,7 +35,7 @@ class Archive:
             True if the path ends with an archive extension, False otherwise
         """
 
-        return path and any(path.lower().endswith(extension) for extension in [".tar.bz2", ".tar.gz", ".tar.xz", ".zip"])
+        return path and any(path.lower().endswith(extension) for extension in [".tar.bz2", ".tar.gz", ".tar.xz"])
 
     def path(self):
         """
@@ -101,4 +100,4 @@ class Archive:
         compression = compression if compression else path.lower().split(".")[-1]
 
         # Create compression instance
-        return Zip() if compression == "zip" else Tar()
+        return Tar()

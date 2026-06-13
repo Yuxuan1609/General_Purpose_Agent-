@@ -5,9 +5,6 @@ Factory module
 from ..util import Resolver
 
 from .bm25 import BM25
-from .pgtext import PGText
-from .sif import SIF
-from .sparse import Sparse
 from .tfidf import TFIDF
 
 
@@ -41,12 +38,6 @@ class ScoringFactory:
 
         if method == "bm25":
             scoring = BM25(config)
-        elif method == "pgtext":
-            scoring = PGText(config)
-        elif method == "sif":
-            scoring = SIF(config)
-        elif method == "sparse":
-            scoring = Sparse(config, models)
         elif method == "tfidf":
             scoring = TFIDF(config)
         else:
@@ -70,11 +61,8 @@ class ScoringFactory:
             True if this config is for a sparse index
         """
 
-        # Types that are always a sparse index
-        indexes = ["pgtext", "sparse"]
-
-        # True if this config is for a sparse index
-        return config and isinstance(config, dict) and (config.get("method") in indexes or config.get("terms"))
+        # No sparse index backends in stripped version
+        return False
 
     @staticmethod
     def resolve(backend, config):

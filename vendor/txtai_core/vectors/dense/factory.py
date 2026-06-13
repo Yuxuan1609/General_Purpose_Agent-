@@ -6,12 +6,6 @@ from ...util import Resolver
 
 from .external import External
 from .huggingface import HFVectors
-from .litellm import LiteLLM
-from .litert import LiteRT
-from .llama import LlamaCpp
-from .m2v import Model2Vec
-from .sbert import STVectors
-from .words import WordVectors
 
 
 class VectorsFactory:
@@ -40,30 +34,6 @@ class VectorsFactory:
         if method == "external":
             return External(config, scoring, models)
 
-        # LiteLLM vectors
-        if method == "litellm":
-            return LiteLLM(config, scoring, models)
-
-        # LiteRT vectors
-        if method == "litert":
-            return LiteRT(config, scoring, models)
-
-        # llama.cpp vectors
-        if method == "llama.cpp":
-            return LlamaCpp(config, scoring, models)
-
-        # Model2vec vectors
-        if method == "model2vec":
-            return Model2Vec(config, scoring, models)
-
-        # Sentence Transformers vectors
-        if method == "sentence-transformers":
-            return STVectors(config, scoring, models) if config and config.get("path") else None
-
-        # Word vectors
-        if method == "words":
-            return WordVectors(config, scoring, models)
-
         # Transformers vectors
         if HFVectors.ismethod(method):
             return HFVectors(config, scoring, models) if config and config.get("path") else None
@@ -90,18 +60,7 @@ class VectorsFactory:
         # Infer method from path, if blank
         if not method:
             if path:
-                if LiteLLM.ismodel(path):
-                    method = "litellm"
-                elif LiteRT.ismodel(path):
-                    method = "litert"
-                elif LlamaCpp.ismodel(path):
-                    method = "llama.cpp"
-                elif Model2Vec.ismodel(path):
-                    method = "model2vec"
-                elif WordVectors.ismodel(path):
-                    method = "words"
-                else:
-                    method = "transformers"
+                method = "transformers"
             elif config.get("transform"):
                 method = "external"
 

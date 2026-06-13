@@ -9,8 +9,6 @@ import uuid
 
 from ..pipeline import Tokenizer
 
-from .recovery import Recovery
-
 # Core library imports
 from ..util import Library
 
@@ -127,7 +125,7 @@ class Vectors:
 
         # Generate recovery config if checkpoint is set
         vectorsid = self.vectorsid() if checkpoint else None
-        recovery = Recovery(checkpoint, vectorsid, self.loadembeddings) if checkpoint else None
+        recovery = None  # stripped: recovery module removed
 
         # Convert all documents to embedding arrays, stream embeddings to disk to control memory usage
         with self.spool(checkpoint, vectorsid) as output:
