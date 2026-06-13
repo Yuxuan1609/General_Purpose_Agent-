@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-13 | **KnowledgeBase BM25**：`search()` 改用 txtai BM25 scoring 替代 `_keyword_score` 简单匹配。新增 `_rebuild_index()`（lazy reindex）、`_scoring`/`_id_to_idx`/`_needs_reindex` 字段。删除 `_keyword_score` 静态方法。 |
 | 2026-06-12 | **Cleanup**：删除 `L2_DOMAIN_NODES` 硬编码节点列表（已由 DomainRegistry 替代）；删除 `STAGE1_SCHEMA`/`STAGE2_SCHEMA`/`L1_DECISION_SCHEMA`（已被 capture_tools 替代）；删除 `KnowledgeCard.boost`/`penalize` 条目（方法不存在）；清理各层 stage1/stage2 旧注释。 |
 | 2026-06-12 | **Capture-Tool Strict Mode**：L1/L2/L3 decide() 改用 capture_tool 模式（l1_query/l1_report, l2_query/l2_report, l3_continue/l3_report），LLM 通过 tool_call 输出结构化结果替代 JSON-in-prompt。新增 `DictInjector`（轻量工具注入器）、`_schema_to_tool()`。`_call_llm` 新增 `capture_tools` 参数。 |
 | 2026-06-11 | **Agent While-Loop Design**：各层删除硬编码 stage 流水线，统一为 `decide()` + Manager while 循环。L1Agent/L2Agent/L3Agent 新增 `decide()` 方法；L0_5_1Manager/L2Manager/L3Manager 的 `query()` 改为 while 循环，新增 `max_rounds` 配置。`LayerAgent` 新增 `decide()` 抽象方法。 |
@@ -227,6 +228,21 @@
 | `FlexibleKnowledge.add_card` | `(content, domain, confidence, source) → KnowledgeCard` | 新增卡片（仅内存） | seed, L2Manager | — |
 | `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片 | L2Manager | — |
 | `FlexibleKnowledge.modify_card` | `(card_id, new_content) → KnowledgeCard\|None` | 修改卡片内容 | L2Manager | — |
+
+## core/knowledge/knowledge_base.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `KnowledgeBase` | `__init__(storage_path)` | 静态知识库，BM25 全文检索 + CRUD | scripts, KnowledgeCapability | ScoringFactory |
+| `KnowledgeBase.add` | `(doc: KnowledgeDoc) → str` | 添加文档，标记需重建索引 | seed scripts | _ensure_domain() |
+| `KnowledgeBase.get` | `(doc_id) → KnowledgeDoc\|None` | 按 ID 获取文档 | — | — |
+| `KnowledgeBase.update` | `(doc_id, **kwargs) → bool` | 更新文档字段，标记需重建索引 | — | — |
+| `KnowledgeBase.delete` | `(doc_id) → bool` | 删除文档，标记需重建索引 | — | — |
+| `KnowledgeBase.search` | `(query, domain=None, top_k=5) → list[dict]` | BM25 全文检索，按 domain 过滤，返回 top_k 结果 | KnowledgeCapability, scripts | _rebuild_index(), ScoringFactory.search() |
+| `KnowledgeBase._rebuild_index` | `() → None` | 从 _docs 重建 BM25 索引（lazy，仅 search 时触发） | search() | ScoringFactory.create(), scoring.index() |
+| `KnowledgeBase.save` | `() → None` | 持久化 docs+domains 到 JSON | scripts | — |
+| `KnowledgeBase.load` | `() → None` | 从 JSON 加载，标记需重建索引 | scripts | — |
+| `KnowledgeBase.rename_domain` | `(old_path, new_path) → int` | 重命名 domain 及其文档 | — | — |
 
 ## core/skill_layer.py (已有，层内部使用)
 

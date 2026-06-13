@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.knowledge.models import KnowledgeDoc, KBDomain
+from vendor.txtai_core.scoring import ScoringFactory
 
 logger = logging.getLogger("knowledge_base")
 
@@ -26,11 +27,26 @@ class KnowledgeBase:
         self._storage_path = storage_path
         self._docs: dict[str, KnowledgeDoc] = {}
         self._domains: dict[str, KBDomain] = {}
+        self._scoring = None
+        self._id_to_idx: dict[str, int] = {}
+        self._needs_reindex: bool = True
+
+    def _rebuild_index(self):
+        self._scoring = ScoringFactory.create({"method": "bm25", "terms": True, "normalize": True})
+        self._id_to_idx = {}
+        documents = []
+        for idx, (doc_id, doc) in enumerate(self._docs.items()):
+            self._id_to_idx[doc_id] = idx
+            documents.append((idx, doc.content, None))
+        if documents:
+            self._scoring.index(documents)
+        self._needs_reindex = False
 
     def add(self, doc: KnowledgeDoc) -> str:
         self._docs[doc.id] = doc
         self._ensure_domain(doc.domain)
         self._domains[doc.domain].doc_count += 1
+        self._needs_reindex = True
         logger.debug("added doc %s to domain %s", doc.id, doc.domain)
         return doc.id
 
@@ -45,45 +61,49 @@ class KnowledgeBase:
             if hasattr(doc, k):
                 setattr(doc, k, v)
         doc.updated_at = datetime.now(timezone.utc).isoformat()
+        self._needs_reindex = True
         return True
 
     def delete(self, doc_id: str) -> bool:
         doc = self._docs.pop(doc_id, None)
         if doc and doc.domain in self._domains:
             self._domains[doc.domain].doc_count = max(0, self._domains[doc.domain].doc_count - 1)
+        if doc is not None:
+            self._needs_reindex = True
         return doc is not None
 
     def search(self, query: str, domain: str | None = None, top_k: int = 5) -> list[dict]:
+        if self._needs_reindex:
+            self._rebuild_index()
+        if self._scoring is None or not self._docs:
+            return []
+
+        candidates = self._scoring.search(query, limit=max(top_k * 4, 20))
+        if not candidates:
+            return []
+
+        idx_to_id = {v: k for k, v in self._id_to_idx.items()}
+
         results = []
-        for doc in self._docs.values():
+        for idx, score in candidates:
+            doc_id = idx_to_id.get(idx)
+            if doc_id is None:
+                continue
+            doc = self._docs[doc_id]
             if domain and doc.domain != domain:
                 continue
-            score = self._keyword_score(query, doc)
-            if score > 0:
-                results.append({
-                    "id": doc.id,
-                    "domain": doc.domain,
-                    "title": doc.title,
-                    "content": doc.content[:500],
-                    "score": round(score, 4),
-                    "source": doc.source,
-                    "tags": doc.meta.get("tags", []),
-                })
-        results.sort(key=lambda r: r["score"], reverse=True)
-        return results[:top_k]
-
-    @staticmethod
-    def _keyword_score(query: str, doc: KnowledgeDoc) -> float:
-        q = query.lower()
-        score = 0.0
-        if q in doc.title.lower():
-            score += 1.0
-        if q in doc.content.lower():
-            score += 0.5
-        for tag in doc.meta.get("tags", []):
-            if q in tag.lower():
-                score += 0.3
-        return score
+            results.append({
+                "id": doc.id,
+                "domain": doc.domain,
+                "title": doc.title,
+                "content": doc.content[:500],
+                "score": round(float(score), 4),
+                "source": doc.source,
+                "meta": dict(doc.meta),
+            })
+            if len(results) >= top_k:
+                break
+        return results
 
     def list_domains(self) -> list[dict]:
         return [
@@ -150,6 +170,7 @@ class KnowledgeBase:
                 doc_count=d.get("doc_count", 0),
                 neighbors=d.get("neighbors", {}),
             )
+        self._needs_reindex = True
 
     def rename_domain(self, old_path: str, new_path: str) -> int:
         """Rename a domain and all its documents. Returns count of affected docs."""
