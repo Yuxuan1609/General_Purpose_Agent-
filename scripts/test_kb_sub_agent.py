@@ -246,11 +246,8 @@ meta schema: type(reference|tutorial|example|faq), level(beginner|intermediate|a
                 r["meta"] = doc.meta if doc else {}
             hint = ""
             if len(new_results) == 0:
-                domains = [d["path"] for d in self._kb.list_domains()]
-                if domain and domain not in domains:
-                    hint = f" | domain '{domain}' not found. Available: {', '.join(domains)}"
-                elif domain:
-                    hint = f" | 0 results in '{domain}'. Try broader query."
+                if domain:
+                    hint = f" | 0 results in domain '{domain}'. Try broader query or remove domain filter."
                 else:
                     hint = " | 0 results. Try different query terms."
             return {
