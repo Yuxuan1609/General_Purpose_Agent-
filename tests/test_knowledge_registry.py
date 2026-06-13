@@ -1,5 +1,7 @@
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -14,7 +16,13 @@ class TestKnowledgeToolRegistration:
     @classmethod
     def setup_class(cls):
         ToolRegistry().clear()
-        cls.kb = KnowledgeBase(":memory:")
+        cls._tmpdir = tempfile.mkdtemp()
+        cls.kb = KnowledgeBase(cls._tmpdir)
+
+    @classmethod
+    def teardown_class(cls):
+        cls.kb.close()
+        shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setup_method(self):
         ToolRegistry().clear()

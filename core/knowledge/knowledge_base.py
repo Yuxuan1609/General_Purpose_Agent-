@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.knowledge.models import KnowledgeDoc, KBDomain, _count_tokens, _get_tokenizer
-from vendor.txtai_core.scoring import ScoringFactory
+from vendor.txtai_core.embeddings import Embeddings
 
 logger = logging.getLogger("knowledge_base")
 
@@ -17,7 +17,7 @@ def _now_static() -> str:
 
 
 class KnowledgeBase:
-    """Static knowledge base backed by in-memory dicts.
+    """Knowledge base backed by txtai Embeddings for storage/persistence.
 
     Provides CRUD operations and search over KnowledgeDoc entries.
     Domain graph is maintained alongside documents.
@@ -25,22 +25,21 @@ class KnowledgeBase:
 
     def __init__(self, storage_path: str = "data/knowledge"):
         self._storage_path = storage_path
+        self._emb = None
         self._docs: dict[str, KnowledgeDoc] = {}
         self._domains: dict[str, KBDomain] = {}
-        self._scoring = None
-        self._id_to_idx: dict[str, int] = {}
-        self._needs_reindex: bool = True
 
-    def _rebuild_index(self):
-        self._scoring = ScoringFactory.create({"method": "bm25", "terms": True, "normalize": True})
-        self._id_to_idx = {}
-        documents = []
-        for idx, (doc_id, doc) in enumerate(self._docs.items()):
-            self._id_to_idx[doc_id] = idx
-            documents.append((idx, doc.content, None))
-        if documents:
-            self._scoring.index(documents)
-        self._needs_reindex = False
+    def _ensure_emb(self):
+        if self._emb is not None:
+            return
+        self._emb = Embeddings({
+            "path": "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma",
+            "trust_remote_code": True,
+            "content": "sqlite",
+            "keyword": "bm25",
+            "terms": True,
+            "normalize": True,
+        })
 
     def add(self, doc: KnowledgeDoc) -> list[str]:
         return self._chunk_and_add(doc)
@@ -77,11 +76,14 @@ class KnowledgeBase:
         return doc_ids
 
     def _add_single(self, doc: KnowledgeDoc) -> str:
-        doc.meta["id"] = doc.id
+        doc.meta.pop("id", None)
+
+        self._ensure_emb()
+        tags_str = json.dumps(dict(doc.meta), ensure_ascii=False) if doc.meta else None
+        self._emb.upsert([(doc.id, doc.content, tags_str)])
         self._docs[doc.id] = doc
         self._ensure_domain(doc.domain)
         self._domains[doc.domain].doc_count += 1
-        self._needs_reindex = True
         logger.debug("added doc %s to domain %s", doc.id, doc.domain)
         return doc.id
 
@@ -93,52 +95,49 @@ class KnowledgeBase:
         if doc is None:
             return False
         for k, v in kwargs.items():
-            if hasattr(doc, k):
+            if hasattr(doc, k) and k != "meta":
                 setattr(doc, k, v)
         doc.updated_at = datetime.now(timezone.utc).isoformat()
-        self._needs_reindex = True
+        self._ensure_emb()
+        tags_str = json.dumps(dict(doc.meta), ensure_ascii=False) if doc.meta else None
+        self._emb.upsert([(doc.id, doc.content, tags_str)])
         return True
 
     def delete(self, doc_id: str) -> bool:
         doc = self._docs.pop(doc_id, None)
-        if doc and doc.domain in self._domains:
+        if doc is None:
+            return False
+        if doc.domain in self._domains:
             self._domains[doc.domain].doc_count = max(0, self._domains[doc.domain].doc_count - 1)
-        if doc is not None:
-            self._needs_reindex = True
-        return doc is not None
+        if self._emb:
+            self._emb.delete([doc_id])
+        return True
 
     def search(self, query: str, domain: str | None = None, top_k: int = 5) -> list[dict]:
-        if self._needs_reindex:
-            self._rebuild_index()
-        if self._scoring is None or not self._docs:
+        self._ensure_emb()
+        if len(self._docs) == 0:
             return []
-
-        candidates = self._scoring.search(query, limit=max(top_k * 4, 20))
-        if not candidates:
-            return []
-
-        idx_to_id = {v: k for k, v in self._id_to_idx.items()}
-
-        results = []
-        for idx, score in candidates:
-            doc_id = idx_to_id.get(idx)
-            if doc_id is None:
+        results = self._emb.search(query, limit=max(top_k * 4, 20))
+        out = []
+        for r in results:
+            doc_id = r["id"]
+            doc = self._docs.get(doc_id)
+            if doc is None:
                 continue
-            doc = self._docs[doc_id]
             if domain and doc.domain != domain:
                 continue
-            results.append({
+            out.append({
                 "id": doc.id,
                 "domain": doc.domain,
                 "title": doc.title,
                 "content": doc.content[:500],
-                "score": round(float(score), 4),
+                "score": round(r["score"], 4),
                 "source": doc.source,
                 "meta": dict(doc.meta),
             })
-            if len(results) >= top_k:
+            if len(out) >= top_k:
                 break
-        return results
+        return out
 
     def list_domains(self) -> list[dict]:
         return [
@@ -164,10 +163,8 @@ class KnowledgeBase:
         return True
 
     def save(self) -> None:
-        if self._storage_path == ":memory:":
-            return
-        import json
         from pathlib import Path
+        import json as _json
         p = Path(self._storage_path)
         p.mkdir(parents=True, exist_ok=True)
         data = {
@@ -183,15 +180,15 @@ class KnowledgeBase:
                 for dpath, d in self._domains.items()
             },
         }
-        (p / "kb.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        (p / "kb.json").write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def load(self) -> None:
-        import json
+        import json as _json
         from pathlib import Path
         p = Path(self._storage_path) / "kb.json"
         if not p.exists():
             return
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = _json.loads(p.read_text(encoding="utf-8"))
         self._docs = {
             did: KnowledgeDoc.from_dict(d)
             for did, d in data.get("docs", {}).items()
@@ -205,7 +202,16 @@ class KnowledgeBase:
                 doc_count=d.get("doc_count", 0),
                 neighbors=d.get("neighbors", {}),
             )
-        self._needs_reindex = True
+        if self._docs:
+            self._ensure_emb()
+            for doc in self._docs.values():
+                tags_str = _json.dumps(dict(doc.meta), ensure_ascii=False) if doc.meta else None
+                self._emb.upsert([(doc.id, doc.content, tags_str)])
+
+    def close(self):
+        if self._emb:
+            self._emb.close()
+            self._emb = None
 
     def rename_domain(self, old_path: str, new_path: str) -> int:
         """Rename a domain and all its documents. Returns count of affected docs."""

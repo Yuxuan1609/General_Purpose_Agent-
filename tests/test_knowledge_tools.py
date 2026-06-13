@@ -1,5 +1,7 @@
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -13,7 +15,13 @@ from core.knowledge.knowledge_base import KnowledgeBase
 class TestKnowledgeTools:
     @classmethod
     def setup_class(cls):
-        cls.kb = KnowledgeBase(":memory:")
+        cls._tmpdir = tempfile.mkdtemp()
+        cls.kb = KnowledgeBase(cls._tmpdir)
+
+    @classmethod
+    def teardown_class(cls):
+        cls.kb.close()
+        shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def test_knowledge_add(self):
         result = json.loads(knowledge_add(
@@ -68,7 +76,8 @@ class TestKnowledgeTools:
 
     def test_knowledge_sync_domain_rename(self):
         from core.knowledge.tools import knowledge_sync_domain
-        kb = KnowledgeBase(":memory:")
+        tmpdir = tempfile.mkdtemp()
+        kb = KnowledgeBase(tmpdir)
         kb.add(KnowledgeDoc(domain="coding/python", title="Python Guide", content="python programming guide"))
         kb.add(KnowledgeDoc(domain="coding/python", title="Python Tips", content="python tips and tricks"))
         result = json.loads(knowledge_sync_domain(
@@ -84,15 +93,20 @@ class TestKnowledgeTools:
         assert "coding/python" not in paths
         results = kb.search("python", domain="coding/python_programming")
         assert len(results) == 2
+        kb.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_knowledge_sync_domain_list(self):
         from core.knowledge.tools import knowledge_sync_domain
-        kb = KnowledgeBase(":memory:")
+        tmpdir = tempfile.mkdtemp()
+        kb = KnowledgeBase(tmpdir)
         kb.add(KnowledgeDoc(domain="a/b", title="X", content="Y"))
         result = json.loads(knowledge_sync_domain(kb, action="list", source_domain=""))
         assert len(result["domains"]) >= 1
         paths = [d["path"] for d in result["domains"]]
         assert "a/b" in paths
+        kb.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_knowledge_get(self):
         from core.knowledge.tools import knowledge_get

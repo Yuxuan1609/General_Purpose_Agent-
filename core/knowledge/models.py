@@ -57,7 +57,9 @@ class KnowledgeDoc:
 
     @classmethod
     def from_dict(cls, d: dict) -> KnowledgeDoc:
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        obj = cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        obj.meta.pop("id", None)
+        return obj
 
 
 @dataclass

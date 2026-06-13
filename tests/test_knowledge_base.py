@@ -1,6 +1,7 @@
 # tests/test_knowledge_base.py
 import json
 import os
+import shutil
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -77,13 +78,14 @@ class TestKBDomain:
 
 
 class TestKnowledgeBase:
-    @classmethod
-    def setup_class(cls):
-        cls.kb = None
-
     def setup_method(self):
         from core.knowledge.knowledge_base import KnowledgeBase
-        self.kb = KnowledgeBase(":memory:")
+        self._tmpdir = tempfile.mkdtemp()
+        self.kb = KnowledgeBase(self._tmpdir)
+
+    def teardown_method(self):
+        self.kb.close()
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_add_and_get(self):
         from core.knowledge.models import KnowledgeDoc
@@ -136,80 +138,83 @@ class TestKnowledgeBase:
         self.kb.add(doc)
         m = self.kb.get_meta(doc.id)
         assert m["type"] == "reference"
-        assert m["id"] == doc.id
+        assert "id" not in m
         self.kb.update_meta(doc.id, {"level": "beginner", "type": "faq"})
         m2 = self.kb.get_meta(doc.id)
         assert m2["type"] == "faq"
         assert m2["level"] == "beginner"
-        assert m2["id"] == doc.id
 
 
 class TestKnowledgeBasePersistence:
     def setup_method(self):
         from core.knowledge.knowledge_base import KnowledgeBase
-        self.tmpdir = tempfile.mkdtemp()
-        self.kb = KnowledgeBase(self.tmpdir)
+        self._tmpdir = tempfile.mkdtemp()
+        self.kb = KnowledgeBase(self._tmpdir)
+
+    def teardown_method(self):
+        self.kb.close()
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_save_and_load(self):
         from core.knowledge.models import KnowledgeDoc
+        from core.knowledge.knowledge_base import KnowledgeBase
         d1 = KnowledgeDoc(domain="a/b", title="Doc1", content="Content 1", meta={"tags": ["t1"]})
         d2 = KnowledgeDoc(domain="a/c", title="Doc2", content="Content 2", meta={"tags": ["t2"]})
         self.kb.add(d1)
         self.kb.add(d2)
         self.kb.save()
 
-        from core.knowledge.knowledge_base import KnowledgeBase
-        kb2 = KnowledgeBase(self.tmpdir)
+        kb2 = KnowledgeBase(self._tmpdir)
         kb2.load()
         assert kb2.get(d1.id) is not None
         assert kb2.get(d2.id) is not None
         retrieved = kb2.get(d1.id)
         assert retrieved.title == "Doc1"
-        assert retrieved.meta == {"tags": ["t1"], "id": d1.id}
+        assert retrieved.meta == {"tags": ["t1"]}
         domains = kb2.list_domains()
         assert len(domains) == 2
+        kb2.close()
 
     def test_load_nonexistent(self):
         from core.knowledge.knowledge_base import KnowledgeBase
-        import os
-        nonexistent = os.path.join(self.tmpdir, "does_not_exist")
+        nonexistent = os.path.join(self._tmpdir, "does_not_exist")
         kb2 = KnowledgeBase(nonexistent)
         kb2.load()
         assert len(kb2.list_domains()) == 0
+        kb2.close()
 
 
 class TestMetaAndChunking:
     def setup_method(self):
         from core.knowledge.knowledge_base import KnowledgeBase
-        self.kb = KnowledgeBase(":memory:")
+        self._tmpdir = tempfile.mkdtemp()
+        self.kb = KnowledgeBase(self._tmpdir)
 
-    def test_meta_id_matches_doc_id(self):
+    def teardown_method(self):
+        self.kb.close()
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_meta_does_not_contain_id(self):
         from core.knowledge.models import KnowledgeDoc
         doc = KnowledgeDoc(domain="test", title="T", content="Hello world document content", meta={"type": "ref"})
         self.kb.add(doc)
         retrieved = self.kb.get(doc.id)
-        assert retrieved.meta["id"] == doc.id
+        assert "id" not in retrieved.meta
         assert retrieved.meta["type"] == "ref"
 
     def test_meta_roundtrip_through_save_load(self):
-        import tempfile
         from core.knowledge.models import KnowledgeDoc
         from core.knowledge.knowledge_base import KnowledgeBase
-        tmp = tempfile.mkdtemp()
-        try:
-            kb = KnowledgeBase(tmp)
-            doc = KnowledgeDoc(domain="t", title="D", content="hello world", meta={"type": "ref", "level": "beginner"})
-            kb.add(doc)
-            kb.save()
+        doc = KnowledgeDoc(domain="t", title="D", content="hello world", meta={"type": "ref", "level": "beginner"})
+        self.kb.add(doc)
+        self.kb.save()
 
-            kb2 = KnowledgeBase(tmp)
-            kb2.load()
-            doc2 = kb2.get(doc.id)
-            assert doc2 is not None
-            assert doc2.meta == {"type": "ref", "level": "beginner", "id": doc.id}
-        finally:
-            import shutil
-            shutil.rmtree(tmp, ignore_errors=True)
+        kb2 = KnowledgeBase(self._tmpdir)
+        kb2.load()
+        doc2 = kb2.get(doc.id)
+        assert doc2 is not None
+        assert doc2.meta == {"type": "ref", "level": "beginner"}
+        kb2.close()
 
     def test_chunking_long_document(self):
         from core.knowledge.models import KnowledgeDoc

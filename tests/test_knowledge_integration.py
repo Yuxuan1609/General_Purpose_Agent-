@@ -1,5 +1,7 @@
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -16,7 +18,13 @@ from core.knowledge.tools import (
 class TestKnowledgeIntegration:
     @classmethod
     def setup_class(cls):
-        cls.kb = KnowledgeBase(":memory:")
+        cls._tmpdir = tempfile.mkdtemp()
+        cls.kb = KnowledgeBase(cls._tmpdir)
+
+    @classmethod
+    def teardown_class(cls):
+        cls.kb.close()
+        shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def test_agent_workflow_add_query_update_delete(self):
         r = json.loads(knowledge_add(self.kb, domain="game/leduc",
