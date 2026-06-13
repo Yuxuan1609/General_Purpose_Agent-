@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-13 | **Step 2 文档**：KB 维护 task 规格（cleanup/fill_gaps/link_related/dedup），触发机制，质量指标，与 Step 3 query-response 关系。见 `docs/superpowers/specs/2026-06-13-kb-maintenance-tasks.md`。 |
 | 2026-06-13 | **KB 存储合并**：`save()` 同时写入 txtai 持久化文件（config/embeddings/scoring/documents）和 `kb.json` 到同一路径；`load()` 优先从 txtai 磁盘加载，仅在缺失时重建索引。 |
 | 2026-06-13 | **KnowledgeBase BM25**：`search()` 改用 txtai BM25 scoring 替代 `_keyword_score` 简单匹配。新增 `_rebuild_index()`（lazy reindex）、`_scoring`/`_id_to_idx`/`_needs_reindex` 字段。删除 `_keyword_score` 静态方法。 |
 | 2026-06-12 | **Cleanup**：删除 `L2_DOMAIN_NODES` 硬编码节点列表（已由 DomainRegistry 替代）；删除 `STAGE1_SCHEMA`/`STAGE2_SCHEMA`/`L1_DECISION_SCHEMA`（已被 capture_tools 替代）；删除 `KnowledgeCard.boost`/`penalize` 条目（方法不存在）；清理各层 stage1/stage2 旧注释。 |
@@ -269,6 +270,20 @@
 | `scoring` | BM25 倒排索引 | txtai save/load |
 | `documents/` | SQLite 数据库（id + text + tags） | txtai save/load |
 | `kb.json` | 文档（KnowledgeDoc dict）+ domains（KBDomain dict）| KnowledgeBase save/load |
+
+### KnowledgeBase 工具接口（core/knowledge/tools.py）
+
+所有 handler 签名为 `(kb: KnowledgeBase, **kwargs) → str`（返回 JSON）。
+
+| 工具名 | 输入 | 输出 |
+|--------|------|------|
+| `knowledge_query` | `query`, `domain?`, `top_k?`(5) | `{results: [{id, domain, title, content[:500], score, source, meta}]}` |
+| `knowledge_add` | `domain`, `title`, `content`, `meta?`, `source?`("agent") | `{status, doc_id}` |
+| `knowledge_get` | `doc_id` | `{status, doc: KnowledgeDoc \| null}` |
+| `knowledge_update` | `doc_id`, `content?`, `meta?`（局部 merge） | `{status}` |
+| `knowledge_delete` | `doc_id` | `{status}` |
+| `knowledge_list_domains` | `parent?` | `{domains: [{path, parent, description, doc_count}]}` |
+| `knowledge_sync_domain` | `action`(rename), `source_domain`, `target_domain` | `{status, count}` |
 
 ## core/skill_layer.py (已有，层内部使用)
 
