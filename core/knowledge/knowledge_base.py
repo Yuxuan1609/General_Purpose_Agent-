@@ -37,8 +37,6 @@ class KnowledgeBase:
             "trust_remote_code": True,
             "content": "sqlite",
             "keyword": "bm25",
-            "terms": True,
-            "normalize": True,
         })
 
     def add(self, doc: KnowledgeDoc) -> list[str]:

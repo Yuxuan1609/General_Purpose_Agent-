@@ -58,11 +58,10 @@ class ScoringFactory:
             config: scoring configuration
 
         Returns:
-            True if this config is for a sparse index
+            True if this config is for a sparse index (keyword or sparse)
         """
 
-        # No sparse index backends in stripped version
-        return False
+        return config and isinstance(config, dict) and bool(config.get("terms") or config.get("method"))
 
     @staticmethod
     def resolve(backend, config):
