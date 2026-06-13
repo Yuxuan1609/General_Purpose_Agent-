@@ -10,7 +10,6 @@ from ..ann import ANNFactory
 from ..archive import ArchiveFactory
 from ..cloud import CloudFactory
 from ..database import DatabaseFactory
-from ..graph import GraphFactory
 from ..scoring import ScoringFactory
 from ..vectors import VectorsFactory
 
@@ -992,26 +991,7 @@ class Embeddings:
         return DatabaseFactory.create(config)
 
     def creategraph(self):
-        """
-        Creates a graph from config.
-
-        Returns:
-            new graph, if enabled in config
-        """
-
-        # Free existing resources
-        if self.graph:
-            self.graph.close()
-
-        if "graph" in self.config:
-            # Get or create graph configuration
-            config = self.config["graph"] if "graph" in self.config else {}
-
-            # Create configuration with custom columns, if necessary
-            config = self.columns(config)
-            return GraphFactory.create(config)
-
-        return None
+        return None  # stripped: graph module removed
 
     def createids(self, ids=None):
         """
