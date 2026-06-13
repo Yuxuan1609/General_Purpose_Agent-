@@ -135,10 +135,13 @@ class TestKnowledgeBase:
         doc = KnowledgeDoc(domain="test", title="T", content="C", meta={"type": "reference"})
         self.kb.add(doc)
         m = self.kb.get_meta(doc.id)
-        assert m == {"type": "reference"}
+        assert m["type"] == "reference"
+        assert m["id"] == doc.id
         self.kb.update_meta(doc.id, {"level": "beginner", "type": "faq"})
         m2 = self.kb.get_meta(doc.id)
-        assert m2 == {"type": "faq", "level": "beginner"}
+        assert m2["type"] == "faq"
+        assert m2["level"] == "beginner"
+        assert m2["id"] == doc.id
 
 
 class TestKnowledgeBasePersistence:
@@ -162,7 +165,7 @@ class TestKnowledgeBasePersistence:
         assert kb2.get(d2.id) is not None
         retrieved = kb2.get(d1.id)
         assert retrieved.title == "Doc1"
-        assert retrieved.meta == {"tags": ["t1"]}
+        assert retrieved.meta == {"tags": ["t1"], "id": d1.id}
         domains = kb2.list_domains()
         assert len(domains) == 2
 
@@ -173,3 +176,67 @@ class TestKnowledgeBasePersistence:
         kb2 = KnowledgeBase(nonexistent)
         kb2.load()
         assert len(kb2.list_domains()) == 0
+
+
+class TestMetaAndChunking:
+    def setup_method(self):
+        from core.knowledge.knowledge_base import KnowledgeBase
+        self.kb = KnowledgeBase(":memory:")
+
+    def test_meta_id_matches_doc_id(self):
+        from core.knowledge.models import KnowledgeDoc
+        doc = KnowledgeDoc(domain="test", title="T", content="Hello world document content", meta={"type": "ref"})
+        self.kb.add(doc)
+        retrieved = self.kb.get(doc.id)
+        assert retrieved.meta["id"] == doc.id
+        assert retrieved.meta["type"] == "ref"
+
+    def test_meta_roundtrip_through_save_load(self):
+        import tempfile
+        from core.knowledge.models import KnowledgeDoc
+        from core.knowledge.knowledge_base import KnowledgeBase
+        tmp = tempfile.mkdtemp()
+        try:
+            kb = KnowledgeBase(tmp)
+            doc = KnowledgeDoc(domain="t", title="D", content="hello world", meta={"type": "ref", "level": "beginner"})
+            kb.add(doc)
+            kb.save()
+
+            kb2 = KnowledgeBase(tmp)
+            kb2.load()
+            doc2 = kb2.get(doc.id)
+            assert doc2 is not None
+            assert doc2.meta == {"type": "ref", "level": "beginner", "id": doc.id}
+        finally:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_chunking_long_document(self):
+        from core.knowledge.models import KnowledgeDoc
+        long_text = "hello world " * 5000
+        doc = KnowledgeDoc(domain="test", title="Long Doc", content=long_text, meta={"type": "ref"})
+        ids = self.kb.add(doc)
+        assert len(ids) >= 2
+        for i, cid in enumerate(ids):
+            chunk = self.kb.get(cid)
+            assert chunk is not None
+            assert "chunk_of" in chunk.meta
+            assert chunk.meta["chunk_index"] == i
+            assert chunk.meta["chunk_total"] == len(ids)
+
+    def test_short_document_not_chunked(self):
+        from core.knowledge.models import KnowledgeDoc
+        doc = KnowledgeDoc(domain="test", title="Short", content="hello world", meta={"type": "ref"})
+        ids = self.kb.add(doc)
+        assert len(ids) == 1
+        chunk = self.kb.get(ids[0])
+        assert "chunk_of" not in chunk.meta
+
+    def test_knowledge_add_tool_handles_chunking(self):
+        from core.knowledge.tools import knowledge_add
+        import json
+        long_text = "hello world " * 5000
+        result = json.loads(knowledge_add(self.kb, domain="test", title="Long", content=long_text, meta={"type": "ref"}))
+        assert result["status"] == "ok"
+        assert "doc_ids" in result
+        assert len(result["doc_ids"]) >= 2

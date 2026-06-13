@@ -14,9 +14,9 @@ def knowledge_add(kb, domain: str, title: str, content: str,
                   meta: dict | None = None, source: str = "agent") -> str:
     doc = KnowledgeDoc(domain=domain, title=title, content=content,
                        meta=meta or {}, source=source)
-    kb.add(doc)
+    doc_ids = kb.add(doc)
     kb.save()
-    return json.dumps({"status": "ok", "doc_id": doc.id}, ensure_ascii=False)
+    return json.dumps({"status": "ok", "doc_ids": doc_ids, "doc_id": doc_ids[0], "doc_count": len(doc_ids)}, ensure_ascii=False)
 
 
 def knowledge_update(kb, doc_id: str, content: str | None = None,

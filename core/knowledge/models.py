@@ -13,6 +13,23 @@ def _uid() -> str:
     return uuid.uuid4().hex[:8]
 
 
+_gemma_tokenizer = None
+
+
+def _get_tokenizer():
+    global _gemma_tokenizer
+    if _gemma_tokenizer is None:
+        from transformers import AutoTokenizer
+        _gemma_tokenizer = AutoTokenizer.from_pretrained(
+            "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma"
+        )
+    return _gemma_tokenizer
+
+
+def _count_tokens(text: str) -> int:
+    return len(_get_tokenizer().encode(text))
+
+
 @dataclass
 class KnowledgeDoc:
     id: str = field(default_factory=_uid)

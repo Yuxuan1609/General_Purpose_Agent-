@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from core.knowledge.models import KnowledgeDoc, KBDomain
+from core.knowledge.models import KnowledgeDoc, KBDomain, _count_tokens, _get_tokenizer
 from vendor.txtai_core.scoring import ScoringFactory
 
 logger = logging.getLogger("knowledge_base")
@@ -42,7 +42,42 @@ class KnowledgeBase:
             self._scoring.index(documents)
         self._needs_reindex = False
 
-    def add(self, doc: KnowledgeDoc) -> str:
+    def add(self, doc: KnowledgeDoc) -> list[str]:
+        return self._chunk_and_add(doc)
+
+    def _chunk_and_add(self, doc: KnowledgeDoc) -> list[str]:
+        MAX_TOKENS = 8192
+        tokens = _count_tokens(doc.content)
+        if tokens <= MAX_TOKENS:
+            self._add_single(doc)
+            return [doc.id]
+
+        tokenizer = _get_tokenizer()
+        token_ids = tokenizer.encode(doc.content)
+        chunks = []
+        for i in range(0, len(token_ids), MAX_TOKENS):
+            chunk_ids = token_ids[i:i + MAX_TOKENS]
+            chunk_text = tokenizer.decode(chunk_ids, skip_special_tokens=True)
+            chunks.append(chunk_text)
+
+        doc_ids = []
+        for idx, chunk_text in enumerate(chunks):
+            chunk_doc = KnowledgeDoc(
+                domain=doc.domain,
+                title=f"{doc.title} (part {idx+1}/{len(chunks)})",
+                content=chunk_text,
+                meta=dict(doc.meta),
+                source=doc.source,
+            )
+            chunk_doc.meta["chunk_of"] = doc.id if idx == 0 else doc_ids[0]
+            chunk_doc.meta["chunk_index"] = idx
+            chunk_doc.meta["chunk_total"] = len(chunks)
+            self._add_single(chunk_doc)
+            doc_ids.append(chunk_doc.id)
+        return doc_ids
+
+    def _add_single(self, doc: KnowledgeDoc) -> str:
+        doc.meta["id"] = doc.id
         self._docs[doc.id] = doc
         self._ensure_domain(doc.domain)
         self._domains[doc.domain].doc_count += 1
