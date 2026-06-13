@@ -4,9 +4,6 @@ Models module
 
 import os
 
-from .onnx import OnnxModel
-
-# Conditional imports
 from ..util import Library
 
 library = Library()
@@ -187,10 +184,6 @@ class Models:
         Returns:
             machine learning model
         """
-
-        # Detect ONNX models
-        if isinstance(path, bytes) or (isinstance(path, str) and os.path.isfile(path)):
-            return OnnxModel(path, config)
 
         # Return path, if path isn't a string
         if not isinstance(path, str):

@@ -8,7 +8,6 @@ import os
 from .base import Pooling
 from .cls import ClsPooling
 from .last import LastPooling
-from .late import LatePooling
 from .mean import MeanPooling
 
 from ...util import Download, DownloadError
@@ -44,7 +43,7 @@ class PoolingFactory:
             return Pooling(path, device, tokenizer, maxlength, loadprompts, modelargs)
 
         # Derive pooling method if it's not specified and path is a string
-        if (not method or method not in ("clspooling", "meanpooling", "lastpooling", "latepooling")) and isinstance(path, str):
+        if (not method or method not in ("clspooling", "meanpooling", "lastpooling")) and isinstance(path, str):
             method = PoolingFactory.method(path)
 
         # Check for cls pooling
@@ -54,10 +53,6 @@ class PoolingFactory:
         # Check for last pooling
         if method == "lastpooling":
             return LastPooling(path, device, tokenizer, maxlength, loadprompts, modelargs)
-
-        # Check for late pooling
-        if method == "latepooling":
-            return LatePooling(path, device, tokenizer, maxlength, loadprompts, modelargs)
 
         # Default to mean pooling
         return MeanPooling(path, device, tokenizer, maxlength, loadprompts, modelargs)
@@ -87,19 +82,6 @@ class PoolingFactory:
         # Set to last token pooling if it's enabled and mean pooling is disabled
         if config and config.get("pooling_mode_lasttoken") and not config["pooling_mode_mean_tokens"]:
             method = "lastpooling"
-
-        # Check for late interaction pooling
-        if not config:
-            # Load 1_Dense/config.json
-            config = PoolingFactory.load(path, "1_Dense/config.json")
-            if config:
-                method = "latepooling"
-
-            # Load config.json and check architecture
-            else:
-                config = PoolingFactory.load(path, "config.json")
-                if config and "HF_ColBERT" in config.get("architectures", []):
-                    method = "latepooling"
 
         return method
 

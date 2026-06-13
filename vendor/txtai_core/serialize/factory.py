@@ -3,7 +3,6 @@ Factory module
 """
 
 from .messagepack import MessagePack
-from .pickle import Pickle
 
 
 class SerializeFactory:
@@ -20,10 +19,6 @@ class SerializeFactory:
             method: serialization method
             kwargs: additional keyword arguments to pass to serialize instance
         """
-
-        # Pickle serialization
-        if method == "pickle":
-            return Pickle(**kwargs)
 
         # Default serialization
         return MessagePack(**kwargs)
