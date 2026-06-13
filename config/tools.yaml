@@ -21,8 +21,8 @@ tools:
     fallback:
       max_retries: 2
       degrade:
-        - tool: knowledge_query
-          hint: "网络搜索不可用时可尝试 knowledge_query 查询本地知识库"
+        - tool: kb_query
+          hint: "网络搜索不可用时可尝试 kb_query 查询本地知识库"
 
   read_file:
     timeout: 10
@@ -45,9 +45,27 @@ tools:
       max_retries: 1
       degrade: []
 
-  knowledge_query:
-    timeout: 10
+  kb_query:
+    timeout: 60
     allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade:
+        - tool: web_search
+          hint: "知识库查询失败时可通过 web_search 联网搜索"
+
+  kb_delete:
+    timeout: 5
+    allowlist: [l2, l3]
     fallback:
       max_retries: 1
       degrade: []
+
+  kb_fill_gap:
+    timeout: 120
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 0
+      degrade:
+        - tool: web_search
+          hint: "知识填补失败时可通过 web_search 先联网搜索再尝试"

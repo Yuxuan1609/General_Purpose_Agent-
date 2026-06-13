@@ -16,6 +16,7 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     from core.tools.file_tools import register_read_file, register_grep
     from core.tools.tool_proposal import register_tool_proposal, set_proposal_dir
     from core.tools.domain_tool import register_create_domain, set_domain_registry
+    from core.tools.kb_tools import register_kb_tools
 
     register_todo_tool(registry)
     register_terminal_tool(registry)
@@ -24,6 +25,7 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     register_grep(registry)
     register_tool_proposal(registry)
     register_create_domain(registry)
+    register_kb_tools(registry)
 
     if proposal_dir:
         set_proposal_dir(proposal_dir)
