@@ -1,0 +1,20 @@
+# SearXNG settings — minimal config for API use
+use_default_settings: true
+
+server:
+  secret_key: "change-me-to-random-string-1234567890"
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: false
+  public_instance: false
+
+search:
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  proxies: {}
