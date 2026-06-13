@@ -21,168 +21,179 @@ from core.knowledge.knowledge_base import KnowledgeBase
 from core.knowledge.models import KnowledgeDoc
 
 
-SUB_AGENT_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_search",
-            "description": "Search knowledge base with embeddings+BM25. Returns candidates with full meta.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "domain": {"type": "string", "description": "Optional domain filter"},
-                    "top_k": {"type": "integer", "description": "Max results (default 10)"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_get",
-            "description": "Get full content of single document by ID. Use to follow parent/children/related links. HARD LIMIT: 3 calls total.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "doc_id": {"type": "string", "description": "Document ID to fetch"},
-                },
-                "required": ["doc_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_update_meta",
-            "description": "Fix/improve meta fields on a document (type, level, tags, related, etc.) while exploring.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "doc_id": {"type": "string", "description": "Document ID"},
-                    "meta": {"type": "object", "description": "Meta fields to set (shallow merge)"},
-                },
-                "required": ["doc_id", "meta"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_report",
-            "description": "END THE SEARCH. Report findings, coverage assessment, and suggestions for the main agent. Call this as your final action.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "findings": {
-                        "type": "array",
-                        "description": "Documents found and their relevance",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "doc_id": {"type": "string"},
-                                "title": {"type": "string"},
-                                "relevance": {"type": "string", "enum": ["direct", "partial", "background"]},
-                                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-                                "note": {"type": "string", "description": "Why this doc is relevant"},
-                            },
-                            "required": ["doc_id", "title", "relevance", "confidence"],
-                        },
-                    },
-                    "coverage": {
-                        "type": "object",
-                        "properties": {
-                            "match_level": {"type": "string", "enum": ["direct", "partial", "none"]},
-                            "gaps": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Topics missing from results",
-                            },
-                        },
-                        "required": ["match_level"],
-                    },
-                    "suggestions": {
-                        "type": "array",
-                        "description": "Recommendations for the main agent",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "action": {"type": "string", "enum": ["add", "delete", "fix_meta", "search_external"]},
-                                "domain": {"type": "string"},
-                                "topic": {"type": "string"},
-                                "reason": {"type": "string"},
-                                "priority": {"type": "string", "enum": ["high", "medium", "low"]},
-                            },
-                            "required": ["action", "reason"],
-                        },
-                    },
-                    "meta_changes_made": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "doc_id": {"type": "string"},
-                                "field": {"type": "string"},
-                                "old": {},
-                                "new": {},
-                            },
-                            "required": ["doc_id", "field"],
-                        },
-                    },
-                },
-                "required": ["findings", "coverage", "suggestions"],
-            },
-        },
-    },
-]
-
-SUB_AGENT_SYSTEM_PROMPT = """你是一个知识库检索子代理。你的职责是搜索知识库、阅读 meta、修正问题、最终汇报。
-
-工作流程：
-1. 调用 kb_search 搜索用户查询 → 获得候选文档列表（含 id, domain, title, content[:500], score, meta）
-2. 仔细阅读每条结果的 meta 字段
-3. 如果 meta 不准确 → 调用 kb_update_meta 修正
-4. 如果需要深入了解某条文档 → 调用 kb_get (限制：最多 3 次)
-5. 如果第一轮结果不够好 → 换关键词/跟关联链 refine，再次 kb_search
-6. 完成检索 → 调用 kb_report 汇报
-
-规则：
-- 自主完成，不需要和任何人确认
-- kb_get 仅用于跟 parent/children/related 链，不用于批量全文
-- kb_report 是最后一步，之后必须停止
-- 你已穷尽当前 query 方向的所有相关信息"""
-
-
 class SubAgentLoop:
-    """Simple multi-turn tool-call loop for the KB query sub-agent."""
+    """Two-phase KB sub-agent: Phase 1 search (≤3 searches) → Phase 2 meta review (conditional)."""
 
+    MAX_SEARCHES = 3
+    MAX_KB_GET = 3
     MAX_TURNS = 8
+
+    PHASE1_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_search",
+                "description": "Search KB with embeddings+BM25. Returns candidates with meta.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "domain": {"type": "string"},
+                        "top_k": {"type": "integer", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_get",
+                "description": "Get full document by ID. MAX 3 calls.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"doc_id": {"type": "string"}},
+                    "required": ["doc_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_phase1_done",
+                "description": "End search phase. Report findings + coverage + whether meta review needed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "findings": {"type": "array", "items": {"type": "object"}},
+                        "coverage": {
+                            "type": "object",
+                            "properties": {
+                                "match_level": {"type": "string", "enum": ["direct", "partial", "none"]},
+                                "gaps": {"type": "array", "items": {"type": "string"}},
+                            },
+                            "required": ["match_level"],
+                        },
+                        "suggestions": {"type": "array", "items": {"type": "object"}},
+                        "needs_meta_review": {"type": "boolean"},
+                    },
+                    "required": ["findings", "coverage", "needs_meta_review"],
+                },
+            },
+        },
+    ]
+
+    PHASE1_SYSTEM = """你是知识库检索子代理（搜索阶段）。
+
+任务：根据查询搜索知识库，阅读 meta 质量，refine 直到满意。
+
+meta 字段：
+- type: "reference"|"tutorial"|"example"|"faq"
+- level: "beginner"|"intermediate"|"advanced"
+- tags: string[]
+- related: string[] / parent: string / children: string[]
+
+流程：
+1. kb_search → 读每条 meta
+2. 需深入 → kb_get (最多 3 次)
+3. 不够好 → 换关键词 refine kb_search (最多 3 轮)
+4. 完成 → kb_phase1_done
+
+注意：本阶段只检索不修改 meta。如发现 meta 有缺陷，设 needs_meta_review=true。"""
+
+    PHASE2_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_update_meta",
+                "description": "Fix meta fields (type, level, tags, related, etc.).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "doc_id": {"type": "string"},
+                        "meta": {"type": "object"},
+                    },
+                    "required": ["doc_id", "meta"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_phase2_done",
+                "description": "End meta review. Report changes made.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "meta_changes": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "doc_id": {"type": "string"},
+                                    "field": {"type": "string"},
+                                    "old": {},
+                                    "new": {},
+                                },
+                            },
+                        },
+                    },
+                    "required": ["meta_changes"],
+                },
+            },
+        },
+    ]
+
+    PHASE2_SYSTEM = """你是知识库 meta 维护子代理。
+
+meta schema: type(reference|tutorial|example|faq), level(beginner|intermediate|advanced), tags(string[]), related(string[])
+
+任务：阅读检索历史中提到的每篇文档，检查 meta 质量，调用 kb_update_meta 修正。
+
+[检索历史]
+{history}
+
+完成后调用 kb_phase2_done。"""
 
     def __init__(self, llm: LLMClient, kb: KnowledgeBase, trace: bool = True):
         self._llm = llm
         self._kb = kb
-        self._kb_get_count = 0
-        self._report = None
         self._trace = trace
-        self._turn_count = 0
+        self._kb_get_count = 0
+        self._search_count = 0
+        self._phase1_messages: list[dict] = []
 
     def run(self, query: str, context: str = "") -> dict:
+        self._kb_get_count = 0
+        self._search_count = 0
+        self._phase1_messages = []
+
+        phase1 = self._run_phase1(query, context)
+        meta_changes = []
+        if phase1.get("needs_meta_review"):
+            meta_changes = self._run_phase2(phase1)
+
+        return {
+            "findings": phase1.get("findings", []),
+            "coverage": phase1.get("coverage", {"match_level": "none"}),
+            "suggestions": phase1.get("suggestions", []),
+            "meta_changes_made": meta_changes,
+        }
+
+    def _run_phase1(self, query: str, context: str) -> dict:
         messages = [
-            {"role": "system", "content": SUB_AGENT_SYSTEM_PROMPT},
+            {"role": "system", "content": self.PHASE1_SYSTEM},
             {"role": "user", "content": f"[查询]\n{query}\n\n[上下文]\n{context}"},
         ]
 
         for turn in range(1, self.MAX_TURNS + 1):
-            self._turn_count = turn
-            resp = self._llm.chat(messages=messages, tools=SUB_AGENT_TOOLS)
+            resp = self._llm.chat(messages=messages, tools=self.PHASE1_TOOLS)
 
             if resp.text and not resp.tool_calls:
                 if self._trace:
-                    print(f"  [turn {turn}] LLM text: {resp.text[:120]}...")
+                    print(f"  [P1 turn {turn}] text: {resp.text[:100]}...")
                 messages.append({"role": "assistant", "content": resp.text})
                 continue
-
             if not resp.tool_calls:
                 continue
 
@@ -191,14 +202,14 @@ class SubAgentLoop:
                 name = tc.function.name
                 args = json.loads(tc.function.arguments)
                 if self._trace:
-                    arg_summary = {k: v for k, v in args.items() if k not in ("content",)}
-                    print(f"  [turn {turn}] {name}({json.dumps(arg_summary, ensure_ascii=False)})")
+                    arg_summary = {k: v for k, v in args.items() if k not in ("findings", "content")}
+                    print(f"  [P1 turn {turn}] {name}({json.dumps(arg_summary, ensure_ascii=False)[:120]})")
 
-                if name == "kb_report":
-                    self._report = args
+                if name == "kb_phase1_done":
+                    self._phase1_messages = messages
                     return args
 
-                result = self._dispatch(name, args)
+                result = self._dispatch_phase1(name, args)
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -206,59 +217,104 @@ class SubAgentLoop:
                 })
 
             messages.append({
-                "role": "assistant",
-                "content": None,
+                "role": "assistant", "content": None,
                 "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                     for tc in resp.tool_calls
                 ],
             })
             messages.extend(tool_results)
 
-        return {"error": "max_turns_exceeded", "turns": self.MAX_TURNS}
+        self._phase1_messages = messages
+        return {"findings": [], "coverage": {"match_level": "none"}, "needs_meta_review": False}
 
-    def _dispatch(self, name: str, args: dict) -> dict:
+    def _dispatch_phase1(self, name: str, args: dict) -> dict:
         if name == "kb_search":
-            return self._handle_search(**args)
+            self._search_count += 1
+            if self._search_count > self.MAX_SEARCHES:
+                return {"error": f"max {self.MAX_SEARCHES} searches"}
+            results = self._kb.search(**args)
+            for r in results:
+                doc = self._kb.get(r["id"])
+                r["meta"] = doc.meta if doc else {}
+            return {"results": results, "count": len(results)}
         if name == "kb_get":
-            return self._handle_get(**args)
+            self._kb_get_count += 1
+            if self._kb_get_count > self.MAX_KB_GET:
+                return {"status": "limit_exceeded"}
+            doc = self._kb.get(args["doc_id"])
+            return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
+        return {"error": f"unknown: {name}"}
+
+    def _run_phase2(self, phase1: dict) -> list[dict]:
+        history = self._build_phase1_history(phase1)
+        messages = [
+            {"role": "system", "content": self.PHASE2_SYSTEM.format(history=history)},
+            {"role": "user", "content": "请检查上述检索结果中所有文档的 meta 质量并修正。"},
+        ]
+
+        for turn in range(1, self.MAX_TURNS + 1):
+            resp = self._llm.chat(messages=messages, tools=self.PHASE2_TOOLS)
+
+            if resp.text and not resp.tool_calls:
+                messages.append({"role": "assistant", "content": resp.text})
+                continue
+            if not resp.tool_calls:
+                continue
+
+            tool_results = []
+            for tc in resp.tool_calls:
+                name = tc.function.name
+                args = json.loads(tc.function.arguments)
+                if self._trace:
+                    print(f"  [P2] {name}(...)")
+
+                if name == "kb_phase2_done":
+                    return args.get("meta_changes", [])
+
+                result = self._dispatch_phase2(name, args)
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+
+            messages.append({
+                "role": "assistant", "content": None,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in resp.tool_calls
+                ],
+            })
+            messages.extend(tool_results)
+
+        return []
+
+    def _dispatch_phase2(self, name: str, args: dict) -> dict:
         if name == "kb_update_meta":
-            return self._handle_update_meta(**args)
-        return {"error": f"unknown tool: {name}"}
+            doc = self._kb.get(args["doc_id"])
+            if doc is None:
+                return {"status": "not_found"}
+            old = dict(doc.meta)
+            self._kb.update_meta(args["doc_id"], args["meta"])
+            self._kb.update(args["doc_id"])
+            self._kb.save()
+            return {"status": "ok", "doc_id": args["doc_id"], "old": old, "new": dict(doc.meta)}
+        return {"error": f"unknown: {name}"}
 
-    def _handle_search(self, query: str, domain: str | None = None, top_k: int = 10) -> dict:
-        results = self._kb.search(query, domain=domain, top_k=top_k)
-        for r in results:
-            doc = self._kb.get(r["id"])
-            if doc:
-                r["meta"] = doc.meta
-        return {"results": results, "count": len(results)}
-
-    def _handle_get(self, doc_id: str) -> dict:
-        self._kb_get_count += 1
-        if self._kb_get_count > 3:
-            return {"status": "limit_exceeded", "reason": "kb_get limit of 3 reached"}
-        doc = self._kb.get(doc_id)
-        if doc is None:
-            return {"status": "not_found"}
-        return {"status": "ok", "doc": doc.to_dict()}
-
-    def _handle_update_meta(self, doc_id: str, meta: dict) -> dict:
-        doc = self._kb.get(doc_id)
-        if doc is None:
-            return {"status": "not_found"}
-        old = dict(doc.meta)
-        self._kb.update_meta(doc_id, meta)
-        self._kb.update(doc_id)
-        self._kb.save()
-        return {"status": "ok", "doc_id": doc_id, "old": old, "new": dict(doc.meta)}
+    def _build_phase1_history(self, phase1: dict) -> str:
+        lines = ["## 检索到的文档"]
+        for f in phase1.get("findings", []):
+            lines.append(f"- {f.get('doc_id', '?')[:8]}: {f.get('title', '?')} (relevance={f.get('relevance', '?')})")
+        lines.append("")
+        lines.append("## 覆盖评估")
+        cov = phase1.get("coverage", {})
+        lines.append(f"  match_level: {cov.get('match_level', '?')}")
+        if cov.get("gaps"):
+            lines.append(f"  gaps: {', '.join(cov['gaps'])}")
+        return "\n".join(lines)
 
 
 def _now():
