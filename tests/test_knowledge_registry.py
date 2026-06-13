@@ -7,7 +7,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.tools.registry import ToolRegistry
 from core.knowledge.knowledge_base import KnowledgeBase
-from core.knowledge.tools import knowledge_query, knowledge_add, knowledge_update, knowledge_delete
+from core.knowledge.tools import knowledge_query, knowledge_add, knowledge_update, knowledge_delete, knowledge_get
 
 
 class TestKnowledgeToolRegistration:
@@ -54,14 +54,24 @@ class TestKnowledgeToolRegistration:
             handler=lambda args, context: knowledge_delete(self.kb, **args),
             toolset="knowledge",
         )
+        ToolRegistry().register(
+            name="knowledge_get",
+            schema={
+                "name": "knowledge_get",
+                "description": "获取静态知识库文档。",
+            },
+            handler=lambda args, context: knowledge_get(self.kb, **args),
+            toolset="knowledge",
+        )
 
-    def test_all_four_knowledge_tools_registered(self):
+    def test_all_five_knowledge_tools_registered(self):
         definitions = ToolRegistry().get_definitions()
         names = [d["name"] for d in definitions]
         assert "knowledge_query" in names
         assert "knowledge_add" in names
         assert "knowledge_update" in names
         assert "knowledge_delete" in names
+        assert "knowledge_get" in names
 
     def test_dispatch_knowledge_query(self):
         from core.knowledge.models import KnowledgeDoc

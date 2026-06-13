@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.knowledge.tools import knowledge_query, knowledge_add, knowledge_update, knowledge_delete
+from core.knowledge.tools import knowledge_query, knowledge_add, knowledge_update, knowledge_delete, knowledge_get
 from core.knowledge.models import KnowledgeDoc
 from core.knowledge.knowledge_base import KnowledgeBase
 
@@ -93,3 +93,12 @@ class TestKnowledgeTools:
         assert len(result["domains"]) >= 1
         paths = [d["path"] for d in result["domains"]]
         assert "a/b" in paths
+
+    def test_knowledge_get(self):
+        from core.knowledge.tools import knowledge_get
+        doc = KnowledgeDoc(domain="test", title="Get Me", content="full content", meta={"type": "ref"})
+        self.kb.add(doc)
+        result = json.loads(knowledge_get(self.kb, doc_id=doc.id))
+        assert result["status"] == "ok"
+        assert result["doc"]["title"] == "Get Me"
+        assert result["doc"]["meta"]["type"] == "ref"
