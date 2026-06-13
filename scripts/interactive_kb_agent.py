@@ -24,31 +24,34 @@ from core.knowledge.models import KnowledgeDoc
 
 SYSTEM_PROMPT = """你是一个知识助手，能搜索和维护一个静态知识库。
 
+知识库范围：仅保存低时效敏感、易于验证的客观信息。
+正例：成熟框架文档（Pandas API 用法）、法律条文、已发布标准的规范。
+反例：新闻资讯、开发中项目信息、个人观点、时效性强的数据。
+
 你有以下工具：
 - kb_query(query, domain?) — 深度查询：搜索 → 读 meta → refine → 返回 findings + suggestions
-- kb_search(query, domain?) — 快速关键词搜索
-- kb_get(doc_id) — 获取完整文档内容
-- kb_add(domain, title, content, meta) — 添加新文档到知识库
-- kb_list_domains() — 浏览已有的领域目录
-- kb_update_meta(doc_id, meta) — 修正文档的 meta 字段
+- kb_delete(doc_id) — 删除知识库中的文档（仅当你能验证该文档确实过时或错误）
+- kb_fill_gap(domain, topic) — 填补知识缺口：根据 topic 生成内容 → 验证后保存到知识库
 
 使用建议：
-- 用户问"XX 是什么/怎么做" → 用 kb_query 做深度查询
-- 用户问"有没有 XX" → 用 kb_search 快速搜
-- kb_query 返回的 suggestions 中如果建议 add → 判断是否该补文档
-- 如果知识库没有答案 → 诚实告知，并建议用 kb_add 补充"""
+- 用户问查资料 → kb_query
+- kb_query 返回的 suggestions 建议 add → kb_fill_gap
+- 发现文档过时/错误且你能确认 → kb_delete
+- 知识库没有答案 → 诚实告知，不要编造"""
+
+KB_SCOPE_NOTE = " 知识库仅保存低时效敏感、易于验证的客观信息（成熟框架文档、法律条文等）。正例：Pandas API 用法。反例：新闻、开发中项目信息。"
 
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "kb_query",
-            "description": "Deep KB query: search → read meta → refine → report findings + suggestions.",
+            "description": "深度查询知识库：搜索 → 读 meta → refine → 返回 findings + suggestions。知识库范围：" + KB_SCOPE_NOTE[4:],
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "domain": {"type": "string", "description": "Optional domain filter"},
+                    "query": {"type": "string", "description": "搜索查询"},
+                    "domain": {"type": "string", "description": "可选 domain 过滤"},
                 },
                 "required": ["query"],
             },
@@ -57,28 +60,13 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "kb_search",
-            "description": "Fast keyword search in knowledge base.",
+            "name": "kb_delete",
+            "description": "删除知识库中的文档。仅当你确认文档确实过时或错误时使用。" + KB_SCOPE_NOTE,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
-                    "domain": {"type": "string"},
-                    "top_k": {"type": "integer", "default": 5},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_get",
-            "description": "Get full content of a single document by ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "doc_id": {"type": "string"},
+                    "doc_id": {"type": "string", "description": "要删除的文档 ID"},
+                    "reason": {"type": "string", "description": "删除原因（过时/错误/重复）"},
                 },
                 "required": ["doc_id"],
             },
@@ -87,47 +75,15 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "kb_add",
-            "description": "Add a new document to the knowledge base.",
+            "name": "kb_fill_gap",
+            "description": "填补知识库缺口：根据 topic 生成/搜集准确内容 → 验证 → 保存。" + KB_SCOPE_NOTE,
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "domain": {"type": "string"},
-                    "title": {"type": "string"},
-                    "content": {"type": "string", "description": "Markdown content"},
-                    "meta": {
-                        "type": "object",
-                        "properties": {
-                            "type": {"type": "string", "enum": ["reference", "tutorial", "example", "faq"]},
-                            "level": {"type": "string", "enum": ["beginner", "intermediate", "advanced"]},
-                            "tags": {"type": "array", "items": {"type": "string"}},
-                        },
-                    },
+                    "domain": {"type": "string", "description": "目标 domain"},
+                    "topic": {"type": "string", "description": "需要填补的主题"},
                 },
-                "required": ["domain", "title", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_list_domains",
-            "description": "List all domains in the knowledge base.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "kb_update_meta",
-            "description": "Fix/improve meta fields on a document (type, level, tags).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "doc_id": {"type": "string"},
-                    "meta": {"type": "object"},
-                },
-                "required": ["doc_id", "meta"],
+                "required": ["domain", "topic"],
             },
         },
     },
@@ -144,6 +100,7 @@ class InteractiveAgent:
         self._llm = self._build_llm()
         self._messages: list[dict] = []
         self._sub_agent = SubAgentLoop(self._llm, kb, trace=False)
+        self._fill_gap = FillGapLoop(self._llm, kb, trace=False)
 
     def _build_llm(self) -> LLMClient:
         load_env(PROJECT_ROOT)
@@ -228,42 +185,17 @@ class InteractiveAgent:
     def _dispatch(self, name: str, args: dict) -> dict:
         if name == "kb_query":
             report = self._sub_agent.run(**args)
-            report.pop("_trace", None)
             return report
-        if name == "kb_search":
-            results = self._kb.search(**args)
-            for r in results:
-                doc = self._kb.get(r["id"])
-                r["meta"] = doc.meta if doc else {}
-            return {"results": results, "count": len(results)}
-        if name == "kb_get":
+        if name == "kb_delete":
             doc = self._kb.get(args["doc_id"])
-            return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
-        if name == "kb_add":
-            return self._handle_kb_add(**args)
-        if name == "kb_list_domains":
-            return {"domains": self._kb.list_domains()}
-        if name == "kb_update_meta":
-            return self._handle_update_meta(**args)
+            if doc is None:
+                return {"status": "not_found", "doc_id": args["doc_id"]}
+            self._kb.delete(args["doc_id"])
+            self._kb.save()
+            return {"status": "ok", "doc_id": args["doc_id"], "title": doc.title}
+        if name == "kb_fill_gap":
+            return self._fill_gap.run(**args)
         return {"error": f"unknown tool: {name}"}
-
-    def _handle_kb_add(self, domain: str, title: str, content: str,
-                       meta: dict | None = None) -> dict:
-        doc = KnowledgeDoc(domain=domain, title=title, content=content,
-                           meta=meta or {}, source="agent")
-        doc_ids = self._kb.add(doc)
-        self._kb.save()
-        return {"status": "ok", "doc_ids": doc_ids, "doc_id": doc_ids[0]}
-
-    def _handle_update_meta(self, doc_id: str, meta: dict) -> dict:
-        doc = self._kb.get(doc_id)
-        if doc is None:
-            return {"status": "not_found"}
-        old = dict(doc.meta)
-        self._kb.update_meta(doc_id, meta)
-        self._kb.update(doc_id)
-        self._kb.save()
-        return {"status": "ok", "doc_id": doc_id, "old": old, "new": dict(doc.meta)}
 
     def _handle_command(self, cmd: str):
         if cmd == "/quit" or cmd == "/exit":
@@ -605,17 +537,142 @@ meta schema：
         return {"error": f"unknown: {name}"}
 
     def _build_phase1_history(self, phase1: dict) -> str:
-        lines = [f"原始查询: (见下方用户消息)", ""]
-        lines.append("## 检索到的文档")
+        lines = ["## 检索到的文档"]
         for f in phase1.get("findings", []):
             lines.append(f"- {f.get('doc_id', '?')[:8]}: {f.get('title', '?')} (relevance={f.get('relevance', '?')})")
         lines.append("")
-        lines.append("## 覆盖评估")
-        cov = phase1.get("coverage", {})
-        lines.append(f"  match_level: {cov.get('match_level', '?')}")
-        if cov.get("gaps"):
-            lines.append(f"  gaps: {', '.join(cov['gaps'])}")
+        lines.append("## 建议")
+        for s in phase1.get("suggestions", []):
+            lines.append(f"- [{s.get('action', '?')}] {s.get('topic', '?')}: {s.get('reason', '?')}")
         return "\n".join(lines)
+
+
+class FillGapLoop:
+    """Fill-gap sub-agent: generate content → verify → kb_add → report."""
+
+    MAX_TURNS = 5
+
+    FILL_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_add",
+                "description": "添加新文档到知识库。知识库仅保存低时效敏感、易于验证的客观信息。" + KB_SCOPE_NOTE,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {"type": "string"},
+                        "title": {"type": "string"},
+                        "content": {"type": "string", "description": "Markdown 内容，必须准确含代码示例"},
+                        "meta": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["reference", "tutorial", "example", "faq"]},
+                                "level": {"type": "string", "enum": ["beginner", "intermediate", "advanced"]},
+                                "tags": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
+                    },
+                    "required": ["domain", "title", "content", "meta"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_fill_done",
+                "description": "结束填补任务，汇报新增了哪些文档。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "added": {"type": "array", "items": {"type": "object"}},
+                        "skipped": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["added"],
+                },
+            },
+        },
+    ]
+
+    FILL_SYSTEM = """你是知识库填补子代理。
+
+知识库范围：仅保存低时效敏感、易于验证的客观信息。
+正例：成熟框架 API 用法、法律条文、已发布标准。
+反例：新闻、开发中项目信息、个人观点。
+
+任务：
+1. 收到 {domain, topic} 知识缺口
+2. 根据自己的知识为这个主题生成准确内容（Markdown + 代码示例）
+3. 调用 kb_add 保存
+4. 调用 kb_fill_done 结束
+
+规则：
+- 内容必须准确可验证，不确定的信息不要写
+- meta 必须完整：type, level, tags
+- 超出你知识范围的主题 → 放入 skipped，不要编造"""
+
+    def __init__(self, llm: LLMClient, kb: KnowledgeBase, trace: bool = False):
+        self._llm = llm
+        self._kb = kb
+        self._trace = trace
+
+    def run(self, domain: str, topic: str) -> dict:
+        messages = [
+            {"role": "system", "content": self.FILL_SYSTEM},
+            {"role": "user", "content": f"[知识缺口]\ndomain: {domain}\ntopic: {topic}"},
+        ]
+
+        for turn in range(1, self.MAX_TURNS + 1):
+            resp = self._llm.chat(messages=messages, tools=self.FILL_TOOLS)
+
+            if resp.text and not resp.tool_calls:
+                messages.append({"role": "assistant", "content": resp.text})
+                continue
+            if not resp.tool_calls:
+                continue
+
+            tool_results = []
+            for tc in resp.tool_calls:
+                name = tc.function.name
+                args = json.loads(tc.function.arguments)
+                if self._trace:
+                    if name == "kb_add":
+                        print(f"  [fill turn {turn}] kb_add({args.get('title', '?')})")
+                    else:
+                        print(f"  [fill turn {turn}] {name}(...)")
+
+                if name == "kb_fill_done":
+                    return args
+
+                result = self._dispatch(name, args)
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+
+            messages.append({
+                "role": "assistant", "content": None,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in resp.tool_calls
+                ],
+            })
+            messages.extend(tool_results)
+
+        return {"added": [], "skipped": []}
+
+    def _dispatch(self, name: str, args: dict) -> dict:
+        if name == "kb_add":
+            doc = KnowledgeDoc(
+                domain=args["domain"], title=args["title"],
+                content=args["content"], meta=args.get("meta", {}), source="fill_gap",
+            )
+            doc_ids = self._kb.add(doc)
+            self._kb.save()
+            return {"status": "ok", "doc_ids": doc_ids, "doc_id": doc_ids[0]}
+        return {"error": f"unknown: {name}"}
 
 
 def seed_test_kb(kb: KnowledgeBase):
