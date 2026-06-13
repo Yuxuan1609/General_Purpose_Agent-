@@ -22,7 +22,7 @@ class TestKnowledgeIntegration:
         r = json.loads(knowledge_add(self.kb, domain="game/leduc",
             title="Leduc Preflop Strategy",
             content="With a King (K), always raise. With a Jack (J), fold unless in position.",
-            tags=["preflop", "strategy"]))
+            meta={"tags": ["preflop", "strategy"]}))
         assert r["status"] == "ok"
         doc_id = r["doc_id"]
 

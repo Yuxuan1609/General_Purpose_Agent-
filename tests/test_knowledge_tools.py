@@ -21,7 +21,7 @@ class TestKnowledgeTools:
             domain="test/d",
             title="Test Doc",
             content="Hello world content",
-            tags=["test"],
+            meta={"tags": ["test"]},
         ))
         assert result["status"] == "ok"
         assert "doc_id" in result

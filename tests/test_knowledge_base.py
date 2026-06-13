@@ -19,7 +19,7 @@ class TestKnowledgeDoc:
             title="列表推导式",
             content="# 列表推导式\n\n[expr for item in iterable]",
             source="manual",
-            tags=["python", "syntax"],
+            meta={"tags": ["python", "syntax"]},
         )
         assert doc.id is not None
         assert len(doc.id) == 8
@@ -27,7 +27,7 @@ class TestKnowledgeDoc:
         assert doc.title == "列表推导式"
         assert doc.content_type == "markdown"
         assert doc.source == "manual"
-        assert doc.tags == ["python", "syntax"]
+        assert doc.meta == {"tags": ["python", "syntax"]}
         assert isinstance(doc.created_at, str)
         assert isinstance(doc.updated_at, str)
 
@@ -38,7 +38,7 @@ class TestKnowledgeDoc:
             content="Always raise with K.",
         )
         assert doc.source == "manual"
-        assert doc.tags == []
+        assert doc.meta == {}
         assert doc.id is not None
 
     def test_doc_id_is_unique(self):
@@ -51,13 +51,13 @@ class TestKnowledgeDoc:
             domain="coding/python",
             title="Test",
             content="Content",
-            tags=["t1"],
+            meta={"tags": ["t1"]},
             source="agent",
         )
         d = doc.to_dict()
         assert d["domain"] == "coding/python"
         assert d["content"] == "Content"
-        assert d["tags"] == ["t1"]
+        assert d["meta"] == {"tags": ["t1"]}
         restored = KnowledgeDoc.from_dict(d)
         assert restored.id == doc.id
         assert restored.domain == doc.domain
@@ -139,8 +139,8 @@ class TestKnowledgeBasePersistence:
 
     def test_save_and_load(self):
         from core.knowledge.models import KnowledgeDoc
-        d1 = KnowledgeDoc(domain="a/b", title="Doc1", content="Content 1", tags=["t1"])
-        d2 = KnowledgeDoc(domain="a/c", title="Doc2", content="Content 2", tags=["t2"])
+        d1 = KnowledgeDoc(domain="a/b", title="Doc1", content="Content 1", meta={"tags": ["t1"]})
+        d2 = KnowledgeDoc(domain="a/c", title="Doc2", content="Content 2", meta={"tags": ["t2"]})
         self.kb.add(d1)
         self.kb.add(d2)
         self.kb.save()
@@ -152,7 +152,7 @@ class TestKnowledgeBasePersistence:
         assert kb2.get(d2.id) is not None
         retrieved = kb2.get(d1.id)
         assert retrieved.title == "Doc1"
-        assert retrieved.tags == ["t1"]
+        assert retrieved.meta == {"tags": ["t1"]}
         domains = kb2.list_domains()
         assert len(domains) == 2
 

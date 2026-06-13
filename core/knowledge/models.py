@@ -21,7 +21,7 @@ class KnowledgeDoc:
     content: str = ""
     content_type: str = "markdown"
     source: str = "manual"
-    tags: list[str] = field(default_factory=list)
+    meta: dict = field(default_factory=dict)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
 
@@ -33,7 +33,7 @@ class KnowledgeDoc:
             "content": self.content,
             "content_type": self.content_type,
             "source": self.source,
-            "tags": self.tags,
+            "meta": self.meta,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

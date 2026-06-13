@@ -62,7 +62,7 @@ class KnowledgeBase:
                     "content": doc.content[:500],
                     "score": round(score, 4),
                     "source": doc.source,
-                    "tags": doc.tags,
+                    "tags": doc.meta.get("tags", []),
                 })
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:top_k]
@@ -75,7 +75,7 @@ class KnowledgeBase:
             score += 1.0
         if q in doc.content.lower():
             score += 0.5
-        for tag in doc.tags:
+        for tag in doc.meta.get("tags", []):
             if q in tag.lower():
                 score += 0.3
         return score
