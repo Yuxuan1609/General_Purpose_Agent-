@@ -130,6 +130,16 @@ class TestKnowledgeBase:
         domains = self.kb.list_domains()
         assert domains == []
 
+    def test_get_meta_and_update_meta(self):
+        from core.knowledge.models import KnowledgeDoc
+        doc = KnowledgeDoc(domain="test", title="T", content="C", meta={"type": "reference"})
+        self.kb.add(doc)
+        m = self.kb.get_meta(doc.id)
+        assert m == {"type": "reference"}
+        self.kb.update_meta(doc.id, {"level": "beginner", "type": "faq"})
+        m2 = self.kb.get_meta(doc.id)
+        assert m2 == {"type": "faq", "level": "beginner"}
+
 
 class TestKnowledgeBasePersistence:
     def setup_method(self):

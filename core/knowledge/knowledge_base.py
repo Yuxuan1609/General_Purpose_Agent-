@@ -10,6 +10,11 @@ from core.knowledge.models import KnowledgeDoc, KBDomain
 logger = logging.getLogger("knowledge_base")
 
 
+def _now_static() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 class KnowledgeBase:
     """Static knowledge base backed by in-memory dicts.
 
@@ -90,6 +95,18 @@ class KnowledgeBase:
             }
             for d in self._domains.values()
         ]
+
+    def get_meta(self, doc_id: str) -> dict | None:
+        doc = self._docs.get(doc_id)
+        return doc.meta if doc else None
+
+    def update_meta(self, doc_id: str, meta: dict) -> bool:
+        doc = self._docs.get(doc_id)
+        if doc is None:
+            return False
+        doc.meta.update(meta)
+        doc.updated_at = _now_static()
+        return True
 
     def save(self) -> None:
         if self._storage_path == ":memory:":
