@@ -255,9 +255,21 @@ class KnowledgeDoc:
 
 ### 持久化
 
-- 文档存 JSON（`domain["title"]` 脱敏后的 key），或 SQLite
-- embeddings 索引由 txtai 管理（tar.gz 压缩归档）
-- meta 字段同时进入 txtai 的 database 列——SQL 可对 `type`, `level`, `domain` 做精确过滤
+所有数据存储在同一个 `storage_path` 目录下：
+
+```
+data/knowledge/
+  config            ← txtai 配置 (模型路径、scoring 参数等)
+  embeddings        ← ANN 向量索引 (NumPy, 768-dim)
+  scoring           ← BM25 倒排索引
+  documents/        ← SQLite 数据库 (id, content, tags JSON)
+  kb.json           ← 文档元数据 (KnowledgeDoc dict) + domain 树 (KBDomain dict)
+```
+
+- `config` / `embeddings` / `scoring` / `documents/` 由 txtai `Embeddings.save(path)` 写入，`Embeddings.load(path)` 读取
+- `kb.json` 由 `KnowledgeBase.save()` 写入，存储所有文档的完整元数据（domain, title, source, created_at, updated_at）和 domain 图
+- 加载时：优先从 txtai 磁盘加载 embeddings + BM25 索引；若磁盘无数据则创建新 Embeddings 并逐文档 upsert 重建
+- meta 字段同时存入 txtai 的 SQLite `tags` 列（JSON 序列化，供 SQL 精确过滤）
 
 ## 与 txtai 的对接
 

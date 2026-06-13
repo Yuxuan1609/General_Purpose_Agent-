@@ -161,10 +161,14 @@ class KnowledgeBase:
         return True
 
     def save(self) -> None:
-        from pathlib import Path
         import json as _json
+        from pathlib import Path
         p = Path(self._storage_path)
         p.mkdir(parents=True, exist_ok=True)
+
+        if self._emb:
+            self._emb.save(str(self._storage_path))
+
         data = {
             "docs": {did: d.to_dict() for did, d in self._docs.items()},
             "domains": {
@@ -183,10 +187,24 @@ class KnowledgeBase:
     def load(self) -> None:
         import json as _json
         from pathlib import Path
-        p = Path(self._storage_path) / "kb.json"
-        if not p.exists():
+
+        p = Path(self._storage_path)
+
+        config_path = p / "config"
+        if config_path.exists():
+            try:
+                self._emb = Embeddings()
+                self._emb.load(str(self._storage_path))
+            except Exception:
+                logger.exception("failed to load txtai from disk, rebuilding")
+                if self._emb:
+                    self._emb.close()
+                self._emb = None
+
+        kb_path = p / "kb.json"
+        if not kb_path.exists():
             return
-        data = _json.loads(p.read_text(encoding="utf-8"))
+        data = _json.loads(kb_path.read_text(encoding="utf-8"))
         self._docs = {
             did: KnowledgeDoc.from_dict(d)
             for did, d in data.get("docs", {}).items()
@@ -200,7 +218,7 @@ class KnowledgeBase:
                 doc_count=d.get("doc_count", 0),
                 neighbors=d.get("neighbors", {}),
             )
-        if self._docs:
+        if self._docs and self._emb is None:
             self._ensure_emb()
             for doc in self._docs.values():
                 tags_str = _json.dumps(dict(doc.meta), ensure_ascii=False) if doc.meta else None

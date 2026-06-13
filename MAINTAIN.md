@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-13 | **KB 存储合并**：`save()` 同时写入 txtai 持久化文件（config/embeddings/scoring/documents）和 `kb.json` 到同一路径；`load()` 优先从 txtai 磁盘加载，仅在缺失时重建索引。 |
 | 2026-06-13 | **KnowledgeBase BM25**：`search()` 改用 txtai BM25 scoring 替代 `_keyword_score` 简单匹配。新增 `_rebuild_index()`（lazy reindex）、`_scoring`/`_id_to_idx`/`_needs_reindex` 字段。删除 `_keyword_score` 静态方法。 |
 | 2026-06-12 | **Cleanup**：删除 `L2_DOMAIN_NODES` 硬编码节点列表（已由 DomainRegistry 替代）；删除 `STAGE1_SCHEMA`/`STAGE2_SCHEMA`/`L1_DECISION_SCHEMA`（已被 capture_tools 替代）；删除 `KnowledgeCard.boost`/`penalize` 条目（方法不存在）；清理各层 stage1/stage2 旧注释。 |
 | 2026-06-12 | **Capture-Tool Strict Mode**：L1/L2/L3 decide() 改用 capture_tool 模式（l1_query/l1_report, l2_query/l2_report, l3_continue/l3_report），LLM 通过 tool_call 输出结构化结果替代 JSON-in-prompt。新增 `DictInjector`（轻量工具注入器）、`_schema_to_tool()`。`_call_llm` 新增 `capture_tools` 参数。 |
@@ -233,16 +234,41 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `KnowledgeBase` | `__init__(storage_path)` | 静态知识库，BM25 全文检索 + CRUD | scripts, KnowledgeCapability | ScoringFactory |
-| `KnowledgeBase.add` | `(doc: KnowledgeDoc) → str` | 添加文档，标记需重建索引 | seed scripts | _ensure_domain() |
-| `KnowledgeBase.get` | `(doc_id) → KnowledgeDoc\|None` | 按 ID 获取文档 | — | — |
-| `KnowledgeBase.update` | `(doc_id, **kwargs) → bool` | 更新文档字段，标记需重建索引 | — | — |
-| `KnowledgeBase.delete` | `(doc_id) → bool` | 删除文档，标记需重建索引 | — | — |
-| `KnowledgeBase.search` | `(query, domain=None, top_k=5) → list[dict]` | BM25 全文检索，按 domain 过滤，返回 top_k 结果 | KnowledgeCapability, scripts | _rebuild_index(), ScoringFactory.search() |
-| `KnowledgeBase._rebuild_index` | `() → None` | 从 _docs 重建 BM25 索引（lazy，仅 search 时触发） | search() | ScoringFactory.create(), scoring.index() |
-| `KnowledgeBase.save` | `() → None` | 持久化 docs+domains 到 JSON | scripts | — |
-| `KnowledgeBase.load` | `() → None` | 从 JSON 加载，标记需重建索引 | scripts | — |
-| `KnowledgeBase.rename_domain` | `(old_path, new_path) → int` | 重命名 domain 及其文档 | — | — |
+| `KnowledgeBase` | `__init__(storage_path="data/knowledge")` | 静态知识库，BM25+embeddings 两路检索 + CRUD | scripts, KnowledgeCapability | txtai Embeddings |
+| `KnowledgeBase.add` | `(doc: KnowledgeDoc) → list[str]` | 添加文档（自动 >8192 token 分块），upsert 到 txtai | seed scripts | _chunk_and_add(), _add_single(), _ensure_domain() |
+| `KnowledgeBase.get` | `(doc_id) → KnowledgeDoc\|None` | 按 ID 获取文档 | tools.py | — |
+| `KnowledgeBase.update` | `(doc_id, **kwargs) → bool` | 更新文档字段，upsert 到 txtai | tools.py | _ensure_emb() |
+| `KnowledgeBase.delete` | `(doc_id) → bool` | 删除文档，从 txtai delete | tools.py | embeddings.delete() |
+| `KnowledgeBase.search` | `(query, domain=None, top_k=5) → list[dict]` | txtai embeddings+BM25 两路融合搜索，domain 过滤，返回 top_k | KnowledgeCapability, tools.py | embeddings.search() |
+| `KnowledgeBase._add_single` | `(doc: KnowledgeDoc) → str` | 单文档 upsert（去 meta.id），更新 domain 计数 | add(), load() | embeddings.upsert() |
+| `KnowledgeBase._chunk_and_add` | `(doc: KnowledgeDoc) → list[str]` | >8192 token 文档分块添加，chunk 间通过 meta.chunk_of 链接 | add() | _count_tokens(), _add_single() |
+| `KnowledgeBase._ensure_emb` | `() → None` | 懒初始化 txtai Embeddings（path=embeddinggemma, content=sqlite, keyword=bm25） | _add_single(), update(), search(), list_domains | Embeddings() |
+| `KnowledgeBase.save` | `() → None` | 持久化 txtai（config/embeddings/scoring/documents）+ kb.json 到 storage_path | scripts, CLI | embeddings.save() |
+| `KnowledgeBase.load` | `() → None` | 从 disk 加载 txtai 索引 + kb.json；若无 disk 数据则从 kb.json 重建 | scripts, CLI | embeddings.load() / embeddings.upsert() |
+| `KnowledgeBase.list_domains` | `() → list[dict]` | 列出所有 domain（path/parent/description/doc_count） | tools.py | — |
+| `KnowledgeBase.get_meta` | `(doc_id) → dict\|None` | 获取文档 meta | tools.py | — |
+| `KnowledgeBase.update_meta` | `(doc_id, meta: dict) → bool` | 局部更新 meta dict | tools.py | — |
+| `KnowledgeBase.rename_domain` | `(old_path, new_path) → int` | 重命名 domain 及其文档 | tools.py | — |
+| `KnowledgeBase.close` | `() → None` | 关闭 txtai embeddings | — | embeddings.close() |
+
+### KnowledgeBase 配置（Embeddings config）
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| `path` | `C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma` | 本地 Gemma embedding 模型路径（768-dim, 2048 token max） |
+| `trust_remote_code` | `True` | HF trust |
+| `content` | `"sqlite"` | 文档存储后端（SQLite） |
+| `keyword` | `"bm25"` | 关键词搜索方法（展开为 scoring={method:"bm25",terms:True,normalize:True}） |
+
+### KnowledgeBase 存储布局（storage_path 目录）
+
+| 文件/目录 | 内容 | 管理者 |
+|-----------|------|--------|
+| `config` | txtai 配置（模型路径、scoring 参数等） | txtai save/load |
+| `embeddings` | ANN 向量索引（NumPy, 768-dim） | txtai save/load |
+| `scoring` | BM25 倒排索引 | txtai save/load |
+| `documents/` | SQLite 数据库（id + text + tags） | txtai save/load |
+| `kb.json` | 文档（KnowledgeDoc dict）+ domains（KBDomain dict）| KnowledgeBase save/load |
 
 ## core/skill_layer.py (已有，层内部使用)
 

@@ -86,4 +86,23 @@ if r["results"]:
     r3 = json.loads(knowledge_get(kb, doc_id=doc_id))
     print(f"  Verify gone: {r3['status']}")
 
+print("\n=== 8. Save/Load roundtrip ===")
+kb.save()
+print(f"  Saved to {kb._storage_path}/")
+
+kb2 = KnowledgeBase("data/knowledge_test")
+kb2.load()
+r = json.loads(knowledge_list_domains(kb2))
+print(f"  Domains after reload: {len(r['domains'])}")
+for d in r["domains"]:
+    print(f"    {d['path']}: {d['doc_count']} docs")
+
+r = json.loads(knowledge_query(kb2, query="agent communication", top_k=2))
+print(f"  Search after reload: {len(r['results'])} results")
+for doc in r["results"]:
+    print(f"    [{doc['domain']}] {doc['title']} (score={doc['score']})")
+
+import shutil
+shutil.rmtree("data/knowledge_test", ignore_errors=True)
+
 print("\n=== DONE ===")
