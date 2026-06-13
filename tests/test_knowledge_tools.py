@@ -102,3 +102,21 @@ class TestKnowledgeTools:
         assert result["status"] == "ok"
         assert result["doc"]["title"] == "Get Me"
         assert result["doc"]["meta"]["type"] == "ref"
+
+    def test_knowledge_list_domains(self):
+        from core.knowledge.tools import knowledge_list_domains
+        self.kb.add(KnowledgeDoc(domain="a/b", title="X", content="Y"))
+        self.kb.add(KnowledgeDoc(domain="a/c", title="Z", content="W"))
+        result = json.loads(knowledge_list_domains(self.kb))
+        paths = [d["path"] for d in result["domains"]]
+        assert "a/b" in paths
+        assert "a/c" in paths
+
+    def test_knowledge_list_domains_parent_filter(self):
+        from core.knowledge.tools import knowledge_list_domains
+        self.kb.add(KnowledgeDoc(domain="a/b", title="X", content="Y"))
+        self.kb.add(KnowledgeDoc(domain="z/y", title="Z", content="W"))
+        result = json.loads(knowledge_list_domains(self.kb, parent="a"))
+        paths = [d["path"] for d in result["domains"]]
+        assert "a/b" in paths
+        assert "z/y" not in paths

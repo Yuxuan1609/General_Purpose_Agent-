@@ -47,6 +47,14 @@ def knowledge_get(kb, doc_id: str) -> str:
     return json.dumps({"status": "ok", "doc": doc.to_dict()}, ensure_ascii=False)
 
 
+def knowledge_list_domains(kb, parent: str | None = None) -> str:
+    domains = kb.list_domains()
+    if parent:
+        prefix = parent.rstrip("/") + "/"
+        domains = [d for d in domains if d["path"].startswith(prefix)]
+    return json.dumps({"domains": domains}, ensure_ascii=False)
+
+
 def knowledge_sync_domain(kb, action: str, source_domain: str,
                            target_domain: str = "") -> str:
     if action == "rename":
