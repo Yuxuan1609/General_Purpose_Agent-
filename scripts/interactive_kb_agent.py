@@ -551,7 +551,7 @@ class FillGapLoop:
     """Fill-gap v2: KB confirm → external tools → ask_user → propose (no direct kb_add)."""
 
     MAX_TURNS = 10
-    MAX_EXTERNAL_CALLS = 5
+    MAX_EXTERNAL_TURNS = 5
 
     FILL_TOOLS = [
         # ── KB internal ──
@@ -701,10 +701,9 @@ class FillGapLoop:
 Step 1: KB 确认（≤2 轮）
   kb_search(topic) → kb_get(相关文档) → 准确理解缺口范围
 
-Step 2: 外部工具补充（**硬上限 5 次总调用**，含 web_search/tavily_search/terminal）
-  web_search → 不够 → tavily_search → 需要代码验证 → terminal
+Step 2: 外部工具补充（**硬上限 5 轮**，每轮可多次调用 web_search/tavily_search/terminal）
   优先级：web_search > tavily_search > terminal
-  达到 5 次上限后**必须**立即调用 kb_fill_propose，不得继续搜索
+  达到 5 轮上限后**必须**立即调用 kb_fill_propose，不得继续搜索
 
 Step 3: 保底（仅 Step 2 仍不足时）
   ask_user(question) → 等待主 agent 收集用户回复后继续
@@ -725,10 +724,10 @@ Step 4: 提案
         self._llm = llm
         self._kb = kb
         self._trace = trace
-        self._external_calls = 0
+        self._external_turns = 0
 
     def run(self, suggestion: dict, user_context: str = "") -> dict:
-        self._external_calls = 0
+        self._external_turns = 0
         domain = suggestion.get("domain", "")
         topic = suggestion.get("topic", "")
         reason = suggestion.get("reason", "")
@@ -763,6 +762,20 @@ Step 4: 提案
                 continue
             if not resp.tool_calls:
                 continue
+
+            external_names = {"web_search", "tavily_search", "terminal"}
+            has_external = any(tc.function.name in external_names for tc in resp.tool_calls)
+            if has_external:
+                self._external_turns += 1
+                if self._external_turns > self.MAX_EXTERNAL_TURNS:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"[系统] 你已达到外部工具轮次上限 ({self.MAX_EXTERNAL_TURNS} 轮)。"
+                            f"请立即调用 kb_fill_propose 提交当前结果，不要再尝试任何搜索。"
+                        ),
+                    })
+                    continue
 
             tool_results = []
             for tc in resp.tool_calls:
@@ -804,9 +817,6 @@ Step 4: 提案
             doc = self._kb.get(args.get("doc_id", ""))
             return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
         if name == "web_search":
-            self._external_calls += 1
-            if self._external_calls > self.MAX_EXTERNAL_CALLS:
-                return {"error": f"external call limit ({self.MAX_EXTERNAL_CALLS}) reached. Stop searching and call kb_fill_propose NOW."}
             from core.tools.web_search_tool import _search_searxng, _search_ddgs
             r = _search_searxng(**args)
             if r is None:
@@ -814,27 +824,21 @@ Step 4: 提案
                     r = _search_ddgs(**args)
                 except Exception:
                     r = []
-            return {"results": r or [], "count": len(r) if r else 0, "calls_used": self._external_calls, "limit": self.MAX_EXTERNAL_CALLS}
+            return {"results": r or [], "count": len(r) if r else 0, "turns_used": self._external_turns, "limit": self.MAX_EXTERNAL_TURNS}
         if name == "tavily_search":
-            self._external_calls += 1
-            if self._external_calls > self.MAX_EXTERNAL_CALLS:
-                return {"error": f"external call limit ({self.MAX_EXTERNAL_CALLS}) reached. Stop searching and call kb_fill_propose NOW."}
             from core.tools.web_search_tool import _search_tavily
             import os
             key = os.environ.get("TAVILY_API_KEY", "")
             r = _search_tavily(api_key=key, **args)
-            return {"results": r, "count": len(r), "calls_used": self._external_calls, "limit": self.MAX_EXTERNAL_CALLS}
+            return {"results": r, "count": len(r), "turns_used": self._external_turns, "limit": self.MAX_EXTERNAL_TURNS}
         if name == "terminal":
-            self._external_calls += 1
-            if self._external_calls > self.MAX_EXTERNAL_CALLS:
-                return {"error": f"external call limit ({self.MAX_EXTERNAL_CALLS}) reached. Stop searching and call kb_fill_propose NOW."}
             import subprocess
             try:
                 result = subprocess.run(
                     args["command"], shell=True, capture_output=True, text=True,
                     timeout=15, cwd=self._kb._storage_path,
                 )
-                return {"stdout": result.stdout[-2000:], "stderr": result.stderr[-500:], "rc": result.returncode}
+                return {"stdout": result.stdout[-2000:], "stderr": result.stderr[-500:], "rc": result.returncode, "turns_used": self._external_turns, "limit": self.MAX_EXTERNAL_TURNS}
             except Exception as e:
                 return {"error": str(e)}
         if name == "ask_user":
