@@ -456,24 +456,34 @@
 
 ## Long-term TODO
 
-### Async deferred sub-agent dispatch
+### Async / Multi-instance Agent Runtime
 
-**目标**：fill-gap 异步运行，主 agent fire-and-forget，sub-agent 完成后直接 `kb_add` 写 KB。
+**范围**：整个 Agent 运行时的异步调度与多实例管理，不局限于 fill-gap。
 
-**当前状态**：`kb_fill_gap` 同步运行 → `kb_fill_propose` 提案 → 主 agent 审查 → 调 `kb_add`。
-
-**待解决问题**：
-1. 任务状态追踪（怎么知道 sub-agent 跑完了/成没成）
-2. `ask_user` 的异步等待（sub-agent 需要用户输入时怎么暂停+恢复）
-3. KB 并发写安全（多个 fill-gap 同时写会不会冲突）
-4. 失败重试与超时
+**核心问题**：
+1. 多 Agent 实例的 IO 管理（LLM call 流、tool 执行、stdin/stdout 路由）
+2. 任务调度与生命周期（dispatch → run → complete/fail → cleanup）
+3. 跨 Agent 通信（主 agent ↔ 子 agent、ask_user 的中断与恢复）
+4. 状态持久化与故障恢复
+5. 资源管理（LLM API rate limit、并发 tool 调用、KB 写锁）
 
 **备选方案**：
 
-| 方案 | 复杂度 | 持久性 | ask_user 支持 | 并发安全 |
-|------|--------|--------|--------------|---------|
-| **A. 简单线程** — `Thread(target=...).start()` | 低 | ❌ 丢在重启 | ❌ 需设计回调 | ❌ 需加锁 |
-| **B. 本地任务队列** — `concurrent.futures` + `queue.Queue` | 中 | ❌ | ❌ | ⚠️ 需线程池约束 |
-| **C. SQLite 任务表** — 持久化 task 到 SQLite，Agent 轮询状态 | 中 | ✅ | ⚠️ 需查询接口 | ⚠️ 需单写者 |
-| **D. Manager 内事件循环** — 纳入现有 while-loop，`decide()` 输出 deferred tasks | 中 | ⚠️ 依赖 session | ✅ Agent 天然支持 | ✅ 单线程 |
-| **E. 独立进程 + 回调** — sub-agent 独立进程，完成写 KB | 高 | ✅ | ⚠️ IPC 复杂 | ⚠️ 需进程间协调 |
+| 方案 | 核心思路 | 复杂度 | 外部依赖 | IO 模型 |
+|------|---------|--------|---------|---------|
+| **A. asyncio 事件循环** | 全 Agent 跑在单进程 asyncio loop 上，每个 Agent 是 async coroutine | 中 | 无 | async/await 原生，需把 LLMClient/tool 全改为 async |
+| **B. Agent Owner 模式** | 每个 SubAgent 有 Owner 对象管理线程、IO channel、状态机；主 Agent 通过 Owner API 通信 | 中高 | 无 | 线程 + Queue channel，Owner 负责 IO 路由 |
+| **C. Celery/Redis 任务队列** | 发任务到 Redis → Worker 进程执行 → 结果回调 | 高 | Redis+Celery | Worker 内部同步，外部消息驱动 |
+| **D. 消息总线 + 状态机** | 所有 Agent 通过 MessageBus 通信（类似 Actor 模型）；Supervisor 管理生命周期 | 高 | 可能 ZeroMQ | 消息驱动，Agent 异步消费 |
+| **E. 进程池 + 共享存储** | 子进程池执行 Agent，结果写回 KB/文件，主 Agent 轮询或回调 | 中 | 无 | 进程间通过文件/DB 传结果，无实时通信 |
+
+**关键权衡**：
+
+| 维度 | A (asyncio) | B (Owner) | C (Celery) | D (Bus) | E (进程池) |
+|------|------------|-----------|------------|---------|------------|
+| 改造量 | 大（全链路 async） | 中（Agent 实现协议接口） | 大（基础设施） | 大（架构级重构） | 小（只改调度层） |
+| ask_user 支持 | ✅ 原生协程暂停 | ✅ Owner 持有会话 | ⚠️ 需 callback | ✅ 消息回复 | ❌ 进程间难交互 |
+| 跨进程扩展 | ❌ 单进程 | ⚠️ 线程受限 | ✅ | ✅ | ✅ |
+| 故障恢复 | ❌ 进程崩溃全丢 | ⚠️ 需额外持久化 | ✅ 任务重试 | ⚠️ 需消息持久化 | ❌ 无内置恢复 |
+
+**初步建议**：当前阶段选 **B（Owner）或 E（进程池）**——改造量可控，不引入新依赖。Owner 模式对 ask_user 更友好，进程池对并发扩展更好。长期可演进到 C 或 D。
