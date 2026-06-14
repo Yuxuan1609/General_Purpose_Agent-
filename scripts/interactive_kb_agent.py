@@ -701,9 +701,10 @@ class FillGapLoop:
 Step 1: KB 确认（≤2 轮）
   kb_search(topic) → kb_get(相关文档) → 准确理解缺口范围
 
-Step 2: 外部工具补充（≤5 次总调用）
+Step 2: 外部工具补充（**硬上限 5 次总调用**，含 web_search/tavily_search/terminal）
   web_search → 不够 → tavily_search → 需要代码验证 → terminal
   优先级：web_search > tavily_search > terminal
+  达到 5 次上限后**必须**立即调用 kb_fill_propose，不得继续搜索
 
 Step 3: 保底（仅 Step 2 仍不足时）
   ask_user(question) → 等待主 agent 收集用户回复后继续
@@ -717,7 +718,8 @@ Step 4: 提案
 规则：
 - 不确定的信息宁可 skipped 也不编造
 - 每个 proposal 必须标明 sources（来源 URL 或命令输出）
-- meta(type/level/tags) 必须完整"""
+- meta(type/level/tags) 必须完整
+- 外部工具调用次数在返回结果中标注，达到上限后禁止继续调用"""
 
     def __init__(self, llm: LLMClient, kb: KnowledgeBase, trace: bool = False):
         self._llm = llm
@@ -804,7 +806,7 @@ Step 4: 提案
         if name == "web_search":
             self._external_calls += 1
             if self._external_calls > self.MAX_EXTERNAL_CALLS:
-                return {"error": f"max {self.MAX_EXTERNAL_CALLS} external calls, use kb_fill_propose"}
+                return {"error": f"external call limit ({self.MAX_EXTERNAL_CALLS}) reached. Stop searching and call kb_fill_propose NOW."}
             from core.tools.web_search_tool import _search_searxng, _search_ddgs
             r = _search_searxng(**args)
             if r is None:
@@ -812,20 +814,20 @@ Step 4: 提案
                     r = _search_ddgs(**args)
                 except Exception:
                     r = []
-            return {"results": r or [], "count": len(r) if r else 0}
+            return {"results": r or [], "count": len(r) if r else 0, "calls_used": self._external_calls, "limit": self.MAX_EXTERNAL_CALLS}
         if name == "tavily_search":
             self._external_calls += 1
             if self._external_calls > self.MAX_EXTERNAL_CALLS:
-                return {"error": f"max {self.MAX_EXTERNAL_CALLS} external calls, use kb_fill_propose"}
+                return {"error": f"external call limit ({self.MAX_EXTERNAL_CALLS}) reached. Stop searching and call kb_fill_propose NOW."}
             from core.tools.web_search_tool import _search_tavily
             import os
             key = os.environ.get("TAVILY_API_KEY", "")
             r = _search_tavily(api_key=key, **args)
-            return {"results": r, "count": len(r)}
+            return {"results": r, "count": len(r), "calls_used": self._external_calls, "limit": self.MAX_EXTERNAL_CALLS}
         if name == "terminal":
             self._external_calls += 1
             if self._external_calls > self.MAX_EXTERNAL_CALLS:
-                return {"error": f"max {self.MAX_EXTERNAL_CALLS} external calls, use kb_fill_propose"}
+                return {"error": f"external call limit ({self.MAX_EXTERNAL_CALLS}) reached. Stop searching and call kb_fill_propose NOW."}
             import subprocess
             try:
                 result = subprocess.run(
