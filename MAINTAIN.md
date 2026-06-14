@@ -451,3 +451,29 @@
 | Anti-patterns | 各层应避免的内容模式（重复、过于泛化、低置信度等） |
 | 自动衰减规则 | activation < 0.1 + 30天 → deprecated；90天 → archive |
 | 三级整理策略 | Level 0（无）/ Level 1（例行归并，可回滚）/ Level 2（深度压缩，需审核） |
+
+---
+
+## Long-term TODO
+
+### Async deferred sub-agent dispatch
+
+**目标**：fill-gap 异步运行，主 agent fire-and-forget，sub-agent 完成后直接 `kb_add` 写 KB。
+
+**当前状态**：`kb_fill_gap` 同步运行 → `kb_fill_propose` 提案 → 主 agent 审查 → 调 `kb_add`。
+
+**待解决问题**：
+1. 任务状态追踪（怎么知道 sub-agent 跑完了/成没成）
+2. `ask_user` 的异步等待（sub-agent 需要用户输入时怎么暂停+恢复）
+3. KB 并发写安全（多个 fill-gap 同时写会不会冲突）
+4. 失败重试与超时
+
+**备选方案**：
+
+| 方案 | 复杂度 | 持久性 | ask_user 支持 | 并发安全 |
+|------|--------|--------|--------------|---------|
+| **A. 简单线程** — `Thread(target=...).start()` | 低 | ❌ 丢在重启 | ❌ 需设计回调 | ❌ 需加锁 |
+| **B. 本地任务队列** — `concurrent.futures` + `queue.Queue` | 中 | ❌ | ❌ | ⚠️ 需线程池约束 |
+| **C. SQLite 任务表** — 持久化 task 到 SQLite，Agent 轮询状态 | 中 | ✅ | ⚠️ 需查询接口 | ⚠️ 需单写者 |
+| **D. Manager 内事件循环** — 纳入现有 while-loop，`decide()` 输出 deferred tasks | 中 | ⚠️ 依赖 session | ✅ Agent 天然支持 | ✅ 单线程 |
+| **E. 独立进程 + 回调** — sub-agent 独立进程，完成写 KB | 高 | ✅ | ⚠️ IPC 复杂 | ⚠️ 需进程间协调 |
