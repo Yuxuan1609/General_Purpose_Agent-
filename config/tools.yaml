@@ -80,3 +80,10 @@ tools:
       degrade:
         - tool: web_search
           hint: "知识填补失败时可通过 web_search 先联网搜索再尝试"
+
+  ask_user:
+    timeout: 10
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []

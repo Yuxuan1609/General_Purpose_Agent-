@@ -548,78 +548,209 @@ meta schema：
 
 
 class FillGapLoop:
-    """Fill-gap sub-agent: generate content → verify → kb_add → report."""
+    """Fill-gap v2: KB confirm → external tools → ask_user → propose (no direct kb_add)."""
 
-    MAX_TURNS = 5
+    MAX_TURNS = 10
+    MAX_EXTERNAL_CALLS = 5
 
     FILL_TOOLS = [
+        # ── KB internal ──
         {
             "type": "function",
             "function": {
-                "name": "kb_add",
-                "description": "添加新文档到知识库。知识库仅保存低时效敏感、易于验证的客观信息。" + KB_SCOPE_NOTE,
+                "name": "kb_search",
+                "description": "Quick KB search to confirm existing content before filling.",
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "query": {"type": "string"},
                         "domain": {"type": "string"},
-                        "title": {"type": "string"},
-                        "content": {"type": "string", "description": "Markdown 内容，必须准确含代码示例"},
-                        "meta": {
-                            "type": "object",
-                            "properties": {
-                                "type": {"type": "string", "enum": ["reference", "tutorial", "example", "faq"]},
-                                "level": {"type": "string", "enum": ["beginner", "intermediate", "advanced"]},
-                                "tags": {"type": "array", "items": {"type": "string"}},
-                            },
-                        },
                     },
-                    "required": ["domain", "title", "content", "meta"],
+                    "required": ["query"],
                 },
             },
         },
         {
             "type": "function",
             "function": {
-                "name": "kb_fill_done",
-                "description": "结束填补任务，汇报新增了哪些文档。",
+                "name": "kb_get",
+                "description": "Get full document content to understand existing coverage.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"doc_id": {"type": "string"}},
+                    "required": ["doc_id"],
+                },
+            },
+        },
+        # ── External tools ──
+        {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Search the web via SearXNG (multi-engine).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "added": {"type": "array", "items": {"type": "object"}},
-                        "skipped": {"type": "array", "items": {"type": "string"}},
+                        "query": {"type": "string"},
+                        "max_results": {"type": "integer", "default": 5},
                     },
-                    "required": ["added"],
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "tavily_search",
+                "description": "AI-optimized web search via Tavily. Use when web_search results are insufficient.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "max_results": {"type": "integer", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "terminal",
+                "description": "Execute a shell command to verify info (e.g. python -c 'help()', man).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "Shell command"},
+                    },
+                    "required": ["command"],
+                },
+            },
+        },
+        # ── Fallback ──
+        {
+            "type": "function",
+            "function": {
+                "name": "ask_user",
+                "description": "Ask the user to provide missing information. Use as last resort when search tools fail.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string", "description": "What to ask the user"},
+                    },
+                    "required": ["question"],
+                },
+            },
+        },
+        # ── End ──
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_fill_propose",
+                "description": "Submit fill proposals. Does NOT save anything — the main agent reviews and calls kb_add separately.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "proposals": {
+                            "type": "array",
+                            "description": "Content proposals ready for kb_add",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "domain": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "content": {"type": "string"},
+                                    "meta": {"type": "object"},
+                                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                                    "sources": {"type": "array", "items": {"type": "string"}},
+                                },
+                                "required": ["domain", "title", "content", "meta", "confidence"],
+                            },
+                        },
+                        "skipped": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "topic": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                },
+                            },
+                        },
+                        "needs_ask_user": {
+                            "type": "object",
+                            "properties": {
+                                "question": {"type": "string"},
+                            },
+                        },
+                    },
+                    "required": ["proposals"],
                 },
             },
         },
     ]
 
-    FILL_SYSTEM = """你是知识库填补子代理。
+    FILL_SYSTEM = """你是知识库填补研究代理。
 
 知识库范围：仅保存低时效敏感、易于验证的客观信息。
 正例：成熟框架 API 用法、法律条文、已发布标准。
 反例：新闻、开发中项目信息、个人观点。
 
-任务：
-1. 收到 {domain, topic} 知识缺口
-2. 根据自己的知识为这个主题生成准确内容（Markdown + 代码示例）
-3. 调用 kb_add 保存
-4. 调用 kb_fill_done 结束
+4 步操作流程：
+
+Step 1: KB 确认（≤2 轮）
+  kb_search(topic) → kb_get(相关文档) → 准确理解缺口范围
+
+Step 2: 外部工具补充（≤5 次总调用）
+  web_search → 不够 → tavily_search → 需要代码验证 → terminal
+  优先级：web_search > tavily_search > terminal
+
+Step 3: 保底（仅 Step 2 仍不足时）
+  ask_user(question) → 等待主 agent 收集用户回复后继续
+
+Step 4: 提案
+  调用 kb_fill_propose 提交研究结果
+  - 信息充足 → proposals 含 title/content/meta/confidence/sources
+  - 信息不够 → skipped 列出缺失项 + needs_ask_user 设置问题
+  - 你不会自动保存文档，主 agent 会审查提案后决定
 
 规则：
-- 内容必须准确可验证，不确定的信息不要写
-- meta 必须完整：type, level, tags
-- 超出你知识范围的主题 → 放入 skipped，不要编造"""
+- 不确定的信息宁可 skipped 也不编造
+- 每个 proposal 必须标明 sources（来源 URL 或命令输出）
+- meta(type/level/tags) 必须完整"""
 
     def __init__(self, llm: LLMClient, kb: KnowledgeBase, trace: bool = False):
         self._llm = llm
         self._kb = kb
         self._trace = trace
+        self._external_calls = 0
 
-    def run(self, domain: str, topic: str) -> dict:
+    def run(self, suggestion: dict, user_context: str = "") -> dict:
+        self._external_calls = 0
+        domain = suggestion.get("domain", "")
+        topic = suggestion.get("topic", "")
+        reason = suggestion.get("reason", "")
+        existing_ids = suggestion.get("existing_doc_ids", [])
+
+        existing_summary = ""
+        if existing_ids:
+            titles = []
+            for did in existing_ids[:5]:
+                doc = self._kb.get(did)
+                if doc:
+                    titles.append(f"  - [{did[:8]}] {doc.title}")
+            if titles:
+                existing_summary = f"\n[已有相关文档]\n" + "\n".join(titles)
+
+        user_msg = (
+            f"[知识缺口]\ndomain: {domain}\ntopic: {topic}\nreason: {reason}"
+            + existing_summary
+            + (f"\n\n[用户补充]\n{user_context}" if user_context else "")
+        )
+
         messages = [
             {"role": "system", "content": self.FILL_SYSTEM},
-            {"role": "user", "content": f"[知识缺口]\ndomain: {domain}\ntopic: {topic}"},
+            {"role": "user", "content": user_msg},
         ]
 
         for turn in range(1, self.MAX_TURNS + 1):
@@ -636,12 +767,9 @@ class FillGapLoop:
                 name = tc.function.name
                 args = json.loads(tc.function.arguments)
                 if self._trace:
-                    if name == "kb_add":
-                        print(f"  [fill turn {turn}] kb_add({args.get('title', '?')})")
-                    else:
-                        print(f"  [fill turn {turn}] {name}(...)")
+                    print(f"  [fill turn {turn}] {name}(...)")
 
-                if name == "kb_fill_done":
+                if name == "kb_fill_propose":
                     return args
 
                 result = self._dispatch(name, args)
@@ -661,17 +789,59 @@ class FillGapLoop:
             })
             messages.extend(tool_results)
 
-        return {"added": [], "skipped": []}
+        return {"proposals": [], "skipped": [{"topic": suggestion.get("topic", ""), "reason": "max_turns_exceeded"}]}
 
     def _dispatch(self, name: str, args: dict) -> dict:
-        if name == "kb_add":
-            doc = KnowledgeDoc(
-                domain=args["domain"], title=args["title"],
-                content=args["content"], meta=args.get("meta", {}), source="fill_gap",
-            )
-            doc_ids = self._kb.add(doc)
-            self._kb.save()
-            return {"status": "ok", "doc_ids": doc_ids, "doc_id": doc_ids[0]}
+        if name == "kb_search":
+            results = self._kb.search(args.get("query", ""), domain=args.get("domain"))
+            for r in results:
+                doc = self._kb.get(r["id"])
+                r["meta"] = doc.meta if doc else {}
+            return {"results": results, "count": len(results)}
+        if name == "kb_get":
+            doc = self._kb.get(args.get("doc_id", ""))
+            return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
+        if name == "web_search":
+            self._external_calls += 1
+            if self._external_calls > self.MAX_EXTERNAL_CALLS:
+                return {"error": f"max {self.MAX_EXTERNAL_CALLS} external calls, use kb_fill_propose"}
+            from core.tools.web_search_tool import _search_searxng, _search_ddgs
+            r = _search_searxng(**args)
+            if r is None:
+                try:
+                    r = _search_ddgs(**args)
+                except Exception:
+                    r = []
+            return {"results": r or [], "count": len(r) if r else 0}
+        if name == "tavily_search":
+            self._external_calls += 1
+            if self._external_calls > self.MAX_EXTERNAL_CALLS:
+                return {"error": f"max {self.MAX_EXTERNAL_CALLS} external calls, use kb_fill_propose"}
+            from core.tools.web_search_tool import _search_tavily
+            import os
+            key = os.environ.get("TAVILY_API_KEY", "")
+            r = _search_tavily(api_key=key, **args)
+            return {"results": r, "count": len(r)}
+        if name == "terminal":
+            self._external_calls += 1
+            if self._external_calls > self.MAX_EXTERNAL_CALLS:
+                return {"error": f"max {self.MAX_EXTERNAL_CALLS} external calls, use kb_fill_propose"}
+            import subprocess
+            try:
+                result = subprocess.run(
+                    args["command"], shell=True, capture_output=True, text=True,
+                    timeout=15, cwd=self._kb._storage_path,
+                )
+                return {"stdout": result.stdout[-2000:], "stderr": result.stderr[-500:], "rc": result.returncode}
+            except Exception as e:
+                return {"error": str(e)}
+        if name == "ask_user":
+            return {
+                "status": "waiting",
+                "question": args.get("question", ""),
+                "note": "main_agent_will_relay_this_question_to_the_user_and_reinvoke_fill_gap_with_user_context",
+            }
+        return {"error": f"unknown: {name}"}
         return {"error": f"unknown: {name}"}
 
 

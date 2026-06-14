@@ -61,15 +61,21 @@ def register_kb_tools(registry):
         "function": {
             "name": "kb_fill_gap",
             "description": (
-                "填补知识库缺口：根据 topic 生成/搜集内容→验证→保存。"
+                "填补知识库缺口：KB确认→外部工具搜索→提案（不直接保存）。"
                 "知识库仅保存低时效敏感、易于验证的客观信息。"
-                "注：当前基于模型自有知识生成，后续将通过 web_search 联网验证。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "domain": {"type": "string", "description": "目标 domain"},
-                    "topic": {"type": "string", "description": "需填补的主题"},
+                    "domain": {"type": "string", "description": "目标 domain（来自 kb_query suggestions）"},
+                    "topic": {"type": "string", "description": "需填补的主题（来自 kb_query suggestions）"},
+                    "reason": {"type": "string", "description": "为什么需要填补（来自 kb_query suggestions）"},
+                    "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "existing_doc_ids": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "Phase 1 已检索到的相关文档 ID",
+                    },
+                    "user_context": {"type": "string", "description": "用户补充的信息（仅在 ask_user 后重新调用时填写）"},
                 },
                 "required": ["domain", "topic"],
             },
@@ -79,6 +85,32 @@ def register_kb_tools(registry):
     registry.register("kb_query", _schema("kb_query"), _kb_query_handler, toolset="core")
     registry.register("kb_delete", _schema("kb_delete"), _kb_delete_handler, toolset="core")
     registry.register("kb_fill_gap", _schema("kb_fill_gap"), _kb_fill_gap_handler, toolset="core")
+
+    # ── ask_user: available to both main agent and fill-gap sub-agent ──
+    _KB_SCHEMAS["ask_user"] = {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": "向用户提问以获取缺失的信息。最后一招，在搜索工具都无法满足时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "要问用户的问题"},
+                },
+                "required": ["question"],
+            },
+        },
+    }
+    registry.register("ask_user", _schema("ask_user"), _ask_user_handler, toolset="core")
+
+
+def _ask_user_handler(args: dict | None = None) -> str:
+    question = (args or {}).get("question", "")
+    return json.dumps({
+        "status": "waiting",
+        "question": question,
+        "note": "用户回复后将通过 user_context 继续任务",
+    })
 
 
 def _get_kb():
@@ -132,8 +164,9 @@ def _kb_delete_handler(args: dict | None = None) -> str:
 
 
 def _kb_fill_gap_handler(args: dict | None = None) -> str:
-    domain = (args or {}).get("domain", "")
-    topic = (args or {}).get("topic", "")
+    suggestion = (args or {})
+    domain = suggestion.get("domain", "")
+    topic = suggestion.get("topic", "")
     if not domain or not topic:
         return json.dumps({"error": "domain and topic required"})
     try:
@@ -142,7 +175,7 @@ def _kb_fill_gap_handler(args: dict | None = None) -> str:
         kb.load()
         llm = _get_llm()
         agent = FillGapLoop(llm, kb, trace=False)
-        result = agent.run(domain, topic)
+        result = agent.run(suggestion)
         kb.close()
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
