@@ -160,11 +160,21 @@ class FlexibleKnowledge:
                 return True
         return False
 
-    def modify_card(self, card_id: str, new_content: str) -> KnowledgeCard | None:
-        """Modify a card's content by id. Returns the updated card or None."""
+    def modify_card(self, card_id: str, new_content: str | None = None,
+                    usefulness: int | None = None,
+                    misleading: int | None = None,
+                    comment: str | None = None) -> KnowledgeCard | None:
+        """Modify a card's content and/or quality fields by id."""
         for c in self.cards:
             if c.id == card_id:
-                c.content = new_content
+                if new_content is not None:
+                    c.content = new_content
+                if usefulness is not None:
+                    c.usefulness = usefulness
+                if misleading is not None:
+                    c.misleading = misleading
+                if comment is not None:
+                    c.comment = comment
                 c.updated_at = _now()
                 return c
         return None

@@ -171,6 +171,17 @@ _L3_OUTPUT: dict = {
 }
 
 
+def _quality_kwargs(payload: dict) -> dict:
+    """Extract quality fields from a modification payload, only including set keys."""
+    kwargs = {}
+    for key in ("usefulness", "misleading"):
+        if key in payload:
+            kwargs[key] = int(payload[key])
+    if "comment" in payload:
+        kwargs["comment"] = str(payload["comment"])
+    return kwargs
+
+
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -698,11 +709,11 @@ class LearningEnv(Environment):
         from core.task import Domain
         if mod_type == "create":
             domain = payload.get("domain", "general")
-            confidence = max(0.1, min(1.0, payload.get("confidence", 0.5)))
             store.add_card(content=content, domain=Domain(domain, "specific"),
-                           confidence=confidence, source="learning_env")
+                           source="learning_env")
         elif mod_type == "update":
-            result = store.modify_card(card_id, content)
+            kwargs = _quality_kwargs(payload)
+            result = store.modify_card(card_id, content or None, **kwargs)
             if result is None:
                 raise ValueError(f"Card not found: {card_id}")
         elif mod_type == "deprecate":
@@ -721,7 +732,8 @@ class LearningEnv(Environment):
                                domain=Domain(domain, "specific"),
                                created_by="learning_env")
         elif mod_type == "update":
-            store.edit_skill(skill_name, content)
+            kwargs = _quality_kwargs(payload)
+            store.edit_skill(skill_name, content or None, **kwargs)
         elif mod_type == "deprecate":
             store.delete_skill(skill_name)
 

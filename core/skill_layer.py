@@ -130,19 +130,62 @@ class SkillLayer:
             })
         return result
 
-    def edit_skill(self, name: str, new_content: str) -> SkillMeta:
+    def edit_skill(self, name: str, new_content: str | None = None,
+                   usefulness: int | None = None,
+                   misleading: int | None = None,
+                   comment: str | None = None) -> SkillMeta:
         skill_dir = self._find_skill_dir(name)
         if not skill_dir:
             raise ValueError(f"Skill not found: {name}")
         skill_file = skill_dir / "SKILL.md"
-        fd, tmp_path = tempfile.mkstemp(dir=skill_dir, suffix=".md")
-        try:
-            with open(fd, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            Path(tmp_path).replace(skill_file)
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
-        return self._parse_skill_meta(skill_file)
+
+        if new_content is not None:
+            # Content provided: write file, re-parse, then apply quality fields
+            fd, tmp_path = tempfile.mkstemp(dir=skill_dir, suffix=".md")
+            try:
+                with open(fd, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                Path(tmp_path).replace(skill_file)
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+            meta = self._parse_skill_meta(skill_file)
+        else:
+            # Only quality fields: read current file, inject into YAML frontmatter
+            current = skill_file.read_text(encoding="utf-8")
+            if current.startswith("---"):
+                parts = current.split("---", 2)
+                if len(parts) >= 3:
+                    try:
+                        fm = yaml.safe_load(parts[1])
+                    except yaml.YAMLError:
+                        fm = {}
+                    if not isinstance(fm, dict):
+                        fm = {}
+                    if usefulness is not None:
+                        fm["usefulness"] = usefulness
+                    if misleading is not None:
+                        fm["misleading"] = misleading
+                    if comment is not None:
+                        fm["comment"] = comment
+                    new_body = f"---\n{yaml.dump(fm, allow_unicode=True, sort_keys=False)}---{parts[2]}"
+                    fd, tmp_path = tempfile.mkstemp(dir=skill_dir, suffix=".md")
+                    try:
+                        with open(fd, "w", encoding="utf-8") as f:
+                            f.write(new_body)
+                        Path(tmp_path).replace(skill_file)
+                    finally:
+                        Path(tmp_path).unlink(missing_ok=True)
+            meta = self._parse_skill_meta(skill_file)
+
+        # Apply quality fields to in-memory meta (in case YAML wasn't the source)
+        if usefulness is not None:
+            meta.usefulness = usefulness
+        if misleading is not None:
+            meta.misleading = misleading
+        if comment is not None:
+            meta.comment = comment
+
+        return meta
 
     def patch_skill(self, name: str, find: str, replace: str) -> SkillMeta:
         skill_dir = self._find_skill_dir(name)
@@ -230,6 +273,9 @@ class SkillLayer:
             created_by=str(fm.get("created_by", "agent")),
             source_cards=fm.get("source_cards", []),
             skill_dir=skill_file.parent,
+            usefulness=int(fm.get("usefulness", 0)),
+            misleading=int(fm.get("misleading", 0)),
+            comment=str(fm.get("comment", "")),
         )
 
     def _extract_bool_from_frontmatter(self, content: str, key: str) -> bool:
