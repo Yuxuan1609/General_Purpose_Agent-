@@ -21,8 +21,19 @@ tools:
     fallback:
       max_retries: 2
       degrade:
+        - tool: tavily_search
+          hint: "SearXNG 不可用时可通过 tavily_search 使用 AI 优化搜索引擎"
         - tool: kb_query
           hint: "网络搜索不可用时可尝试 kb_query 查询本地知识库"
+
+  tavily_search:
+    timeout: 15
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 1
+      degrade:
+        - tool: kb_query
+          hint: "Tavily 搜索不可用时可尝试 kb_query 查询本地知识库"
 
   read_file:
     timeout: 10

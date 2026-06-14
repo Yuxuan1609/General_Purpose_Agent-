@@ -84,3 +84,72 @@ def register_web_search_tool(registry):
             },
         },
     }, handler, toolset="core")
+
+
+def _search_tavily(query: str, max_results: int = 5, api_key: str = "") -> list[dict]:
+    """Search via Tavily API (AI-optimized search)."""
+    if not api_key:
+        return []
+    try:
+        import urllib.request as _ur
+        req = _ur.Request(
+            "https://api.tavily.com/search",
+            data=json.dumps({
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "basic",
+            }).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        data = json.loads(_ur.urlopen(req, timeout=15).read())
+        formatted = []
+        for r in data.get("results", []):
+            formatted.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "snippet": r.get("content", ""),
+                "score": r.get("score", 0),
+            })
+        return formatted
+    except Exception as e:
+        logger.debug("Tavily search failed: %s", e)
+    return []
+
+
+def register_tavily_search_tool(registry):
+    import os
+    api_key = os.environ.get("TAVILY_API_KEY", "")
+
+    def handler(args=None, timeout=30):
+        query = (args or {}).get("query", "")
+        if not query:
+            return json.dumps({"error": "No query provided"})
+        max_results = int((args or {}).get("max_results", 5))
+
+        results = _search_tavily(query, max_results, api_key=api_key)
+        if not results:
+            return json.dumps({"error": "Tavily search failed (check TAVILY_API_KEY env)"})
+
+        return json.dumps(results, ensure_ascii=False)
+
+    registry.register("tavily_search", {
+        "type": "function",
+        "function": {
+            "name": "tavily_search",
+            "description": (
+                "Search the web via Tavily (AI-optimized, higher relevance). "
+                "Use when web_search (SearXNG) returns insufficient results."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query"},
+                    "max_results": {"type": "integer", "description": "Maximum number of results (default: 5)"},
+                },
+                "required": ["query"],
+            },
+        },
+    }, handler, toolset="core")
