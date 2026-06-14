@@ -49,13 +49,6 @@ tools:
       max_retries: 1
       degrade: []
 
-  todo:
-    timeout: 5
-    allowlist: [l1, l2, l3]
-    fallback:
-      max_retries: 1
-      degrade: []
-
   kb_query:
     timeout: 60
     allowlist: [l1, l2, l3]

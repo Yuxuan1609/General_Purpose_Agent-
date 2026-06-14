@@ -10,7 +10,6 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
         proposal_dir: Directory for tool_proposal output. If None, proposals
                       are returned in response but not saved to disk.
     """
-    from core.tools.todo_tool import register_todo_tool
     from core.tools.terminal_tool import register_terminal_tool
     from core.tools.web_search_tool import register_web_search_tool, register_tavily_search_tool
     from core.tools.file_tools import register_read_file, register_grep
@@ -18,7 +17,6 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     from core.tools.domain_tool import register_create_domain, set_domain_registry
     from core.tools.kb_tools import register_kb_tools
 
-    register_todo_tool(registry)
     register_terminal_tool(registry)
     register_web_search_tool(registry)
     register_tavily_search_tool(registry)
