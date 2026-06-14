@@ -486,4 +486,13 @@
 | 跨进程扩展 | ❌ 单进程 | ⚠️ 线程受限 | ✅ | ✅ | ✅ |
 | 故障恢复 | ❌ 进程崩溃全丢 | ⚠️ 需额外持久化 | ✅ 任务重试 | ⚠️ 需消息持久化 | ❌ 无内置恢复 |
 
-**初步建议**：当前阶段选 **B（Owner）或 E（进程池）**——改造量可控，不引入新依赖。Owner 模式对 ask_user 更友好，进程池对并发扩展更好。长期可演进到 C 或 D。
+**参考项目**：
+
+| 项目 | 方案 | 要点 |
+|------|------|------|
+| **OpenClaw** (379k★) | 自建 lane-aware FIFO 队列，纯 TS/promises，无外部依赖 | session lane(maxConcurrent=1) + subagent lane(8) + cron lane，文件锁保护 session 写入 |
+| **LangGraph** | StateGraph + checkpoint + interrupt | 概念贴合但拉 LangChain 全生态，替代现有 while-loop |
+
+**当前结论**：
+1. **多 Agent 实例并行** → SQLite 解决底层文件读写一致性（KB 本身基于 SQLite）。Python 多实例内存隔离默认。
+2. **单实例内 sub-agent/tool 调度** → 手写方案，借鉴 OpenClaw lane 模型：进程内 FIFO 队列 + 每 lane 独立并发上限 + 文件锁。不引入 Redis/Celery。
