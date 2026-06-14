@@ -29,6 +29,31 @@ class L1Agent(LayerAgent):
     # Consolidation tools — modifications via tool calls
     _L1_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
+            "name": "create_domain",
+            "description": "Create a new domain node in the domain registry. "
+                           "Use when encountering a task in an unregistered domain — "
+                           "register it so L2/L3 can build knowledge cards and skills for it.",
+            "parameters": {"type": "object", "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Domain path, e.g. 'interaction' or 'game/mahjong'. "
+                                   "Use '/' to nest under parent.",
+                },
+                "parent": {
+                    "type": "string",
+                    "description": "Parent domain path. Default: 'general'.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description (1-2 sentences, what kind of tasks it covers)",
+                },
+                "relations": {
+                    "type": "string",
+                    "description": "Related domains or notes. Optional.",
+                },
+            }, "required": ["path", "description"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
             "name": "deprecate_l1_rule",
             "description": "废弃（删除）一条 L1 行为准则。用于移除重复、低质量或违反跨领域原则的规则。",
             "parameters": {"type": "object", "properties": {
@@ -62,6 +87,24 @@ class L1Agent(LayerAgent):
         """Wire DictInjector for L1 consolidation tools."""
         agent = self
 
+        def create_domain(args: dict) -> str:
+            path = args.get("path", "")
+            parent = args.get("parent", "general")
+            description = args.get("description", "")
+            relations = args.get("relations", "")
+            if not path or not description:
+                return json.dumps({"error": "path and description are required"})
+            if agent._registry is None:
+                return json.dumps({"error": "DomainRegistry not connected"})
+            try:
+                agent._registry.add_node(path, parent, description, {}, relations)
+                return json.dumps({
+                    "success": True,
+                    "message": f"Domain '{path}' created under '{parent}'",
+                }, ensure_ascii=False)
+            except Exception as e:
+                return json.dumps({"error": str(e)})
+
         def deprecate_l1_rule(args: dict) -> str:
             agent._pending_mods.append({
                 "type": "deprecate", "target": args["rule_id"],
@@ -89,14 +132,16 @@ class L1Agent(LayerAgent):
             return f"已记录: 修改 {args['rule_id']}"
 
         self._injector = DictInjector({
+            "create_domain": create_domain,
             "deprecate_l1_rule": deprecate_l1_rule,
             "create_l1_rule": create_l1_rule,
             "modify_l1_rule": modify_l1_rule,
         })
 
-    def __init__(self, llm_client, philosophy):
+    def __init__(self, llm_client, philosophy, domain_registry=None):
         super().__init__(llm_client, logger)
         self._philosophy = philosophy
+        self._registry = domain_registry
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
@@ -309,7 +354,7 @@ class L0_5_1Manager(LayerManager):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._meta = meta_driver
         self._philosophy = philosophy
-        self._agent = L1Agent(auxiliary_llm, philosophy) if auxiliary_llm else None
+        self._agent = L1Agent(auxiliary_llm, philosophy, domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
         self.max_rounds = max_rounds
         self._l1_notify: dict | None = None

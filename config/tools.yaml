@@ -74,6 +74,13 @@ tools:
         - tool: web_search
           hint: "知识填补失败时可通过 web_search 先联网搜索再尝试"
 
+  create_domain:
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 1
+      degrade: []
+
   ask_user:
     timeout: 10
     allowlist: [l1, l2, l3]

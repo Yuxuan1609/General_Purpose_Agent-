@@ -975,7 +975,7 @@ class LearningEnv(Environment):
         ]:
             if keyword in desc_lower:
                 return domain
-        return "general"
+        return desc_lower
 
     def _scan_pending(self, domain: str) -> list[dict]:
         records = []

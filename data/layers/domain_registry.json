@@ -9,19 +9,25 @@
     "game": {
       "parent": "general",
       "description": "游戏策略领域的根节点，涵盖各类对抗性游戏的决策知识",
-      "correlations": {"learning/reflect": 0.2},
+      "correlations": {
+        "learning/reflect": 0.2
+      },
       "relations": "子域: game/leduc, game/doudizhu"
     },
     "game/leduc": {
       "parent": "game",
       "description": "Leduc Hold'em 简化德州扑克，2人对局，K/Q/J各两种花色，翻牌前/翻牌后两轮下注",
-      "correlations": {"game/doudizhu": 0.6},
+      "correlations": {
+        "game/doudizhu": 0.6
+      },
       "relations": "姊妹域: game/doudizhu（同为扑克类游戏，部分策略可迁移）"
     },
     "game/doudizhu": {
       "parent": "game",
       "description": "斗地主3人卡牌游戏，54张牌含大小王，1地主vs2农民",
-      "correlations": {"game/leduc": 0.6},
+      "correlations": {
+        "game/leduc": 0.6
+      },
       "relations": "姊妹域: game/leduc（扑克类，顶牌/炸弹等策略部分互通）"
     },
     "learning/reflect": {
@@ -33,18 +39,44 @@
     "learning/compile": {
       "parent": "learning/reflect",
       "description": "知识编译域，将高激活同域卡片编译为L3技能",
-      "correlations": {"learning/consolidate": 0.8},
+      "correlations": {
+        "learning/consolidate": 0.8
+      },
       "relations": "姊妹域: learning/consolidate"
     },
     "learning/consolidate": {
       "parent": "learning/reflect",
       "description": "知识整理域，管理知识库容量：合并相似条目、归档低活跃内容",
-      "correlations": {"learning/compile": 0.8},
+      "correlations": {
+        "learning/compile": 0.8
+      },
       "relations": "姊妹域: learning/compile"
+    },
+    "interaction": {
+      "parent": "general",
+      "description": "交互对话域：管理多轮对话技巧、用户意图理解、回复风格策略",
+      "correlations": {},
+      "relations": "姊妹域: coding"
     }
   },
   "reverse_index": {
-    "l2": {},
+    "l2": {
+      "game/leduc": [
+        "card_f14bb27f",
+        "card_e393d7bf",
+        "card_d8ec637e"
+      ],
+      "game/doudizhu": [
+        "card_dbcf8043",
+        "card_1e2dd9c2"
+      ],
+      "learning/consolidate": [
+        "card_dd29fed7",
+        "card_1602da41",
+        "card_04dbfe1b",
+        "card_ca42dfbe"
+      ]
+    },
     "l3": {},
     "tool": {}
   }
