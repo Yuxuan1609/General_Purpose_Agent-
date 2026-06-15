@@ -716,6 +716,11 @@ class LearningEnv(Environment):
             result = store.modify_card(card_id, content or None, **kwargs)
             if result is None:
                 raise ValueError(f"Card not found: {card_id}")
+            if "domain" in payload:
+                new_domain = payload["domain"]
+                if new_domain and new_domain != result.domain.path:
+                    result.domain = Domain(new_domain, "specific")
+                    result.available_domains = [new_domain]
         elif mod_type == "deprecate":
             if not store.remove_card(card_id):
                 raise ValueError(f"Card not found: {card_id}")
@@ -734,6 +739,13 @@ class LearningEnv(Environment):
         elif mod_type == "update":
             kwargs = _quality_kwargs(payload)
             store.edit_skill(skill_name, content or None, **kwargs)
+            if "domain" in payload:
+                new_domain = payload["domain"]
+                if new_domain:
+                    meta = store._skills.get(skill_name)
+                    if meta:
+                        meta.domain = Domain(new_domain, "specific")
+                        meta.available_domains = [new_domain]
         elif mod_type == "deprecate":
             store.delete_skill(skill_name)
 
