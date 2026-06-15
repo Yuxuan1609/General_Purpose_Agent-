@@ -146,9 +146,9 @@
 | `L3Manager.query` | `(msg, trace_id) → None` | 确定性匹配技能 → while 循环 decide() 决策执行 | L2Manager._propagate | SkillLayer.match(), L3Agent.decide() |
 | `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
 | `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
-| `L3Agent` | `__init__(llm_client)` | L3 LLM Agent：基于匹配技能执行认知任务 | L3Manager.query() | — |
+| `L3Agent` | `__init__(llm_client, skill_layer=None, domain_registry=None)` | L3 LLM Agent：基于匹配技能执行认知任务 | L3Manager.query() | — |
 | `L3Agent.decide` | `(meta, state, context, tools, layer) → dict{done, result, skills_used, reasoning}` | 单步决策：通过 capture_tool（l3_continue/l3_report）输出；`l3_output_format` 时用 consolidation 工具。 | L3Manager.query() | _call_llm(), _schema_to_tool() |
-| `L3Agent._setup_l3_consolidation` | `() → None` | 注册 deprecate/create/modify L3 技能的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
+| `L3Agent._setup_l3_consolidation` | `() → None` | 注册 deprecate/create/modify/query_domain L3 技能的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
 
 ## core/layers/l2/manager.py (Phase 1)
 
@@ -160,7 +160,7 @@
 | `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
 | `L2Agent` | `__init__(llm_client, knowledge)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
 | `L2Agent.decide` | `(query, meta, state, context, tools, layer) → dict{done, reply, selected_nodes, selected_cards, queries_to_L3, reasoning}` | 单步决策：通过 capture_tool（l2_query/l2_report）输出；`l2_output_format` 时用 consolidation 工具。 | L2Manager.query() | _get_cards_for_nodes(), _call_llm(), _schema_to_tool() |
-| `L2Agent._setup_l2_consolidation` | `() → None` | 注册 deprecate/create/modify L2 卡片的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
+| `L2Agent._setup_l2_consolidation` | `() → None` | 注册 query_domain/deprecate/create/modify L2 卡片的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
 | `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | decide() | FlexibleKnowledge.get_domain_cards() |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
