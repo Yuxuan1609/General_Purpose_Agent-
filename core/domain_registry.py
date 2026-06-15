@@ -10,6 +10,7 @@ class DomainNode:
     description: str
     correlations: dict[str, float] = field(default_factory=dict)
     relations: str = ""
+    embedding_vector: list[float] | None = None
 
 
 class DomainRegistry:
@@ -113,6 +114,152 @@ class DomainRegistry:
                     result.append(item_id)
         return result
 
+    # ── embedding & correlation ──
+
+    def compute_embedding(self, path: str, content_getter=None) -> bool:
+        node = self._nodes.get(path)
+        if node is None:
+            return False
+        if content_getter is None:
+            return False
+
+        parts = [node.description]
+        for layer in ("l2", "l3"):
+            items = content_getter(layer, path) or []
+            parts.extend(items)
+
+        text = " | ".join(p for p in parts if p)
+        if not text.strip():
+            return False
+
+        try:
+            from vendor.txtai_core.embeddings import HFVectors
+            model = HFVectors("C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma")
+            vec = model.encode(text)[0]
+            import numpy as np
+            v = np.array(vec)
+            v = v / (np.linalg.norm(v) + 1e-8)
+            node.embedding_vector = v.tolist()
+            return True
+        except Exception:
+            return False
+
+    def compute_correlation(self, a: str, b: str) -> float:
+        node_a = self._nodes.get(a)
+        node_b = self._nodes.get(b)
+        if not node_a or not node_b:
+            return 0.0
+
+        emb_score = 0.0
+        if node_a.embedding_vector and node_b.embedding_vector:
+            import numpy as np
+            va = np.array(node_a.embedding_vector)
+            vb = np.array(node_b.embedding_vector)
+            emb_score = float(np.dot(va, vb) / (np.linalg.norm(va) * np.linalg.norm(vb) + 1e-8))
+            emb_score = max(0.0, emb_score)
+
+        idx = self._reverse_index
+        items_a = set()
+        items_b = set()
+        for layer in ("l2", "l3"):
+            for did in idx.get(layer, {}).get(a, []):
+                items_a.add((layer, did))
+            for did in idx.get(layer, {}).get(b, []):
+                items_b.add((layer, did))
+        union = len(items_a | items_b)
+        jaccard = len(items_a & items_b) / union if union > 0 else 0.0
+
+        return round(0.5 * emb_score + 0.5 * jaccard, 4)
+
+    def refresh_embeddings_for(self, domains: list[str],
+                               content_getter=None) -> int:
+        count = 0
+        for path in domains:
+            if self.compute_embedding(path, content_getter):
+                count += 1
+        return count
+
+    def compute_all_correlations(self) -> int:
+        paths = list(self._nodes.keys())
+        count = 0
+        for i, a in enumerate(paths):
+            for b in paths[i+1:]:
+                corr = self.compute_correlation(a, b)
+                self.update_correlation(a, b, corr)
+                count += 1
+        return count
+
+    # ── deprecate & merge ──
+
+    def deprecate_domain(self, path: str) -> int:
+        node = self._nodes.get(path)
+        if node is None:
+            raise ValueError(f"Domain not found: {path}")
+
+        orphaned = 0
+        for layer in ("l2", "l3"):
+            idx = self._reverse_index.get(layer, {})
+            items_in_domain = set(idx.get(path, []))
+            if not items_in_domain:
+                continue
+            items_in_others = set()
+            for domain_name, item_list in idx.items():
+                if domain_name != path:
+                    items_in_others.update(item_list)
+            orphans = items_in_domain - items_in_others
+            orphaned += len(orphans)
+
+        if orphaned > 0:
+            raise ValueError(
+                f"Domain '{path}' still has {orphaned} items with no other domain. "
+                f"Migrate items before deprecating."
+            )
+
+        for layer in ("l2", "l3", "tool"):
+            self._reverse_index.get(layer, {}).pop(path, None)
+        self._nodes.pop(path, None)
+        return 0
+
+    def merge_domain(self, source: str, target: str,
+                     content_getter=None) -> dict:
+        if source not in self._nodes:
+            raise ValueError(f"Source domain not found: {source}")
+        if target not in self._nodes:
+            raise ValueError(f"Target domain not found: {target}")
+
+        source_node = self._nodes[source]
+        target_node = self._nodes[target]
+
+        moved = 0
+        for layer in ("l2", "l3"):
+            idx = self._reverse_index.get(layer, {})
+            items = idx.pop(source, [])
+            target_items = idx.setdefault(target, [])
+            for item_id in items:
+                if item_id not in target_items:
+                    target_items.append(item_id)
+                    moved += 1
+
+        for k, v in source_node.correlations.items():
+            if k in target_node.correlations:
+                target_node.correlations[k] = max(target_node.correlations[k], v)
+            else:
+                target_node.correlations[k] = v
+        target_node.correlations.pop(source, None)
+        target_node.correlations.pop(target, None)
+
+        for n in self._nodes.values():
+            if source in n.correlations:
+                v = n.correlations.pop(source)
+                n.correlations[target] = max(n.correlations.get(target, 0), v)
+
+        self.deprecate_domain(source)
+
+        if content_getter:
+            self.compute_embedding(target, content_getter)
+
+        return {"moved_items": moved}
+
     def save(self, filepath: Path) -> None:
         import json
         import tempfile
@@ -123,6 +270,7 @@ class DomainRegistry:
                     "description": node.description,
                     "correlations": node.correlations,
                     "relations": node.relations,
+                    "embedding_vector": node.embedding_vector,
                 }
                 for path, node in self._nodes.items()
             },
@@ -151,6 +299,7 @@ class DomainRegistry:
                 description=raw.get("description", ""),
                 correlations=raw.get("correlations", {}),
                 relations=raw.get("relations", ""),
+                embedding_vector=raw.get("embedding_vector"),
             )
         reg = cls(nodes)
         reg._reverse_index = data.get("reverse_index", {"l2": {}, "l3": {}, "tool": {}})
