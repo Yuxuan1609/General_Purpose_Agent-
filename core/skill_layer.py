@@ -40,12 +40,43 @@ class SkillMeta:
 class SkillLayer:
     """L3: Semi-static skills. SKILL.md format (compatible with agentskills.io)."""
 
-    def __init__(self, skills_dir: Path, domain_registry=None):
+    def __init__(self, skills_dir: Path, domain_registry=None, db_path: Path | None = None):
         from core.task import Domain
         self.skills_dir = Path(skills_dir)
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self._registry = domain_registry
         self._skills: dict[str, SkillMeta] = {}
+        self._db = None
+        if db_path:
+            from core.storage.l3_store import L3SQLiteStore
+            self._db = L3SQLiteStore(db_path)
+            self._load_from_db()
+
+    def _load_from_db(self) -> None:
+        from core.task import Domain
+        from datetime import datetime, timezone
+        rows = self._db.list_all()
+        for row in rows:
+            domain_path = row["domain"]
+            domain_level = "general" if domain_path == "general" else "specific"
+            meta = SkillMeta(
+                name=row["name"],
+                description=row["description"],
+                domain=Domain(domain_path, domain_level),
+                available_domains=row["available_domains"],
+                cross_domain=row["cross_domain"],
+                version=row["version"],
+                created_by=row["created_by"],
+                source_cards=row["source_cards"],
+                usefulness=row.get("usefulness", 0),
+                misleading=row.get("misleading", 0),
+                comment=row.get("comment", ""),
+            )
+            meta._raw_content = row["content"]
+            self._skills[meta.name] = meta
+            if self._registry:
+                for d in meta.available_domains:
+                    self._registry.index_item("l3", d, meta.name)
 
     def list_all(self) -> list[SkillMeta]:
         metas = []
@@ -114,6 +145,25 @@ class SkillLayer:
             skill_dir=skill_dir,
         )
         self._skills[name] = meta
+        if self._db:
+            self._db.insert({
+                "name": name,
+                "description": meta.description,
+                "content": content,
+                "domain": domain.path,
+                "available_domains": available_domains,
+                "cross_domain": cross_domain if cross_domain else self._extract_bool_from_frontmatter(content, "cross_domain"),
+                "version": "1.0.0",
+                "created_by": created_by,
+                "source_cards": [],
+                "created_at": _now().isoformat(),
+                "updated_at": _now().isoformat(),
+                "last_used": _now().isoformat(),
+                "usefulness": 0,
+                "misleading": 0,
+                "comment": "",
+            })
+            meta._raw_content = content
         if self._registry:
             for d in meta.available_domains:
                 self._registry.index_item("l3", d, name)
@@ -125,8 +175,8 @@ class SkillLayer:
             skill = self._skills.get(name)
             if skill is None:
                 continue
-            content = ""
-            if skill.skill_dir:
+            content = getattr(skill, '_raw_content', None) or ""
+            if not content and skill.skill_dir:
                 skf = skill.skill_dir / "SKILL.md"
                 if skf.exists():
                     content = skf.read_text(encoding="utf-8")
@@ -206,6 +256,19 @@ class SkillLayer:
         if comment is not None:
             meta.comment = comment
 
+        if self._db:
+            fields = {}
+            if new_content is not None:
+                fields["content"] = new_content
+            if usefulness is not None:
+                fields["usefulness"] = usefulness
+            if misleading is not None:
+                fields["misleading"] = misleading
+            if comment is not None:
+                fields["comment"] = comment
+            self._db.update(name, **fields)
+            meta._raw_content = new_content if new_content is not None else getattr(meta, '_raw_content', None)
+
         meta.updated_at = _now()
         return meta
 
@@ -227,6 +290,9 @@ class SkillLayer:
         archive_dir = self.skills_dir / ".archive"
         archive_dir.mkdir(exist_ok=True)
         skill_dir.rename(archive_dir / name)
+        if self._db:
+            self._db.delete(name)
+        self._skills.pop(name, None)
 
     def touch_skill(self, name: str) -> None:
         """Mark a skill as recently used."""
