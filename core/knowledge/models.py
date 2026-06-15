@@ -41,6 +41,7 @@ class KnowledgeDoc:
     meta: dict = field(default_factory=dict)
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    last_used: str = field(default_factory=_now)
 
     def to_dict(self) -> dict:
         return {
@@ -53,6 +54,7 @@ class KnowledgeDoc:
             "meta": self.meta,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "last_used": self.last_used,
         }
 
     @classmethod
