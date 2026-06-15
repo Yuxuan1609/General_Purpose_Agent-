@@ -14,11 +14,13 @@ class DomainNode:
 
 
 class DomainRegistry:
-    def __init__(self, nodes: dict[str, DomainNode] | None = None):
+    def __init__(self, nodes: dict[str, DomainNode] | None = None,
+                 embedding_model_path: str | None = None):
         self._nodes: dict[str, DomainNode] = nodes or {}
         self._reverse_index: dict[str, dict[str, list[str]]] = {
             "l2": {}, "l3": {}, "tool": {},
         }
+        self._embedding_model_path = embedding_model_path
 
     def get_node(self, path: str) -> DomainNode | None:
         return self._nodes.get(path)
@@ -132,9 +134,12 @@ class DomainRegistry:
         if not text.strip():
             return False
 
+        if self._embedding_model_path is None:
+            return False
+
         try:
             from vendor.txtai_core.embeddings import HFVectors
-            model = HFVectors("C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma")
+            model = HFVectors(self._embedding_model_path)
             vec = model.encode(text)[0]
             import numpy as np
             v = np.array(vec)
@@ -155,7 +160,7 @@ class DomainRegistry:
             import numpy as np
             va = np.array(node_a.embedding_vector)
             vb = np.array(node_b.embedding_vector)
-            emb_score = float(np.dot(va, vb) / (np.linalg.norm(va) * np.linalg.norm(vb) + 1e-8))
+            emb_score = float(np.dot(va, vb))
             emb_score = max(0.0, emb_score)
 
         idx = self._reverse_index
@@ -191,7 +196,12 @@ class DomainRegistry:
 
     # ── deprecate & merge ──
 
-    def deprecate_domain(self, path: str) -> int:
+    def _remove_domain(self, path: str) -> None:
+        for layer in ("l2", "l3", "tool"):
+            self._reverse_index.get(layer, {}).pop(path, None)
+        self._nodes.pop(path, None)
+
+    def deprecate_domain(self, path: str) -> None:
         node = self._nodes.get(path)
         if node is None:
             raise ValueError(f"Domain not found: {path}")
@@ -218,7 +228,6 @@ class DomainRegistry:
         for layer in ("l2", "l3", "tool"):
             self._reverse_index.get(layer, {}).pop(path, None)
         self._nodes.pop(path, None)
-        return 0
 
     def merge_domain(self, source: str, target: str,
                      content_getter=None) -> dict:
@@ -231,7 +240,7 @@ class DomainRegistry:
         target_node = self._nodes[target]
 
         moved = 0
-        for layer in ("l2", "l3"):
+        for layer in ("l2", "l3", "tool"):
             idx = self._reverse_index.get(layer, {})
             items = idx.pop(source, [])
             target_items = idx.setdefault(target, [])
@@ -253,7 +262,7 @@ class DomainRegistry:
                 v = n.correlations.pop(source)
                 n.correlations[target] = max(n.correlations.get(target, 0), v)
 
-        self.deprecate_domain(source)
+        self._remove_domain(source)
 
         if content_getter:
             self.compute_embedding(target, content_getter)
