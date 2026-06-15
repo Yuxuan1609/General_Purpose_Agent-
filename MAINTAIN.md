@@ -226,12 +226,27 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `FlexibleKnowledge` | `__init__(knowledge_dir, index_path)` | L2 知识卡片管理 | L2Manager | — |
+| `FlexibleKnowledge` | `__init__(knowledge_dir, index_path, domain_registry=None, db_path=None)` | L2 知识卡片管理（可选 SQLite 后端） | L2Manager | L2SQLiteStore (if db_path) |
 | `FlexibleKnowledge.get_active_cards` | `(domain, context, top_k) → list[KnowledgeCard]` | 按激活值排序返回 top-k 活跃卡片 | L2Manager.process() | KnowledgeCard.compute_activation() |
 | `FlexibleKnowledge.get_domain_cards` | `(domain) → list[KnowledgeCard]` | 返回指定 domain 下所有卡片 | L2Agent | — |
-| `FlexibleKnowledge.add_card` | `(content, domain, confidence, source) → KnowledgeCard` | 新增卡片（仅内存） | seed, L2Manager | — |
-| `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片 | L2Manager | — |
-| `FlexibleKnowledge.modify_card` | `(card_id, new_content) → KnowledgeCard\|None` | 修改卡片内容 | L2Manager | — |
+| `FlexibleKnowledge._load_cards_from_files` | `() → list[KnowledgeCard]` | 文件模式加载卡片（当前返回空） | __init__ | — |
+| `FlexibleKnowledge._load_cards_from_db` | `() → list[KnowledgeCard]` | 从 SQLite 加载全部卡片为内存对象 | __init__ | L2SQLiteStore.list_all() |
+| `FlexibleKnowledge.add_card` | `(content, domain, sub_tags, source, available_domains) → KnowledgeCard` | 新增卡片（内存 + SQLite） | seed, L2Manager | L2SQLiteStore.insert() |
+| `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片（内存 + SQLite） | L2Manager | L2SQLiteStore.delete() |
+| `FlexibleKnowledge.modify_card` | `(card_id, new_content, usefulness, misleading, comment) → KnowledgeCard\|None` | 修改卡片（内存 + SQLite） | L2Manager | L2SQLiteStore.update() |
+
+## core/storage/l2_store.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `L2SQLiteStore` | `__init__(db_path)` | SQLite WAL 模式存储 L2 知识卡片 | FlexibleKnowledge | sqlite3 |
+| `L2SQLiteStore.insert` | `(card: dict) → None` | 插入或替换一张卡片 | FlexibleKnowledge.add_card | — |
+| `L2SQLiteStore.update` | `(card_id, **fields) → bool` | 按字段更新卡片 | FlexibleKnowledge.modify_card | — |
+| `L2SQLiteStore.delete` | `(card_id) → bool` | 删除卡片 | FlexibleKnowledge.remove_card | — |
+| `L2SQLiteStore.get` | `(card_id) → dict\|None` | 按 ID 获取单张卡片 | — | — |
+| `L2SQLiteStore.list_all` | `() → list[dict]` | 返回全部卡片 | FlexibleKnowledge._load_cards_from_db | — |
+| `L2SQLiteStore.list_by_domain` | `(domain) → list[dict]` | 按 available_domains 模糊匹配 | — | — |
+| `L2SQLiteStore.close` | `() → None` | 关闭连接 | — | — |
 
 ## core/knowledge/knowledge_base.py
 

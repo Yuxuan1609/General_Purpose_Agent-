@@ -95,13 +95,19 @@ class FlexibleKnowledge:
     """L2: Flexible knowledge. Stores cards in memory, persists via MD+JSON+Graph."""
 
     def __init__(self, knowledge_dir: Path, index_path: Path,
-                 domain_registry=None):
+                 domain_registry=None, db_path: Path | None = None):
         self.knowledge_dir = Path(knowledge_dir)
         self.index_path = Path(index_path)
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
-        self.cards: list[KnowledgeCard] = []
         self.graph: KnowledgeGraph | None = None
         self._registry = domain_registry
+        self._db = None
+        if db_path:
+            from core.storage.l2_store import L2SQLiteStore
+            self._db = L2SQLiteStore(db_path)
+            self.cards: list[KnowledgeCard] = self._load_cards_from_db()
+        else:
+            self.cards: list[KnowledgeCard] = self._load_cards_from_files()
         self._load_index()
 
     def get_active_cards(self, task_domain, task_context: str = "", top_k: int = 5) -> list[KnowledgeCard]:
@@ -120,6 +126,31 @@ class FlexibleKnowledge:
                 result.append(card)
         return result
 
+    def _load_cards_from_files(self) -> list[KnowledgeCard]:
+        return []
+
+    def _load_cards_from_db(self) -> list[KnowledgeCard]:
+        from core.task import Domain
+        cards = []
+        for row in self._db.list_all():
+            domain_path = row.get("domain", "general")
+            domain = Domain(domain_path, "general" if "/" not in domain_path else "specific")
+            cards.append(KnowledgeCard(
+                id=row["id"],
+                content=row["content"],
+                domain=domain,
+                available_domains=row.get("available_domains", []),
+                sub_tags=row.get("sub_tags", []),
+                source=row.get("source", "observation"),
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+                last_used=datetime.fromisoformat(row["last_used"]),
+                usefulness=row.get("usefulness", 0),
+                misleading=row.get("misleading", 0),
+                comment=row.get("comment", ""),
+            ))
+        return cards
+
     def add_card(self, content: str, domain, sub_tags: list[str] | None = None,
                  source: str = "observation",
                  available_domains: list[str] | None = None) -> KnowledgeCard:
@@ -135,6 +166,21 @@ class FlexibleKnowledge:
         )
         self.cards.append(card)
         self._sync_card_index(card)
+        if self._db:
+            self._db.insert({
+                "id": card.id,
+                "content": card.content,
+                "domain": card.domain.path,
+                "available_domains": card.available_domains,
+                "sub_tags": card.sub_tags,
+                "source": card.source,
+                "created_at": card.created_at.isoformat(),
+                "updated_at": card.updated_at.isoformat(),
+                "last_used": card.last_used.isoformat(),
+                "usefulness": card.usefulness,
+                "misleading": card.misleading,
+                "comment": card.comment,
+            })
         return card
 
     def _sync_card_index(self, card) -> None:
@@ -157,6 +203,8 @@ class FlexibleKnowledge:
             if c.id == card_id:
                 self._unsync_card_index(card_id)
                 self.cards.pop(i)
+                if self._db:
+                    self._db.delete(card_id)
                 return True
         return False
 
@@ -176,6 +224,18 @@ class FlexibleKnowledge:
                 if comment is not None:
                     c.comment = comment
                 c.updated_at = _now()
+                if self._db:
+                    fields = {}
+                    if new_content is not None:
+                        fields["content"] = new_content
+                    if usefulness is not None:
+                        fields["usefulness"] = usefulness
+                    if misleading is not None:
+                        fields["misleading"] = misleading
+                    if comment is not None:
+                        fields["comment"] = comment
+                    if fields:
+                        self._db.update(card_id, **fields)
                 return c
         return None
 
