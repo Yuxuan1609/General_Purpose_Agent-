@@ -41,7 +41,8 @@
 |----------|------|------|-----------|---------|
 | `DomainRetrieveResult` | `@dataclass(path, depth, correlation, primary_count, explore_count, total_count)` | 单域名检索结果容器 | DomainRegistry.retrieve_from_root() | Executor, L2Manager |
 | `DomainNode` | `@dataclass(path, parent, description, correlations, relations)` | 领域树节点 | DomainRegistry | — |
-| `DomainRegistry` | `__init__(nodes, embedding_model_path=None)` | 领域注册中心，管理 domain tree + reverse index + embedding | build_chain, seed_knowledge | — |
+| `DomainRegistry` | `__init__(nodes, embedding_model_path=None, db_path=None)` | 领域注册中心，管理 domain tree + reverse index + embedding（可选 SQLite 后端） | build_chain, seed_knowledge | DomainSQLiteStore (if db_path) |
+| `DomainRegistry._load_from_db` | `() → None` | 从 SQLite 加载 nodes + reverse_index 到内存 | __init__ | DomainSQLiteStore.list_nodes(), get_all_index() |
 | `DomainRegistry.get_node` | `(path) → DomainNode\|None` | 按路径查找节点 | L2Agent, Executor | — |
 | `DomainRegistry.list_all` | `() → list[DomainNode]` | 列出所有节点 | — | — |
 | `DomainRegistry.children_of` | `(path) → list[DomainNode]` | 获取直接子节点 | — | — |
@@ -49,7 +50,7 @@
 | `DomainRegistry.get_explore_items` | `(layer, domain, threshold=0.5) → list[str]` | 按关联权重阈值获取相邻 domain 的项 ID | L2Manager, Executor | — |
 | `DomainRegistry.get_items_for_domains` | `(layer, domains) → list[str]` | 批量获取多个 domain 的项 ID（去重） | L2Manager, Executor | — |
 | `DomainRegistry.retrieve_from_root` | `(root_path, layer, depth, correlation_threshold) → list[DomainRetrieveResult]` | 从 root 递归检索子孙邻域及自身项 | L2Manager | get_primary_items, get_explore_items, children_of |
-| `DomainRegistry.save` | `(filepath) → None` | 原子持久化 nodes + reverse_index 到 JSON | seed_knowledge | — |
+| `DomainRegistry.save` | `(filepath) → None` | 原子持久化 nodes + reverse_index 到 JSON（db_path 激活时为 no-op） | seed_knowledge | — |
 | `DomainRegistry.load` | `(filepath) → DomainRegistry` | 从 JSON 加载注册中心 | build_chain | — |
 
 ## core/types.py (NEW in Phase 1)
@@ -248,6 +249,38 @@
 | `L2SQLiteStore.list_by_domain` | `(domain) → list[dict]` | 按 available_domains 模糊匹配 | — | — |
 | `L2SQLiteStore.close` | `() → None` | 关闭连接 | — | — |
 
+## core/storage/l3_store.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `L3SQLiteStore` | `__init__(db_path)` | SQLite WAL 模式存储 L3 技能（含 SKILL.md 内容） | SkillLayer | sqlite3 |
+| `L3SQLiteStore.insert` | `(skill: dict) → None` | 插入或替换一个技能 | SkillLayer.create_skill | — |
+| `L3SQLiteStore.update` | `(name, **fields) → bool` | 按字段更新技能 | SkillLayer.edit_skill | — |
+| `L3SQLiteStore.delete` | `(name) → bool` | 删除技能 | SkillLayer.delete_skill | — |
+| `L3SQLiteStore.get` | `(name) → dict\|None` | 按 name 获取单个技能 | — | — |
+| `L3SQLiteStore.list_all` | `() → list[dict]` | 返回全部技能 | SkillLayer._load_from_db | — |
+| `L3SQLiteStore.list_by_domain` | `(domain) → list[dict]` | 按 available_domains 模糊匹配 | — | — |
+| `L3SQLiteStore.count` | `() → int` | 返回技能总数 | — | — |
+| `L3SQLiteStore.close` | `() → None` | 关闭连接 | — | — |
+
+## core/storage/domain_store.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `DomainSQLiteStore` | `__init__(db_path)` | SQLite WAL 模式存储 DomainRegistry nodes + reverse_index | DomainRegistry | sqlite3 |
+| `DomainSQLiteStore.insert_node` | `(node: dict) → None` | 插入或替换一个 domain 节点 | DomainRegistry.add_node | — |
+| `DomainSQLiteStore.update_node` | `(path, **fields) → bool` | 按字段更新节点 | DomainRegistry.update_correlation, compute_embedding, merge_domain | — |
+| `DomainSQLiteStore.delete_node` | `(path) → bool` | 删除节点 | DomainRegistry._remove_domain, deprecate_domain | — |
+| `DomainSQLiteStore.get_node` | `(path) → dict\|None` | 按 path 获取单个节点 | — | — |
+| `DomainSQLiteStore.list_nodes` | `() → list[dict]` | 返回全部节点 | DomainRegistry._load_from_db | — |
+| `DomainSQLiteStore.index_item` | `(layer, domain, item_id) → None` | 插入反向索引条目 | DomainRegistry.index_item, merge_domain | — |
+| `DomainSQLiteStore.unindex_item` | `(layer, domain, item_id) → None` | 删除单条反向索引 | DomainRegistry.unindex_item, update_item_domains | — |
+| `DomainSQLiteStore.unindex_domain` | `(layer, domain) → None` | 删除某 domain 全部反向索引 | DomainRegistry._remove_domain, deprecate_domain | — |
+| `DomainSQLiteStore.get_items` | `(layer, domain) → list[str]` | 获取某 layer+domain 的 item_id 列表 | — | — |
+| `DomainSQLiteStore.get_all_index` | `() → dict` | 返回完整反向索引结构 | DomainRegistry._load_from_db | — |
+| `DomainSQLiteStore.count` | `() → int` | 返回节点总数 | — | — |
+| `DomainSQLiteStore.close` | `() → None` | 关闭连接 | — | — |
+
 ## core/knowledge/knowledge_base.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
@@ -306,11 +339,12 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `SkillLayer` | `__init__(skills_dir, tool_registry)` | L3 技能管理 | L3Manager | — |
+| `SkillLayer` | `__init__(skills_dir, domain_registry=None, db_path=None)` | L3 技能管理（可选 SQLite 后端） | L3Manager | L3SQLiteStore (if db_path) |
+| `SkillLayer._load_from_db` | `() → None` | 从 SQLite 加载全部技能为内存对象 | __init__ | L3SQLiteStore.list_all() |
 | `SkillLayer.match` | `(domain) → list[SkillMeta]` | 按 domain 匹配技能 | L3Manager.query() | — |
-| `SkillLayer.create_skill` | `(name, content, domain, ...) → SkillMeta` | 创建新技能 | L3Manager | 写 SKILL.md |
-| `SkillLayer.edit_skill` | `(name, new_content) → SkillMeta` | 更新技能内容 | L3Manager | 写 SKILL.md |
-| `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive） | L3Manager | — |
+| `SkillLayer.create_skill` | `(name, content, domain, ...) → SkillMeta` | 创建新技能（内存 + SQLite） | L3Manager | L3SQLiteStore.insert() |
+| `SkillLayer.edit_skill` | `(name, new_content, usefulness, misleading, comment) → SkillMeta` | 更新技能内容/质量字段（内存 + SQLite） | L3Manager | L3SQLiteStore.update() |
+| `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive + SQLite） | L3Manager | L3SQLiteStore.delete() |
 | `SkillLayer.touch_skill` | `(name) → None` | 标记技能最近使用（更新 last_used） | L3Manager.query() | — |
 | `SkillLayer.should_create_skill` | `(domain, cards) → bool` | 检查 L2→L3 编译条件 | Phase 2: Reflect | — |
 | `SkillLayer.propose_and_create` | `(domain, cards, llm) → SkillMeta\|None` | LLM 编译知识卡片为 SKILL.md | Phase 2: Reflect | — |

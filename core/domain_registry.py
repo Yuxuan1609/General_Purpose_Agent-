@@ -36,12 +36,30 @@ class DomainNode:
 
 class DomainRegistry:
     def __init__(self, nodes: dict[str, DomainNode] | None = None,
-                 embedding_model_path: str | None = None):
+                 embedding_model_path: str | None = None,
+                 db_path: Path | str | None = None):
         self._nodes: dict[str, DomainNode] = nodes or {}
         self._reverse_index: dict[str, dict[str, list[str]]] = {
             "l2": {}, "l3": {}, "tool": {},
         }
         self._embedding_model_path = embedding_model_path
+        self._db = None
+        if db_path:
+            from core.storage.domain_store import DomainSQLiteStore
+            self._db = DomainSQLiteStore(db_path)
+            self._load_from_db()
+
+    def _load_from_db(self):
+        for n in self._db.list_nodes():
+            self._nodes[n["path"]] = DomainNode(
+                path=n["path"],
+                parent=n.get("parent"),
+                description=n.get("description", ""),
+                correlations=n.get("correlations", {}),
+                relations=n.get("relations", ""),
+                embedding_vector=n.get("embedding_vector"),
+            )
+        self._reverse_index = self._db.get_all_index()
 
     def get_node(self, path: str) -> DomainNode | None:
         return self._nodes.get(path)
@@ -59,12 +77,16 @@ class DomainRegistry:
         lst = idx.setdefault(domain, [])
         if item_id not in lst:
             lst.append(item_id)
+        if self._db:
+            self._db.index_item(layer, domain, item_id)
 
     def unindex_item(self, layer: str, domain: str, item_id: str) -> None:
         idx = self._reverse_index.get(layer, {})
         lst = idx.get(domain, [])
         if item_id in lst:
             lst.remove(item_id)
+        if self._db:
+            self._db.unindex_item(layer, domain, item_id)
 
     def update_item_domains(self, layer: str, item_id: str,
                             domains: list[str]) -> None:
@@ -72,6 +94,8 @@ class DomainRegistry:
         for d, lst in idx.items():
             if item_id in lst:
                 lst.remove(item_id)
+                if self._db:
+                    self._db.unindex_item(layer, d, item_id)
         for d in domains:
             self.index_item(layer, d, item_id)
 
@@ -86,15 +110,27 @@ class DomainRegistry:
             correlations=correlations or {}, relations=relations,
         )
         self._nodes[path] = node
+        if self._db:
+            self._db.insert_node({
+                "path": path,
+                "parent": parent,
+                "description": description,
+                "correlations": correlations or {},
+                "relations": relations,
+            })
         return node
 
     def update_correlation(self, a: str, b: str, weight: float) -> None:
         node_a = self._nodes.get(a)
         if node_a:
             node_a.correlations[b] = weight
+            if self._db:
+                self._db.update_node(a, correlations=node_a.correlations)
         node_b = self._nodes.get(b)
         if node_b:
             node_b.correlations[a] = weight
+            if self._db:
+                self._db.update_node(b, correlations=node_b.correlations)
 
     def update_node(self, path: str, **fields) -> DomainNode | None:
         node = self._nodes.get(path)
@@ -103,6 +139,8 @@ class DomainRegistry:
         for key, val in fields.items():
             if hasattr(node, key):
                 object.__setattr__(node, key, val)
+        if self._db and fields:
+            self._db.update_node(path, **fields)
         return node
 
     def get_primary_items(self, layer: str, domain: str) -> list[str]:
@@ -160,6 +198,8 @@ class DomainRegistry:
             import numpy as np
             vec = model.batchtransform([text])[0]
             node.embedding_vector = vec.tolist()
+            if self._db:
+                self._db.update_node(path, embedding_vector=node.embedding_vector)
             return True
         except Exception:
             return False
@@ -219,7 +259,11 @@ class DomainRegistry:
     def _remove_domain(self, path: str) -> None:
         for layer in ("l2", "l3", "tool"):
             self._reverse_index.get(layer, {}).pop(path, None)
+            if self._db:
+                self._db.unindex_domain(layer, path)
         self._nodes.pop(path, None)
+        if self._db:
+            self._db.delete_node(path)
 
     def deprecate_domain(self, path: str) -> None:
         node = self._nodes.get(path)
@@ -247,7 +291,11 @@ class DomainRegistry:
 
         for layer in ("l2", "l3", "tool"):
             self._reverse_index.get(layer, {}).pop(path, None)
+            if self._db:
+                self._db.unindex_domain(layer, path)
         self._nodes.pop(path, None)
+        if self._db:
+            self._db.delete_node(path)
 
     def merge_domain(self, source: str, target: str,
                      content_getter=None) -> dict:
@@ -268,6 +316,8 @@ class DomainRegistry:
                 if item_id not in target_items:
                     target_items.append(item_id)
                     moved += 1
+                    if self._db:
+                        self._db.index_item(layer, target, item_id)
 
         for k, v in source_node.correlations.items():
             if k in target_node.correlations:
@@ -281,6 +331,11 @@ class DomainRegistry:
             if source in n.correlations:
                 v = n.correlations.pop(source)
                 n.correlations[target] = max(n.correlations.get(target, 0), v)
+                if self._db:
+                    self._db.update_node(n.path, correlations=n.correlations)
+
+        if self._db:
+            self._db.update_node(target, correlations=target_node.correlations)
 
         self._remove_domain(source)
 
@@ -290,6 +345,8 @@ class DomainRegistry:
         return {"moved_items": moved}
 
     def save(self, filepath: Path) -> None:
+        if self._db:
+            return
         import json
         import tempfile
         data = {
