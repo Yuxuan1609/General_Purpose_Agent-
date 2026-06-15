@@ -96,6 +96,13 @@ class L2Agent(LayerAgent):
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["card_id", "reason"], "additionalProperties": False},
         }},
+        {"type": "function", "function": {
+            "name": "query_domain",
+            "description": "List all L2 cards and L3 skills in a domain. Use to inspect domain contents before splitting or merging.",
+            "parameters": {"type": "object", "properties": {
+                "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
+            }, "required": ["domain"], "additionalProperties": False},
+        }},
     ]
 
     def _setup_l2_consolidation(self):
@@ -111,26 +118,49 @@ class L2Agent(LayerAgent):
         def create_l2_card(args: dict) -> str:
             agent._pending_mods.append({
                 "type": "create", "target": "", "layer": "l2",
-                "content": args["content"], "domain": args["domain"],
                 "reason": args["reason"],
+                "payload": {
+                    "content": args["content"],
+                    "domain": args.get("domain", "general"),
+                },
             })
             return f"已记录: 创建新卡片"
 
         def modify_l2_card(args: dict) -> str:
-            mod = {"type": "update", "target": args["card_id"], "layer": "l2",
-                   "content": args.get("content", ""), "reason": args["reason"]}
+            payload = {"content": args.get("content", "")}
             if "domain" in args and args["domain"]:
-                mod["domain"] = args["domain"]
+                payload["domain"] = args["domain"]
             if "usefulness" in args:
-                mod["usefulness"] = args["usefulness"]
+                payload["usefulness"] = args["usefulness"]
             if "misleading" in args:
-                mod["misleading"] = args["misleading"]
+                payload["misleading"] = args["misleading"]
             if "comment" in args:
-                mod["comment"] = args["comment"]
-            agent._pending_mods.append(mod)
+                payload["comment"] = args["comment"]
+            agent._pending_mods.append({
+                "type": "update", "target": args["card_id"], "layer": "l2",
+                "reason": args["reason"], "payload": payload,
+            })
             return f"已记录: 修改 {args['card_id']}"
 
+        def query_domain(args: dict) -> str:
+            domain = args["domain"]
+            if agent._registry is None:
+                return json.dumps({"error": "DomainRegistry not connected"})
+            l2_ids = set(agent._registry._reverse_index.get("l2", {}).get(domain, []))
+            l3_ids = set(agent._registry._reverse_index.get("l3", {}).get(domain, []))
+            cards = []
+            for c in agent._knowledge.cards:
+                if c.id in l2_ids:
+                    cards.append({"id": c.id, "content": c.content[:150],
+                                  "usefulness": c.usefulness, "last_used": str(c.last_used.isoformat())[:10]})
+            skills = []
+            if l3_ids:
+                skills = [{"name": n} for n in l3_ids]
+            return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
+                              ensure_ascii=False, default=str)
+
         self._injector = DictInjector({
+            "query_domain": query_domain,
             "deprecate_l2_card": deprecate_l2_card,
             "create_l2_card": create_l2_card,
             "modify_l2_card": modify_l2_card,

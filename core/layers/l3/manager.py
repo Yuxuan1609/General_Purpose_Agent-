@@ -79,6 +79,13 @@ class L3Agent(LayerAgent):
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["skill_name", "reason"], "additionalProperties": False},
         }},
+        {"type": "function", "function": {
+            "name": "query_domain",
+            "description": "List all L2 cards and L3 skills in a domain. Use to inspect domain contents before splitting or merging.",
+            "parameters": {"type": "object", "properties": {
+                "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
+            }, "required": ["domain"], "additionalProperties": False},
+        }},
     ]
 
     def _setup_l3_consolidation(self):
@@ -94,33 +101,62 @@ class L3Agent(LayerAgent):
         def create_l3_skill(args: dict) -> str:
             agent._pending_mods.append({
                 "type": "create", "target": args["name"], "layer": "l3",
-                "content": args["content"], "domain": args["domain"],
                 "reason": args["reason"],
+                "payload": {
+                    "content": args["content"],
+                    "domain": args.get("domain", "general"),
+                },
             })
             return f"已记录: 创建 {args['name']}"
 
         def modify_l3_skill(args: dict) -> str:
-            mod = {"type": "update", "target": args["skill_name"], "layer": "l3",
-                   "content": args.get("content", ""), "reason": args["reason"]}
+            payload = {"content": args.get("content", "")}
             if "domain" in args and args["domain"]:
-                mod["domain"] = args["domain"]
+                payload["domain"] = args["domain"]
             if "usefulness" in args:
-                mod["usefulness"] = args["usefulness"]
+                payload["usefulness"] = args["usefulness"]
             if "misleading" in args:
-                mod["misleading"] = args["misleading"]
+                payload["misleading"] = args["misleading"]
             if "comment" in args:
-                mod["comment"] = args["comment"]
-            agent._pending_mods.append(mod)
+                payload["comment"] = args["comment"]
+            agent._pending_mods.append({
+                "type": "update", "target": args["skill_name"], "layer": "l3",
+                "reason": args["reason"], "payload": payload,
+            })
             return f"已记录: 修改 {args['skill_name']}"
 
+        def query_domain(args: dict) -> str:
+            domain = args["domain"]
+            if agent._registry is None:
+                return json.dumps({"error": "DomainRegistry not connected"})
+            l2_ids = set(agent._registry._reverse_index.get("l2", {}).get(domain, []))
+            l3_ids = set(agent._registry._reverse_index.get("l3", {}).get(domain, []))
+            cards = []
+            if l2_ids:
+                cards = [{"id": i} for i in l2_ids]
+            skills = []
+            for name in l3_ids:
+                if agent._skill_layer:
+                    m = agent._skill_layer._skills.get(name)
+                    if m:
+                        skills.append({"name": m.name, "description": m.description[:150],
+                                       "usefulness": m.usefulness, "last_used": str(m.last_used.isoformat())[:10]})
+                else:
+                    skills.append({"name": name})
+            return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
+                              ensure_ascii=False, default=str)
+
         self._injector = DictInjector({
+            "query_domain": query_domain,
             "deprecate_l3_skill": deprecate_l3_skill,
             "create_l3_skill": create_l3_skill,
             "modify_l3_skill": modify_l3_skill,
         })
 
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, skill_layer=None, domain_registry=None):
         super().__init__(llm_client, logger)
+        self._skill_layer = skill_layer
+        self._registry = domain_registry
 
     def _build_system_prompt(self, instruction: str, meta: str) -> str:
         return (
@@ -293,7 +329,7 @@ class L3Manager(LayerManager):
                  domain_registry=None, max_rounds=3):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
-        self._agent = L3Agent(auxiliary_llm) if auxiliary_llm else None
+        self._agent = L3Agent(auxiliary_llm, skill_layer=skill_layer, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
         self.max_rounds = max_rounds
         self._matched: list[str] = []

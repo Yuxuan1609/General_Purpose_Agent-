@@ -218,20 +218,23 @@ class L1Agent(LayerAgent):
         def create_l1_rule(args: dict) -> str:
             agent._pending_mods.append({
                 "type": "create", "target": "", "layer": "l1",
-                "content": args["content"], "reason": args["reason"],
+                "reason": args["reason"],
+                "payload": {"content": args["content"]},
             })
             return f"已记录: 创建新规则"
 
         def modify_l1_rule(args: dict) -> str:
-            mod = {"type": "update", "target": args["rule_id"], "layer": "l1",
-                   "content": args["content"], "reason": args["reason"]}
+            payload = {"content": args.get("content", "")}
             if "usefulness" in args:
-                mod["usefulness"] = args["usefulness"]
+                payload["usefulness"] = args["usefulness"]
             if "misleading" in args:
-                mod["misleading"] = args["misleading"]
+                payload["misleading"] = args["misleading"]
             if "comment" in args:
-                mod["comment"] = args["comment"]
-            agent._pending_mods.append(mod)
+                payload["comment"] = args["comment"]
+            agent._pending_mods.append({
+                "type": "update", "target": args["rule_id"], "layer": "l1",
+                "reason": args["reason"], "payload": payload,
+            })
             return f"已记录: 修改 {args['rule_id']}"
 
         self._injector = DictInjector({
@@ -370,6 +373,7 @@ class L1Agent(LayerAgent):
         user = "\n\n".join(user_parts)
 
         if l1_fmt:
+            _saved_injector = self._injector
             self._setup_l1_consolidation()
             report_tool = self._schema_to_tool(
                 "l1_report",
@@ -395,6 +399,7 @@ class L1Agent(LayerAgent):
                 "reasoning": result.get("reasoning", ""),
                 "queries": [],
             }
+            self._injector = _saved_injector
             return result
 
         # Normal mode: two capture tools
