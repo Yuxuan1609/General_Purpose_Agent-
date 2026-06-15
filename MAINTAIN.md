@@ -499,3 +499,61 @@
 **当前结论**：
 1. **多 Agent 实例并行** → SQLite 解决底层文件读写一致性（KB 本身基于 SQLite）。Python 多实例内存隔离默认。
 2. **单实例内 sub-agent/tool 调度** → 手写方案，借鉴 OpenClaw lane 模型：进程内 FIFO 队列 + 每 lane 独立并发上限 + 文件锁。不引入 Redis/Celery。
+
+---
+
+## DomainRegistry — Domain Management V2
+
+### DomainRegistry (core/domain_registry.py)
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `compute_embedding` | `(path, content_getter) -> bool` | Compute and cache embedding vector for a domain using HFVectors + embeddinggemma |
+| `compute_correlation` | `(a, b) -> float` | 50% embedding cosine + 50% reverse_index Jaccard, returns [0,1] |
+| `refresh_embeddings_for` | `(domains, content_getter) -> int` | Recompute embeddings for given domains, returns count |
+| `compute_all_correlations` | `() -> int` | Recompute all domain pair correlations, returns count |
+| `deprecate_domain` | `(path) -> None` | Remove domain node, raises if orphaned L2/L3 items exist |
+| `merge_domain` | `(source, target, content_getter) -> dict` | Move items + merge correlations + deprecate source, auto-embeds target |
+| `_remove_domain` | `(path) -> None` | Internal: remove domain without orphan check (used by merge) |
+
+### DomainNode
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `embedding_vector` | `list[float] \| None` | Cached embeddinggemma vector, persisted to JSON |
+
+### SkillLayer (core/skill_layer.py)
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `touch_skill` | `(name) -> None` | Mark skill as recently used (sets last_used) |
+
+### SkillMeta — new time fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `created_at` | `datetime` | When skill was created |
+| `updated_at` | `datetime` | Last content update |
+| `last_used` | `datetime` | Last time skill was matched |
+
+### KnowledgeDoc — new time field
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `last_used` | `str` | ISO timestamp of last KB query hit |
+
+### Consolidation Tools (L1 DictInjector)
+
+| Tool | Description |
+|------|-------------|
+| `query_domain` | List L2 cards + L3 skills in a domain |
+| `deprecate_domain` | Remove domain (fails if orphaned items) |
+| `merge_domain` | Merge source→target: move items, merge correlations, deprecate source |
+| `create_domain` (enhanced) | Create domain + must provide initial_cards or initial_skills |
+
+### Modify Tools (L2/L3)
+
+| Field | Description |
+|-------|-------------|
+| `domain` (modify_l2_card) | Change card's domain assignment |
+| `domain` (modify_l3_skill) | Change skill's domain assignment |
