@@ -134,17 +134,18 @@ class DomainRegistry:
         if not text.strip():
             return False
 
-        if self._embedding_model_path is None:
-            return False
-
         try:
-            from vendor.txtai_core.embeddings import HFVectors
-            model = HFVectors(self._embedding_model_path)
-            vec = model.encode(text)[0]
+            from core.knowledge.models import _get_tokenizer
+            tokenizer = _get_tokenizer()
+            token_ids = tokenizer.encode(text)[:8192]
             import numpy as np
-            v = np.array(vec)
-            v = v / (np.linalg.norm(v) + 1e-8)
-            node.embedding_vector = v.tolist()
+            vec = np.zeros(768, dtype=np.float32)
+            for tid in token_ids:
+                vec[tid % 768] += 1.0
+            norm = np.linalg.norm(vec)
+            if norm > 0:
+                vec /= norm
+            node.embedding_vector = vec.tolist()
             return True
         except Exception:
             return False
@@ -185,13 +186,18 @@ class DomainRegistry:
         return count
 
     def compute_all_correlations(self) -> int:
+        """Recompute all domain-to-domain correlations.
+        Preserves existing correlations when computed value is 0.0
+        (empty domains with no content to compare).
+        """
         paths = list(self._nodes.keys())
         count = 0
         for i, a in enumerate(paths):
             for b in paths[i+1:]:
                 corr = self.compute_correlation(a, b)
-                self.update_correlation(a, b, corr)
-                count += 1
+                if corr > 0.0 or self._nodes[a].correlations.get(b) or self._nodes[b].correlations.get(a):
+                    self.update_correlation(a, b, corr)
+                    count += 1
         return count
 
     # ── deprecate & merge ──

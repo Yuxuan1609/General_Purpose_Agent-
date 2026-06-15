@@ -7,12 +7,14 @@ from core.task import Domain
 logger = logging.getLogger(__name__)
 
 
-def init_registry(registry_path: Path) -> "DomainRegistry":
+def init_registry(registry_path: Path, embedding_model_path: str | None = None) -> "DomainRegistry":
     from core.domain_registry import DomainRegistry
     reg = DomainRegistry.load(registry_path)
     if len(reg) == 0:
         reg = _seed_domain_nodes()
         reg.save(registry_path)
+    if embedding_model_path:
+        reg._embedding_model_path = embedding_model_path
     return reg
 
 

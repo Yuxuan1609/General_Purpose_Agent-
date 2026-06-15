@@ -311,6 +311,29 @@ class LearningEnv(Environment):
 
         if not self._dry_run:
             self._save_stats()
+            # Auto-refresh domain embeddings + correlations after learning round
+            if self._registry:
+                affected: set[str] = set()
+                for layer_key in ("l1", "l2", "l3"):
+                    for mod in parsed.get(f"{layer_key}_modifications", []):
+                        domain = mod.get("domain")
+                        if domain:
+                            affected.add(domain)
+                        # Also collect domains from create_target
+                        target = mod.get("target")
+                        if target and "/" in str(target):
+                            affected.add(str(target).split("/", 1)[0])
+                if affected:
+                    l2 = self._knowledge.get("l2")
+                    l3 = self._knowledge.get("l3")
+                    def _getter(layer, d):
+                        if layer == "l2" and l2:
+                            return [c.content for c in l2.cards if d in c.available_domains]
+                        if layer == "l3" and l3:
+                            return [m.description for n, m in l3._skills.items() if d in m.available_domains]
+                        return []
+                    self._registry.refresh_embeddings_for(list(affected), content_getter=_getter)
+                    self._registry.compute_all_correlations()
         self._step_count += 1
         self._done = True
 

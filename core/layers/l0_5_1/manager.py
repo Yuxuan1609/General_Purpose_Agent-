@@ -30,28 +30,54 @@ class L1Agent(LayerAgent):
     _L1_CONSOLIDATION_TOOLS: list[dict] = [
         {"type": "function", "function": {
             "name": "create_domain",
-            "description": "Create a new domain node in the domain registry. "
-                           "Use when encountering a task in an unregistered domain — "
-                           "register it so L2/L3 can build knowledge cards and skills for it.",
+            "description": "Create a new domain. Must provide at least one L2 card or L3 skill as initial content — empty domains are not allowed.",
             "parameters": {"type": "object", "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Domain path, e.g. 'interaction' or 'game/mahjong'. "
-                                   "Use '/' to nest under parent.",
+                "path": {"type": "string", "description": "Domain path, e.g. 'interaction'"},
+                "parent": {"type": "string", "description": "Parent domain. Default: 'general'."},
+                "description": {"type": "string", "description": "Brief description (1-2 sentences)"},
+                "relations": {"type": "string", "description": "Related domains or notes. Optional."},
+                "initial_cards": {
+                    "type": "array", "items": {
+                        "type": "object", "properties": {
+                            "content": {"type": "string"},
+                        }, "required": ["content"]
+                    },
+                    "description": "Initial L2 knowledge cards for this domain"
                 },
-                "parent": {
-                    "type": "string",
-                    "description": "Parent domain path. Default: 'general'.",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Brief description (1-2 sentences, what kind of tasks it covers)",
-                },
-                "relations": {
-                    "type": "string",
-                    "description": "Related domains or notes. Optional.",
+                "initial_skills": {
+                    "type": "array", "items": {
+                        "type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "content": {"type": "string"},
+                        }, "required": ["name", "content"]
+                    },
+                    "description": "Initial L3 skills for this domain"
                 },
             }, "required": ["path", "description"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "query_domain",
+            "description": "List all L2 cards and L3 skills in a domain. Use to inspect domain contents before splitting or merging.",
+            "parameters": {"type": "object", "properties": {
+                "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
+            }, "required": ["domain"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "deprecate_domain",
+            "description": "Remove a domain. Before calling, ensure all L2/L3 items have been migrated to other domains. Will fail if items still reference ONLY this domain.",
+            "parameters": {"type": "object", "properties": {
+                "domain": {"type": "string", "description": "Domain path to deprecate"},
+                "reason": {"type": "string", "description": "Why this domain is being removed"},
+            }, "required": ["domain", "reason"], "additionalProperties": False},
+        }},
+        {"type": "function", "function": {
+            "name": "merge_domain",
+            "description": "Merge source domain into target: moves all items, merges correlations, deprecates source. One-click operation — Agent only provides two domain names.",
+            "parameters": {"type": "object", "properties": {
+                "source": {"type": "string", "description": "Domain to merge FROM (will be removed)"},
+                "target": {"type": "string", "description": "Domain to merge INTO (survives)"},
+                "reason": {"type": "string", "description": "Why merging"},
+            }, "required": ["source", "target", "reason"], "additionalProperties": False},
         }},
         {"type": "function", "function": {
             "name": "deprecate_l1_rule",
@@ -87,20 +113,97 @@ class L1Agent(LayerAgent):
         """Wire DictInjector for L1 consolidation tools."""
         agent = self
 
+        def _getter(layer, domain):
+            if layer == "l2" and agent._l2_store:
+                return [c.content for c in agent._l2_store.cards
+                        if domain in c.available_domains]
+            if layer == "l3" and agent._l3_store:
+                return [m.description for n, m in agent._l3_store._skills.items()
+                        if domain in m.available_domains]
+            return []
+
+        def query_domain(args: dict) -> str:
+            domain = args["domain"]
+            if agent._registry is None:
+                return json.dumps({"error": "DomainRegistry not connected"})
+            l2_ids = set(agent._registry._reverse_index.get("l2", {}).get(domain, []))
+            l3_ids = set(agent._registry._reverse_index.get("l3", {}).get(domain, []))
+            cards = []
+            if agent._l2_store:
+                for c in agent._l2_store.cards:
+                    if c.id in l2_ids:
+                        cards.append({"id": c.id, "content": c.content[:150],
+                                      "usefulness": c.usefulness, "last_used": str(c.last_used.isoformat())[:10]})
+            skills = []
+            if agent._l3_store:
+                for name, m in agent._l3_store._skills.items():
+                    if name in l3_ids:
+                        skills.append({"name": name, "description": m.description[:150],
+                                       "usefulness": m.usefulness, "last_used": str(m.last_used.isoformat())[:10]})
+            return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
+                              ensure_ascii=False, default=str)
+
+        def deprecate_domain(args: dict) -> str:
+            domain = args["domain"]
+            if agent._registry is None:
+                return json.dumps({"error": "DomainRegistry not connected"})
+            try:
+                agent._registry.deprecate_domain(domain)
+                return json.dumps({"success": True, "message": f"Domain '{domain}' removed"})
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+
+        def merge_domain(args: dict) -> str:
+            source = args["source"]
+            target = args["target"]
+            if agent._registry is None:
+                return json.dumps({"error": "DomainRegistry not connected"})
+            try:
+                result = agent._registry.merge_domain(source, target, content_getter=_getter)
+                return json.dumps({"success": True, "message": f"Merged '{source}' → '{target}', {result['moved_items']} items moved"})
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+
         def create_domain(args: dict) -> str:
             path = args.get("path", "")
             parent = args.get("parent", "general")
             description = args.get("description", "")
             relations = args.get("relations", "")
+            initial_cards = args.get("initial_cards", [])
+            initial_skills = args.get("initial_skills", [])
             if not path or not description:
                 return json.dumps({"error": "path and description are required"})
+            if not initial_cards and not initial_skills:
+                return json.dumps({"error": "Domain must have at least one initial card or skill. Empty domains are not allowed."})
             if agent._registry is None:
                 return json.dumps({"error": "DomainRegistry not connected"})
             try:
                 agent._registry.add_node(path, parent, description, {}, relations)
+                created_cards = 0
+                if agent._l2_store:
+                    from core.task import Domain
+                    for card_data in initial_cards:
+                        agent._l2_store.add_card(
+                            content=card_data["content"],
+                            domain=Domain(path, "specific"),
+                            source="learning_env",
+                        )
+                        created_cards += 1
+                created_skills = 0
+                if agent._l3_store:
+                    from core.task import Domain
+                    for skill_data in initial_skills:
+                        agent._l3_store.create_skill(
+                            name=skill_data["name"],
+                            content=skill_data["content"],
+                            domain=Domain(path, "specific"),
+                            created_by="learning_env",
+                        )
+                        created_skills += 1
+                agent._registry.compute_embedding(path, content_getter=_getter)
                 return json.dumps({
                     "success": True,
-                    "message": f"Domain '{path}' created under '{parent}'",
+                    "message": f"Domain '{path}' created under '{parent}'. Cards: {created_cards}, Skills: {created_skills}",
                 }, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"error": str(e)})
@@ -133,15 +236,22 @@ class L1Agent(LayerAgent):
 
         self._injector = DictInjector({
             "create_domain": create_domain,
+            "query_domain": query_domain,
+            "deprecate_domain": deprecate_domain,
+            "merge_domain": merge_domain,
             "deprecate_l1_rule": deprecate_l1_rule,
             "create_l1_rule": create_l1_rule,
             "modify_l1_rule": modify_l1_rule,
         })
 
-    def __init__(self, llm_client, philosophy, domain_registry=None):
+    def __init__(self, llm_client, philosophy, domain_registry=None,
+                 knowledge_stores: dict | None = None):
         super().__init__(llm_client, logger)
         self._philosophy = philosophy
         self._registry = domain_registry
+        stores = knowledge_stores or {}
+        self._l2_store = stores.get("l2")
+        self._l3_store = stores.get("l3")
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
@@ -350,11 +460,13 @@ class L0_5_1Manager(LayerManager):
     def __init__(self, meta_driver, philosophy, auxiliary_llm=None,
                  downstream: LayerManager | None = None,
                  upward=None, downward=None,
-                 domain_registry=None, max_rounds=3):
+                 domain_registry=None, max_rounds=3,
+                 knowledge_stores: dict | None = None):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._meta = meta_driver
         self._philosophy = philosophy
-        self._agent = L1Agent(auxiliary_llm, philosophy, domain_registry) if auxiliary_llm else None
+        self._agent = L1Agent(auxiliary_llm, philosophy, domain_registry,
+                              knowledge_stores=knowledge_stores) if auxiliary_llm else None
         self._registry = domain_registry
         self.max_rounds = max_rounds
         self._l1_notify: dict | None = None

@@ -148,7 +148,18 @@ class SkillLayer:
         skill_file = skill_dir / "SKILL.md"
 
         if new_content is not None:
-            # Content provided: write file, re-parse, then apply quality fields
+            if new_content.startswith("---"):
+                nc_parts = new_content.split("---", 2)
+                if len(nc_parts) >= 3:
+                    try:
+                        nc_fm = yaml.safe_load(nc_parts[1])
+                    except yaml.YAMLError:
+                        nc_fm = {}
+                    if not isinstance(nc_fm, dict):
+                        nc_fm = {}
+                    nc_fm["updated_at"] = _now().isoformat()
+                    nc_fm["last_used"] = _now().isoformat()
+                    new_content = f"---\n{yaml.dump(nc_fm, allow_unicode=True, sort_keys=False)}---{nc_parts[2]}"
             fd, tmp_path = tempfile.mkstemp(dir=skill_dir, suffix=".md")
             try:
                 with open(fd, "w", encoding="utf-8") as f:
@@ -175,6 +186,8 @@ class SkillLayer:
                         fm["misleading"] = misleading
                     if comment is not None:
                         fm["comment"] = comment
+                    fm["updated_at"] = _now().isoformat()
+                    fm["last_used"] = _now().isoformat()
                     new_body = f"---\n{yaml.dump(fm, allow_unicode=True, sort_keys=False)}---{parts[2]}"
                     fd, tmp_path = tempfile.mkstemp(dir=skill_dir, suffix=".md")
                     try:
@@ -283,7 +296,10 @@ class SkillLayer:
             if not v:
                 return _now()
             try:
-                return datetime.fromisoformat(str(v))
+                dt = datetime.fromisoformat(str(v))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
             except (ValueError, TypeError):
                 return _now()
 

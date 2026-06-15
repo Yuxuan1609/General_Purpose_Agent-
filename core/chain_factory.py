@@ -21,7 +21,8 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         data_root = Path(__file__).resolve().parent.parent
 
     from core.seed_knowledge import init_registry
-    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json")
+    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json",
+                        embedding_model_path=str(data_root / "embeddinggemma"))
 
     meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(data_root / "data" / "layers" / "l1_rules.json")
@@ -36,8 +37,16 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         from core.seed_knowledge import seed_knowledge
         seed_knowledge(fk, phil, sl, domain_registry=reg)
 
+    # Initialize domain embeddings + correlations on startup
+    getter = _make_content_getter(fk, sl)
+    for node in reg.list_all():
+        reg.compute_embedding(node.path, content_getter=getter)
+    reg.compute_all_correlations()
+    reg.save(data_root / "data" / "layers" / "domain_registry.json")
+
+    knowledge_stores = {"l2": fk, "l3": sl}
     chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm,
-                    domain_registry=reg)
+                    domain_registry=reg, knowledge_stores=knowledge_stores)
     _mount_tools(chain, data_root)
     return chain
 
@@ -70,6 +79,17 @@ def _mount_tools(chain, data_root: Path):
             logging.getLogger("chain_factory").info(
                 "[%s] tools: %s", layer.name, ", ".join(tool_names) if tool_names else "(none)"
             )
+
+
+def _make_content_getter(fk, sl):
+    def getter(layer: str, domain: str) -> list[str]:
+        if layer == "l2":
+            return [c.content for c in fk.cards if domain in c.available_domains]
+        elif layer == "l3":
+            return [m.description for n, m in sl._skills.items()
+                    if domain in m.available_domains]
+        return []
+    return getter
 
 
 def _iter_layers(root):
