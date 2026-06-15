@@ -21,8 +21,9 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         data_root = Path(__file__).resolve().parent.parent
 
     from core.seed_knowledge import init_registry
-    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json",
-                        embedding_model_path=str(data_root / "embeddinggemma"))
+    from core.domain_registry import set_embedding_model_path
+    set_embedding_model_path(str(data_root / "embeddinggemma"))
+    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json")
 
     meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(data_root / "data" / "layers" / "l1_rules.json")

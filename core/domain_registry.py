@@ -2,6 +2,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_embedding_model = None
+_embedding_model_path = None
+
+
+def _get_embedding_model():
+    global _embedding_model, _embedding_model_path
+    if _embedding_model is not None:
+        return _embedding_model
+    from vendor.txtai_core.embeddings import Embeddings
+    model_path = _embedding_model_path or "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma"
+    _embedding_model = Embeddings({
+        "path": model_path,
+        "content": "memory",
+    })
+    return _embedding_model
+
+
+def set_embedding_model_path(path: str) -> None:
+    global _embedding_model_path
+    _embedding_model_path = path
+
 
 @dataclass
 class DomainNode:
@@ -135,16 +156,9 @@ class DomainRegistry:
             return False
 
         try:
-            from core.knowledge.models import _get_tokenizer
-            tokenizer = _get_tokenizer()
-            token_ids = tokenizer.encode(text)[:8192]
+            model = _get_embedding_model()
             import numpy as np
-            vec = np.zeros(768, dtype=np.float32)
-            for tid in token_ids:
-                vec[tid % 768] += 1.0
-            norm = np.linalg.norm(vec)
-            if norm > 0:
-                vec /= norm
+            vec = model.batchtransform([text])[0]
             node.embedding_vector = vec.tolist()
             return True
         except Exception:
