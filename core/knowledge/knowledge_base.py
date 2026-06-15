@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from core.knowledge.models import KnowledgeDoc, KBDomain, _count_tokens, _get_tokenizer
@@ -23,11 +24,29 @@ class KnowledgeBase:
     Domain graph is maintained alongside documents.
     """
 
-    def __init__(self, storage_path: str = "data/knowledge"):
+    def __init__(self, storage_path: str = "data/knowledge",
+                 meta_db_path: Path | None = None):
         self._storage_path = storage_path
         self._emb = None
         self._docs: dict[str, KnowledgeDoc] = {}
         self._domains: dict[str, KBDomain] = {}
+        self._meta_db = None
+        if meta_db_path:
+            from core.storage.kb_store import KBSQLiteStore
+            self._meta_db = KBSQLiteStore(meta_db_path)
+            self._load_meta_from_db()
+
+    def _load_meta_from_db(self):
+        rows = self._meta_db.list_all()
+        for row in rows:
+            doc = KnowledgeDoc(
+                id=row["id"], domain=row["domain"], title=row["title"],
+                content_type=row["content_type"], source=row["source"],
+                meta=row["meta"],
+                created_at=row["created_at"], updated_at=row["updated_at"],
+                last_used=row["last_used"],
+            )
+            self._docs[doc.id] = doc
 
     def _ensure_emb(self):
         if self._emb is not None:
@@ -82,6 +101,8 @@ class KnowledgeBase:
         self._docs[doc.id] = doc
         self._ensure_domain(doc.domain)
         self._domains[doc.domain].doc_count += 1
+        if self._meta_db:
+            self._meta_db.insert(doc.to_dict())
         logger.debug("added doc %s to domain %s", doc.id, doc.domain)
         return doc.id
 
@@ -109,6 +130,8 @@ class KnowledgeBase:
             self._domains[doc.domain].doc_count = max(0, self._domains[doc.domain].doc_count - 1)
         if self._emb:
             self._emb.delete([doc_id])
+        if self._meta_db:
+            self._meta_db.delete(doc_id)
         return True
 
     def search(self, query: str, domain: str | None = None, top_k: int = 5) -> list[dict]:
@@ -162,12 +185,14 @@ class KnowledgeBase:
 
     def save(self) -> None:
         import json as _json
-        from pathlib import Path
         p = Path(self._storage_path)
         p.mkdir(parents=True, exist_ok=True)
 
         if self._emb:
             self._emb.save(str(self._storage_path))
+
+        if self._meta_db:
+            return
 
         data = {
             "docs": {did: d.to_dict() for did, d in self._docs.items()},
@@ -186,7 +211,6 @@ class KnowledgeBase:
 
     def load(self) -> None:
         import json as _json
-        from pathlib import Path
 
         p = Path(self._storage_path)
 
@@ -228,6 +252,9 @@ class KnowledgeBase:
         if self._emb:
             self._emb.close()
             self._emb = None
+        if self._meta_db:
+            self._meta_db.close()
+            self._meta_db = None
 
     def rename_domain(self, old_path: str, new_path: str) -> int:
         """Rename a domain and all its documents. Returns count of affected docs."""

@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-15 | **KB SQLite Backend**：新增 `core/storage/kb_store.py`（KBSQLiteStore），KnowledgeBase 新增 `meta_db_path` 参数，激活后 metadata 写入 SQLite 而非 kb.json。向后兼容：不传 meta_db_path 时行为不变。 |
 | 2026-06-13 | **Step 3 文档**：KB query-response 两阶段检索设计（Stage 1 txtai 粗筛 + Stage 2 Agent LLM 精排）、`knowledge_select` capture_tool、Agent while-loop 集成、推广到 L1/L2/L3 内部通信。见 `docs/superpowers/specs/2026-06-13-kb-query-response.md`。 |
 | 2026-06-13 | **Step 2 文档**：KB 维护 task 规格（cleanup/fill_gaps/link_related/dedup），触发机制，质量指标，与 Step 3 query-response 关系。见 `docs/superpowers/specs/2026-06-13-kb-maintenance-tasks.md`。 |
 | 2026-06-13 | **KB 存储合并**：`save()` 同时写入 txtai 持久化文件（config/embeddings/scoring/documents）和 `kb.json` 到同一路径；`load()` 优先从 txtai 磁盘加载，仅在缺失时重建索引。 |
@@ -281,26 +282,41 @@
 | `DomainSQLiteStore.count` | `() → int` | 返回节点总数 | — | — |
 | `DomainSQLiteStore.close` | `() → None` | 关闭连接 | — | — |
 
+## core/storage/kb_store.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `KBSQLiteStore` | `__init__(db_path)` | SQLite WAL 模式存储 KB metadata（非 txtai 内容） | KnowledgeBase | sqlite3 |
+| `KBSQLiteStore.insert` | `(doc: dict) → None` | 插入或替换一条 KB metadata | KnowledgeBase._add_single | — |
+| `KBSQLiteStore.update` | `(doc_id, **fields) → bool` | 按字段更新 metadata，自动设置 updated_at | — | — |
+| `KBSQLiteStore.delete` | `(doc_id) → bool` | 删除 metadata | KnowledgeBase.delete | — |
+| `KBSQLiteStore.get` | `(doc_id) → dict\|None` | 按 ID 获取 metadata | — | — |
+| `KBSQLiteStore.list_all` | `() → list[dict]` | 返回全部 metadata | KnowledgeBase._load_meta_from_db | — |
+| `KBSQLiteStore.list_by_domain` | `(domain) → list[dict]` | 按 domain 过滤 metadata | — | — |
+| `KBSQLiteStore.touch` | `(doc_id) → None` | 更新 last_used 时间戳 | — | — |
+| `KBSQLiteStore.close` | `() → None` | 关闭连接 | KnowledgeBase.close | — |
+
 ## core/knowledge/knowledge_base.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `KnowledgeBase` | `__init__(storage_path="data/knowledge")` | 静态知识库，BM25+embeddings 两路检索 + CRUD | scripts, KnowledgeCapability | txtai Embeddings |
+| `KnowledgeBase` | `__init__(storage_path="data/knowledge", meta_db_path=None)` | 静态知识库，BM25+embeddings 两路检索 + CRUD；可选 SQLite metadata 后端 | scripts, KnowledgeCapability | txtai Embeddings, KBSQLiteStore (if meta_db_path) |
+| `KnowledgeBase._load_meta_from_db` | `() → None` | 从 SQLite 加载 metadata 到 _docs 内存 | __init__ | KBSQLiteStore.list_all() |
 | `KnowledgeBase.add` | `(doc: KnowledgeDoc) → list[str]` | 添加文档（自动 >8192 token 分块），upsert 到 txtai | seed scripts | _chunk_and_add(), _add_single(), _ensure_domain() |
 | `KnowledgeBase.get` | `(doc_id) → KnowledgeDoc\|None` | 按 ID 获取文档 | tools.py | — |
 | `KnowledgeBase.update` | `(doc_id, **kwargs) → bool` | 更新文档字段，upsert 到 txtai | tools.py | _ensure_emb() |
-| `KnowledgeBase.delete` | `(doc_id) → bool` | 删除文档，从 txtai delete | tools.py | embeddings.delete() |
+| `KnowledgeBase.delete` | `(doc_id) → bool` | 删除文档，从 txtai delete + meta_db delete | tools.py | embeddings.delete(), KBSQLiteStore.delete() |
 | `KnowledgeBase.search` | `(query, domain=None, top_k=5) → list[dict]` | txtai embeddings+BM25 两路融合搜索，domain 过滤，返回 top_k | KnowledgeCapability, tools.py | embeddings.search() |
-| `KnowledgeBase._add_single` | `(doc: KnowledgeDoc) → str` | 单文档 upsert（去 meta.id），更新 domain 计数 | add(), load() | embeddings.upsert() |
+| `KnowledgeBase._add_single` | `(doc: KnowledgeDoc) → str` | 单文档 upsert（去 meta.id），更新 domain 计数，写入 meta_db | add(), load() | embeddings.upsert(), KBSQLiteStore.insert() |
 | `KnowledgeBase._chunk_and_add` | `(doc: KnowledgeDoc) → list[str]` | >8192 token 文档分块添加，chunk 间通过 meta.chunk_of 链接 | add() | _count_tokens(), _add_single() |
 | `KnowledgeBase._ensure_emb` | `() → None` | 懒初始化 txtai Embeddings（path=embeddinggemma, content=sqlite, keyword=bm25） | _add_single(), update(), search(), list_domains | Embeddings() |
-| `KnowledgeBase.save` | `() → None` | 持久化 txtai（config/embeddings/scoring/documents）+ kb.json 到 storage_path | scripts, CLI | embeddings.save() |
+| `KnowledgeBase.save` | `() → None` | 持久化 txtai；若 meta_db 激活则跳过 kb.json（metadata 已在 SQLite） | scripts, CLI | embeddings.save() |
 | `KnowledgeBase.load` | `() → None` | 从 disk 加载 txtai 索引 + kb.json；若无 disk 数据则从 kb.json 重建 | scripts, CLI | embeddings.load() / embeddings.upsert() |
 | `KnowledgeBase.list_domains` | `() → list[dict]` | 列出所有 domain（path/parent/description/doc_count） | tools.py | — |
 | `KnowledgeBase.get_meta` | `(doc_id) → dict\|None` | 获取文档 meta | tools.py | — |
 | `KnowledgeBase.update_meta` | `(doc_id, meta: dict) → bool` | 局部更新 meta dict | tools.py | — |
 | `KnowledgeBase.rename_domain` | `(old_path, new_path) → int` | 重命名 domain 及其文档 | tools.py | — |
-| `KnowledgeBase.close` | `() → None` | 关闭 txtai embeddings | — | embeddings.close() |
+| `KnowledgeBase.close` | `() → None` | 关闭 txtai embeddings + meta_db | — | embeddings.close(), KBSQLiteStore.close() |
 
 ### KnowledgeBase 配置（Embeddings config）
 
