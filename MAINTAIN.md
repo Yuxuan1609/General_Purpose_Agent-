@@ -295,6 +295,7 @@
 | `SkillLayer.create_skill` | `(name, content, domain, ...) → SkillMeta` | 创建新技能 | L3Manager | 写 SKILL.md |
 | `SkillLayer.edit_skill` | `(name, new_content) → SkillMeta` | 更新技能内容 | L3Manager | 写 SKILL.md |
 | `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive） | L3Manager | — |
+| `SkillLayer.touch_skill` | `(name) → None` | 标记技能最近使用（更新 last_used） | L3Manager.query() | — |
 | `SkillLayer.should_create_skill` | `(domain, cards) → bool` | 检查 L2→L3 编译条件 | Phase 2: Reflect | — |
 | `SkillLayer.propose_and_create` | `(domain, cards, llm) → SkillMeta\|None` | LLM 编译知识卡片为 SKILL.md | Phase 2: Reflect | — |
 

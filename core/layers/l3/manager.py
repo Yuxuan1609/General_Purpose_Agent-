@@ -349,6 +349,10 @@ class L3Manager(LayerManager):
                     "name": s.name, "description": s.description,
                     "domain": s.domain.path, "content": content,
                 })
+
+        for skill_id in self._matched:
+            self._skill_layer.touch_skill(skill_id)
+
         logger.debug("── L3 (match) ──")
         logger.debug("  domain: %s → %d skills", domain_path, len(self._matched))
 

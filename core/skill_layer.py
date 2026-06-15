@@ -3,9 +3,14 @@ import logging
 import re
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
+
+
+def _now():
+    return datetime.now(timezone.utc)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,9 @@ class SkillMeta:
     usefulness: int = 0
     misleading: int = 0
     comment: str = ""
+    created_at: datetime = field(default_factory=_now)
+    updated_at: datetime = field(default_factory=_now)
+    last_used: datetime = field(default_factory=_now)
 
 
 class SkillLayer:
@@ -185,6 +193,7 @@ class SkillLayer:
         if comment is not None:
             meta.comment = comment
 
+        meta.updated_at = _now()
         return meta
 
     def patch_skill(self, name: str, find: str, replace: str) -> SkillMeta:
@@ -205,6 +214,12 @@ class SkillLayer:
         archive_dir = self.skills_dir / ".archive"
         archive_dir.mkdir(exist_ok=True)
         skill_dir.rename(archive_dir / name)
+
+    def touch_skill(self, name: str) -> None:
+        """Mark a skill as recently used."""
+        meta = self._skills.get(name)
+        if meta:
+            meta.last_used = _now()
 
     def should_create_skill(self, domain, domain_cards: list) -> bool:
         cards = [c for c in domain_cards if c.domain.path == domain.path]
@@ -262,6 +277,16 @@ class SkillLayer:
             return None
         if not isinstance(fm, dict):
             return None
+
+        def _parse_time(key: str) -> datetime:
+            v = fm.get(key, "")
+            if not v:
+                return _now()
+            try:
+                return datetime.fromisoformat(str(v))
+            except (ValueError, TypeError):
+                return _now()
+
         domain_path = fm.get("domain", "general")
         domain_level = "general" if domain_path == "general" else "specific"
         return SkillMeta(
@@ -276,6 +301,9 @@ class SkillLayer:
             usefulness=int(fm.get("usefulness", 0)),
             misleading=int(fm.get("misleading", 0)),
             comment=str(fm.get("comment", "")),
+            created_at=_parse_time("created_at"),
+            updated_at=_parse_time("updated_at"),
+            last_used=_parse_time("last_used"),
         )
 
     def _extract_bool_from_frontmatter(self, content: str, key: str) -> bool:
