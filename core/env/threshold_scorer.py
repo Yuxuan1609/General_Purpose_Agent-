@@ -47,6 +47,29 @@ class ThresholdScorer:
                 logger.warning("Failed to read pending record: %s", f)
         return records
 
+    def domain_health_report(self, registry, l2_store, l3_store) -> str:
+        """Build a domain health report for consolidation task meta."""
+        lines = ["### Domain Health Report", ""]
+        lines.append("| domain | L2 cards | L3 skills | correlations | status |")
+        lines.append("|--------|----------|-----------|-------------|--------|")
+        for node in registry.list_all():
+            path = node.path
+            l2_count = len(registry._reverse_index.get("l2", {}).get(path, []))
+            l3_count = len(registry._reverse_index.get("l3", {}).get(path, []))
+            corr_items = sorted(node.correlations.items())
+            corr_str = ", ".join(f"{k}={v:.2f}" for k, v in corr_items[:3])
+            if len(corr_items) > 3:
+                corr_str += ", ..."
+            status = []
+            if l2_count >= 25:
+                status.append("L2_OVER_LIMIT")
+            if l3_count >= 20:
+                status.append("L3_OVER_LIMIT")
+            if not status:
+                status.append("OK")
+            lines.append(f"| {path} | {l2_count} | {l3_count} | {corr_str} | {', '.join(status)} |")
+        return "\n".join(lines)
+
     @staticmethod
     def _extract_tokens(record: dict) -> int:
         return record.get("observation", {}).get("state", {}).get("token_count", 0)

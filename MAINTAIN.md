@@ -41,7 +41,7 @@
 |----------|------|------|-----------|---------|
 | `DomainRetrieveResult` | `@dataclass(path, depth, correlation, primary_count, explore_count, total_count)` | 单域名检索结果容器 | DomainRegistry.retrieve_from_root() | Executor, L2Manager |
 | `DomainNode` | `@dataclass(path, parent, description, correlations, relations)` | 领域树节点 | DomainRegistry | — |
-| `DomainRegistry` | `__init__(nodes)` | 领域注册中心，管理 domain tree + reverse index | build_chain, seed_knowledge | — |
+| `DomainRegistry` | `__init__(nodes, embedding_model_path=None)` | 领域注册中心，管理 domain tree + reverse index + embedding | build_chain, seed_knowledge | — |
 | `DomainRegistry.get_node` | `(path) → DomainNode\|None` | 按路径查找节点 | L2Agent, Executor | — |
 | `DomainRegistry.list_all` | `() → list[DomainNode]` | 列出所有节点 | — | — |
 | `DomainRegistry.children_of` | `(path) → list[DomainNode]` | 获取直接子节点 | — | — |
@@ -165,13 +165,13 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream, upward, downward)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
+| `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream, upward, downward, domain_registry, max_rounds, knowledge_stores)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
 | `L0_5_1Manager.query` | `(msg, trace_id) → None` | while 循环调用 decide() → propagate queries 到 L2 → 收集 NOTIFY | Executor / 上层 | self._agent.decide(), self._downward.wrap_query(), collect_notify() |
 | `L0_5_1Manager.notify` | `() → dict` | 返回 `{done, result, reasoning}` 或 `{status:"ok"}` | collect_notify() | — |
 | `L0_5_1Manager.process` | `(data) → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | LayerManager.query() | — |
-| `L1Agent` | `__init__(llm_client, philosophy)` | L1 层 LLM Agent，while-loop 决策 | L0_5_1Manager | — |
+| `L1Agent` | `__init__(llm_client, philosophy, domain_registry, knowledge_stores)` | L1 层 LLM Agent，while-loop 决策 | L0_5_1Manager | — |
 | `L1Agent.decide` | `(meta, state, history, tools, layer) → dict{done, result, queries, reasoning}` | 单步决策：通过 capture_tool（l1_query/l1_report）输出；`l1_output_format` 时用 consolidation 工具 + DictInjector。 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm(), _schema_to_tool() |
-| `L1Agent._setup_l1_consolidation` | `() → None` | 注册 deprecate/create/modify L1 规则的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
+| `L1Agent._setup_l1_consolidation` | `() → None` | 注册 query_domain/deprecate_domain/merge_domain/create_domain + deprecate/create/modify L1 规则的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
 | `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
 | `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
 
@@ -195,7 +195,8 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `build_chain` | `(meta_driver, philosophy, flexible_knowledge, skill_layer, auxiliary_llm) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1) | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
+| `build_chain` | `(meta_driver, philosophy, flexible_knowledge, skill_layer, auxiliary_llm, domain_registry, knowledge_stores) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1) | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
+| `_make_content_getter` | `(fk, sl) → Callable[[str, str], list[str]]` | 构造 content_getter 闭包，供 DomainRegistry.compute_embedding 使用 | chain_factory 内部 | fk.cards, sl._skills |
 
 ## core/meta_driver.py
 
@@ -303,7 +304,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `LearningEnv` | `__init__(pending_dir, knowledge_stores, preprocessing_llm, stats_file)` | 学习环境：消费 ExecutionRecords，产出知识变更，与 GameEnv 共享 Executor+LayerChain | run_leduc_cognitive.py | ThresholdScorer, Philosophy，FlexibleKnowledge，SkillLayer |
+| `LearningEnv` | `__init__(pending_dir, knowledge_stores, preprocessing_llm, stats_file, ..., domain_registry=None)` | 学习环境：消费 ExecutionRecords，产出知识变更，与 GameEnv 共享 Executor+LayerChain | run_leduc_cognitive.py | ThresholdScorer, Philosophy，FlexibleKnowledge，SkillLayer, DomainRegistry |
 | `LearningEnv.reset` | `(task_description) → EnvState` | 扫描 pending/ records，构建 observation | orchestrator | _scan_pending(), _build_learning_units() |
 | `LearningEnv.step` | `(action) → EnvStep` | 解析 NOTIFY layers → 验证 → 应用修改 → 记录统计 | Executor | _parse_notify_layers(), _apply_layer_mod() |
 | `LearningEnv.build_task_observation` | `() → TaskObservation` | 构建 TaskObservation 供 Executor+Layers 消费 | run_leduc_cognitive.py | — |
@@ -332,6 +333,7 @@
 | `ThresholdScorer.score` | `(domain) → float` | 计算某 domain 的分数 (count + tokens) | should_trigger() | _domain_records() |
 | `ThresholdScorer.should_trigger` | `(domain) → bool` | 判断是否达到学习触发阈值 | run_leduc_cognitive.py | score() |
 | `ThresholdScorer.domain_count` | `(domain) → int` | 返回某 domain 的 pending records 数量 | test | _domain_records() |
+| `ThresholdScorer.domain_health_report` | `(registry, l2_store, l3_store) → str` | 构建 domain 健康报告 Markdown 表格（card/skill 计数、correlation、状态） | LearningEnv.build_consolidation_task | DomainRegistry.list_all(), _reverse_index |
 
 ## core/layer_message.py (已有)
 

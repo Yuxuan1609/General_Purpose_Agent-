@@ -201,9 +201,11 @@ class LearningEnv(Environment):
                  preprocessing_llm=None, stats_file: Path | None = None,
                  l2_card_limit: int = 30, l3_skill_limit: int = 20,
                  dry_run: bool = False,
-                 consolidation_spec: dict | None = None):
+                 consolidation_spec: dict | None = None,
+                 domain_registry=None):
         self._pending_dir = Path(pending_dir)
         self._knowledge = knowledge_stores
+        self._registry = domain_registry
         self._pre_llm = preprocessing_llm
         self._scorer = ThresholdScorer(pending_dir)
         self._stats_file = Path(stats_file) if stats_file else (
@@ -473,6 +475,14 @@ class LearningEnv(Environment):
                     )
             meta_lines.append("")
         meta = "\n".join(meta_lines)
+
+        if self._registry:
+            health = self._scorer.domain_health_report(
+                self._registry,
+                self._knowledge.get("l2"),
+                self._knowledge.get("l3"),
+            )
+            meta += f"\n\n{health}"
 
         # ── l1_task: criteria text only (DD4 — no rule listing, system prompt has rules) ──
         l1_task = (
