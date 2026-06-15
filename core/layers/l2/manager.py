@@ -322,7 +322,10 @@ class L2Agent(LayerAgent):
         )
 
         if l2_fmt:
+            _saved_injector = self._injector
             self._setup_l2_consolidation()
+            self._injector._fallback = _saved_injector
+            base_tools = self._get_tools(layer) or []
             report_tool = self._schema_to_tool(
                 "l2_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -336,7 +339,7 @@ class L2Agent(LayerAgent):
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = self._L2_CONSOLIDATION_TOOLS + [report_tool]
+            all_tools = base_tools + self._L2_CONSOLIDATION_TOOLS + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                     capture_tools={"l2_report"})

@@ -11,8 +11,10 @@ from core.layers.comm import UpwardComm, DownwardComm
 class DictInjector:
     """Lightweight tool injector — maps function names to handler callables."""
 
-    def __init__(self, handlers: dict[str, callable]):
+    def __init__(self, handlers: dict[str, callable],
+                 fallback_injector=None):
         self._handlers = handlers
+        self._fallback = fallback_injector
 
     def execute_tool_call(self, layer: str, name: str, arguments_json: str):
         from dataclasses import dataclass
@@ -25,6 +27,8 @@ class DictInjector:
 
         handler = self._handlers.get(name)
         if handler is None:
+            if self._fallback:
+                return self._fallback.execute_tool_call(layer, name, arguments_json)
             return _TR(success=False, data={}, error=f"Unknown: {name}")
         try:
             args = json.loads(arguments_json) if arguments_json else {}

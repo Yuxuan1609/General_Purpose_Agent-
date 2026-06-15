@@ -249,7 +249,10 @@ class L3Agent(LayerAgent):
         )
 
         if l3_fmt:
+            _saved_injector = self._injector
             self._setup_l3_consolidation()
+            self._injector._fallback = _saved_injector
+            base_tools = self._get_tools(layer) or []
             report_tool = self._schema_to_tool(
                 "l3_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -264,7 +267,7 @@ class L3Agent(LayerAgent):
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = self._L3_CONSOLIDATION_TOOLS + [report_tool]
+            all_tools = base_tools + self._L3_CONSOLIDATION_TOOLS + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                     capture_tools={"l3_report"})
