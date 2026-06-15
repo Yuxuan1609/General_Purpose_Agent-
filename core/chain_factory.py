@@ -38,13 +38,6 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         from core.seed_knowledge import seed_knowledge
         seed_knowledge(fk, phil, sl, domain_registry=reg)
 
-    # Initialize domain embeddings + correlations on startup
-    getter = _make_content_getter(fk, sl)
-    for node in reg.list_all():
-        reg.compute_embedding(node.path, content_getter=getter)
-    reg.compute_all_correlations()
-    reg.save(data_root / "data" / "layers" / "domain_registry.json")
-
     knowledge_stores = {"l2": fk, "l3": sl}
     chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm,
                     domain_registry=reg, knowledge_stores=knowledge_stores)

@@ -10,6 +10,21 @@ from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l2")
 
+
+def cascade_consolidation_to_l3(downstream, meta, state, trace_id):
+    """Propagate consolidation task to L3 and collect NOTIFY."""
+    cascade_obs = TaskObservation(
+        meta=meta,
+        state={
+            **state,
+            "context_history": [],
+            "domains_hint": state.get("domains_hint", []),
+        },
+    )
+    downstream.query(cascade_obs, trace_id)
+    return downstream.collect_notify()
+
+
 class L2Agent(LayerAgent):
     """L2 LLM Agent — while-loop decision via capture_tool mode.
 
@@ -325,7 +340,9 @@ class L2Agent(LayerAgent):
             _saved_injector = self._injector
             self._setup_l2_consolidation()
             self._injector._fallback = _saved_injector
-            base_tools = self._get_tools(layer) or []
+            _allowed = {"kb_query", "read_file", "grep"}
+            base_tools = [t for t in (self._get_tools(layer) or [])
+                          if t["function"]["name"] in _allowed]
             report_tool = self._schema_to_tool(
                 "l2_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -540,6 +557,15 @@ class L2Manager(LayerManager):
             "cards": cards,
             "reasoning": result.get("reasoning", ""),
         }
+
+        # Cascade consolidation to L3
+        if "l2_output_format" in state and self._downstream and self._agent:
+            l3_notify_full = cascade_consolidation_to_l3(
+                self._downstream, meta, state, trace_id)
+            if l3_notify_full:
+                self._l2_notify["l3_modifications"] = \
+                    l3_notify_full.get("l3_modifications",
+                                       l3_notify_full.get("l3", {}).get("l3_modifications", []))
 
         for q in result.get("queries_to_L3", []):
             sub_obs = TaskObservation(

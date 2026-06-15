@@ -252,7 +252,9 @@ class L3Agent(LayerAgent):
             _saved_injector = self._injector
             self._setup_l3_consolidation()
             self._injector._fallback = _saved_injector
-            base_tools = self._get_tools(layer) or []
+            _allowed = {"kb_query", "read_file", "grep"}
+            base_tools = [t for t in (self._get_tools(layer) or [])
+                          if t["function"]["name"] in _allowed]
             report_tool = self._schema_to_tool(
                 "l3_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",

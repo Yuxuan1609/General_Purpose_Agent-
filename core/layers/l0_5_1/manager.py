@@ -377,7 +377,9 @@ class L1Agent(LayerAgent):
             self._setup_l1_consolidation()
             # Wire fallback: DictInjector delegates unknown tools to LayerInjector
             self._injector._fallback = _saved_injector
-            base_tools = self._get_tools(layer) or []
+            _allowed = {"kb_query", "ask_user"}
+            base_tools = [t for t in (self._get_tools(layer) or [])
+                          if t["function"]["name"] in _allowed]
             report_tool = self._schema_to_tool(
                 "l1_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -525,6 +527,25 @@ class L0_5_1Manager(LayerManager):
                     "result": result.get("result", ""),
                     "reasoning": result.get("reasoning", ""),
                 }
+                # Cascade consolidation to L2/L3
+                if "l1_output_format" in state and self._downstream:
+                    cascade_obs = TaskObservation(
+                        meta=meta,
+                        state={
+                            **state,
+                            "context_history": [],
+                            "domains_hint": obs.session.get("domains_hint", [])
+                                if obs.session else [],
+                        },
+                    )
+                    self._downstream.query(cascade_obs, trace_id)
+                    l2_notify = self._downstream.collect_notify()
+                    mods = []
+                    if isinstance(l2_notify, dict):
+                        mods = l2_notify.get("l2_modifications", [])
+                        l3_mods = l2_notify.get("l3_modifications", [])
+                        self._l1_notify["l3_modifications"] = l3_mods
+                    self._l1_notify["l2_modifications"] = mods
                 return
 
             queries = result.get("queries", [])
