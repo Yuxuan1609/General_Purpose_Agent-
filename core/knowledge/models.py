@@ -20,9 +20,8 @@ def _get_tokenizer():
     global _gemma_tokenizer
     if _gemma_tokenizer is None:
         from transformers import AutoTokenizer
-        _gemma_tokenizer = AutoTokenizer.from_pretrained(
-            "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma"
-        )
+        from core.model_manager import get_model_path
+        _gemma_tokenizer = AutoTokenizer.from_pretrained(get_model_path())
     return _gemma_tokenizer
 
 

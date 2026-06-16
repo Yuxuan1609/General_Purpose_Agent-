@@ -8,36 +8,6 @@ from core.layer_message import LayerMessage
 from core.layers.comm import UpwardComm, DownwardComm
 
 
-class DictInjector:
-    """Lightweight tool injector — maps function names to handler callables."""
-
-    def __init__(self, handlers: dict[str, callable],
-                 fallback_injector=None):
-        self._handlers = handlers
-        self._fallback = fallback_injector
-
-    def execute_tool_call(self, layer: str, name: str, arguments_json: str):
-        from dataclasses import dataclass
-
-        @dataclass
-        class _TR:
-            success: bool
-            data: dict
-            error: str = ""
-
-        handler = self._handlers.get(name)
-        if handler is None:
-            if self._fallback:
-                return self._fallback.execute_tool_call(layer, name, arguments_json)
-            return _TR(success=False, data={}, error=f"Unknown: {name}")
-        try:
-            args = json.loads(arguments_json) if arguments_json else {}
-            result = handler(args)
-            return _TR(success=True, data={"result": result})
-        except Exception as e:
-            return _TR(success=False, data={}, error=str(e))
-
-
 def _indent(text: str, spaces: int) -> str:
     prefix = " " * spaces
     return prefix + text.replace("\n", "\n" + prefix)

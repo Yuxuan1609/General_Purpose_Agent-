@@ -160,44 +160,6 @@ class Executor:
             parts.append(current)
         return "\n\n".join(parts) if parts else ""
 
-    def _write_pending(self, obs: TaskObservation, notify_layers: dict,
-                       result: dict) -> None:
-        session = obs.session or {}
-        session_id = session.get("id", "unknown")
-        domain = session.get("domain", "general")
-
-        # Task-meta folder: one per task domain
-        task_dir = self._learning_dir / "pending" / domain.replace("/", "_")
-        task_dir.mkdir(parents=True, exist_ok=True)
-
-        # Session file: one per session, datetime-stamped (E3: atomic write)
-        if session_id not in self._session_files:
-            from datetime import datetime
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._session_files[session_id] = task_dir / f"{session_id}_{stamp}.json"
-
-        filepath = self._session_files[session_id]
-        rec = ExecutionRecord(
-            session=session,
-            observation={"meta": obs.meta, "state": obs.state},
-            notify_layers=notify_layers,
-            action=result.get("action_text"),
-        )
-
-        # Accumulate steps: load existing → append → atomic write
-        existing: list = []
-        if filepath.exists():
-            existing = json.loads(filepath.read_text(encoding="utf-8"))
-            if not isinstance(existing, list):
-                existing = [existing]
-        existing.append(rec.__dict__)
-
-        tmp = tempfile.mktemp(suffix=".json", dir=str(task_dir))
-        content = json.dumps(existing, ensure_ascii=False, indent=2, default=str)
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(content)
-        Path(tmp).replace(filepath)
-
     def write_game_result(self, session_id: str, domain: str, result: dict) -> None:
         """Write game-end summary to session's pending file (no agent call)."""
         if not self._learning_dir:

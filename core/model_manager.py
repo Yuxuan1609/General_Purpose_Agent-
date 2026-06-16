@@ -15,7 +15,8 @@ def set_model_path(path: str) -> None:
 
 
 def get_model_path() -> str:
-    return _model_path or "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma"
+    from pathlib import Path
+    return _model_path or str(Path(__file__).resolve().parent.parent / "embeddinggemma")
 
 
 def get_embedding_model():
