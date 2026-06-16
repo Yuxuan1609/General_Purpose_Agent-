@@ -209,11 +209,19 @@ class LayerAgent(ABC):
                     from core.task_runner import get_task_runner
                     runner = get_task_runner()
                     batch = []
+                    batch_timeout = 30
                     for tc in sync_batch:
                         inj = self._injector
                         l = layer
                         n = tc.function.name
                         a = tc.function.arguments
+                        try:
+                            call_args = json.loads(a) if a else {}
+                        except json.JSONDecodeError:
+                            call_args = {}
+                        call_timeout = call_args.get("timeout", 0)
+                        if call_timeout > batch_timeout:
+                            batch_timeout = call_timeout
                         self._log.debug("  ├─ call  : %s(%s) id=%s",
                                        n, a[:400], tc.id)
                         def _make_exec(_inj, _l, _n, _a):
@@ -226,7 +234,7 @@ class LayerAgent(ABC):
                             "exec": _make_exec(inj, l, n, a),
                         })
 
-                    outcomes = runner.run_sync_batch(batch, timeout=30)
+                    outcomes = runner.run_sync_batch(batch, timeout=batch_timeout)
                     for outcome in outcomes:
                         tc_id = outcome["id"]
                         if outcome["success"]:

@@ -51,8 +51,9 @@ class KnowledgeBase:
     def _ensure_emb(self):
         if self._emb is not None:
             return
+        from core.model_manager import get_model_path
         self._emb = Embeddings({
-            "path": "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma",
+            "path": get_model_path(),
             "trust_remote_code": True,
             "content": "sqlite",
             "keyword": "bm25",
