@@ -86,6 +86,12 @@ def register_kb_tools(registry):
     registry.register("kb_delete", _schema("kb_delete"), _kb_delete_handler, toolset="core")
     registry.register("kb_fill_gap", _schema("kb_fill_gap"), _kb_fill_gap_handler, toolset="core")
 
+    # ── Async variants ──
+    registry.register("kb_query_async", _schema("kb_query"), _kb_query_async_handler,
+                      toolset="core", sync=False)
+    registry.register("kb_fill_gap_async", _schema("kb_fill_gap"), _kb_fill_gap_async_handler,
+                      toolset="core", sync=False)
+
     # ── ask_user: available to both main agent and fill-gap sub-agent ──
     _KB_SCHEMAS["ask_user"] = {
         "type": "function",
@@ -121,6 +127,47 @@ def _get_kb():
 def _get_llm():
     from core.llm_factory import build_llm_client
     return build_llm_client(temperature=0.1)
+
+
+def _kb_query_async_handler(args: dict | None = None) -> str:
+    query = (args or {}).get("query", "")
+    domain = (args or {}).get("domain")
+    if not query:
+        return json.dumps({"error": "No query provided"})
+
+    def _run():
+        from scripts.interactive_kb_agent import SubAgentLoop
+        kb = _get_kb()
+        kb.load()
+        llm = _get_llm()
+        agent = SubAgentLoop(llm, kb, trace=False)
+        result = agent.run(query, domain)
+        kb.close()
+        return result
+
+    from core.task_runner import get_task_runner
+    tid = get_task_runner().submit("kb_query_async", _run)
+    return json.dumps({"task_id": tid, "status": "running"})
+
+
+def _kb_fill_gap_async_handler(args: dict | None = None) -> str:
+    suggestion = (args or {})
+    domain = suggestion.get("domain", "")
+    topic = suggestion.get("topic", "")
+    if not domain or not topic:
+        return json.dumps({"error": "domain and topic required"})
+
+    def _run():
+        from scripts.interactive_kb_agent import FillGapLoop
+        kb = _get_kb()
+        kb.load()
+        llm = _get_llm()
+        agent = FillGapLoop(llm, kb, trace=False)
+        return agent.run(suggestion)
+
+    from core.task_runner import get_task_runner
+    tid = get_task_runner().submit("kb_fill_gap_async", _run)
+    return json.dumps({"task_id": tid, "status": "running"})
 
 
 def _kb_query_handler(args: dict | None = None) -> str:

@@ -5,6 +5,7 @@ default_timeout: 30
 
 tools:
   terminal:
+    sync: true
     timeout: 30
     allowlist: [l2, l3]
     fallback:
@@ -16,6 +17,7 @@ tools:
           hint: "终端不可用时可尝试 grep 搜索文件内容"
 
   web_search:
+    sync: true
     timeout: 15
     allowlist: [l2, l3]
     fallback:
@@ -27,6 +29,7 @@ tools:
           hint: "网络搜索不可用时可尝试 kb_query 查询本地知识库"
 
   tavily_search:
+    sync: true
     timeout: 15
     allowlist: [l2, l3]
     fallback:
@@ -36,6 +39,7 @@ tools:
           hint: "Tavily 搜索不可用时可尝试 kb_query 查询本地知识库"
 
   read_file:
+    sync: true
     timeout: 10
     allowlist: [l2, l3]
     fallback:
@@ -43,6 +47,7 @@ tools:
       degrade: []
 
   grep:
+    sync: true
     timeout: 10
     allowlist: [l2, l3]
     fallback:
@@ -50,6 +55,7 @@ tools:
       degrade: []
 
   kb_query:
+    sync: true
     timeout: 60
     allowlist: [l1, l2, l3]
     fallback:
@@ -59,6 +65,7 @@ tools:
           hint: "知识库查询失败时可通过 web_search 联网搜索"
 
   kb_delete:
+    sync: true
     timeout: 5
     allowlist: [l2, l3]
     fallback:
@@ -66,6 +73,7 @@ tools:
       degrade: []
 
   kb_fill_gap:
+    sync: true
     timeout: 120
     allowlist: [l2, l3]
     fallback:
@@ -75,6 +83,7 @@ tools:
           hint: "知识填补失败时可通过 web_search 先联网搜索再尝试"
 
   create_domain:
+    sync: true
     timeout: 5
     allowlist: [l1]
     fallback:
@@ -82,6 +91,39 @@ tools:
       degrade: []
 
   ask_user:
+    sync: true
+    timeout: 10
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  kb_query_async:
+    sync: false
+    timeout: 5
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  kb_fill_gap_async:
+    sync: false
+    timeout: 5
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  kb_check_task:
+    sync: true
+    timeout: 5
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  kb_collect_tasks:
+    sync: true
     timeout: 10
     allowlist: [l1, l2, l3]
     fallback:
