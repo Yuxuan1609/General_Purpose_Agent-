@@ -6,7 +6,18 @@ internally use the lower-level functions from core/knowledge/tools.py.
 from __future__ import annotations
 import json
 import logging
+import threading
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_ASK_USER_TIMEOUT_S = 300
+_ask_user_timed_out: bool = False
+
+
+def _reset_ask_user_state():
+    global _ask_user_timed_out
+    _ask_user_timed_out = False
 
 logger = logging.getLogger(__name__)
 
@@ -108,23 +119,97 @@ def register_kb_tools(registry):
 
 
 def _ask_user_handler(args: dict | None = None) -> str:
+    global _ask_user_timed_out
     question = (args or {}).get("question", "")
     if not question:
         return json.dumps({"response": "(no question)"})
+
+    _TIMEOUT_MSG = json.dumps({
+        "response": "",
+        "error": ("TIMEOUT: User did not respond within 300 seconds. "
+                  "Do NOT call ask_user again in this session — make decisions "
+                  "with available information and other tools.")
+    })
+
+    if _ask_user_timed_out:
+        return _TIMEOUT_MSG
+
     try:
         import tkinter as tk
-        from tkinter import simpledialog
         root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        response = simpledialog.askstring(
-            "Agent asks", question, parent=root)
-        root.destroy()
-        return json.dumps({"response": response or "(no response)"})
+        try:
+            root.withdraw()
+        finally:
+            root.destroy()
+        return _ask_user_dialog(question, _TIMEOUT_MSG)
     except Exception:
-        print(f"\n[Agent]: {question}")
-        response = input("> ")
+        return _ask_user_console(question, _TIMEOUT_MSG)
+
+
+def _ask_user_dialog(question: str, timeout_msg: str) -> str:
+    global _ask_user_timed_out
+    result = {"response": ""}
+    lock = threading.Lock()
+    done = threading.Event()
+
+    import tkinter as tk
+    from tkinter import simpledialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+
+    def _on_timeout():
+        root.destroy()
+        done.set()
+
+    root.after(_ASK_USER_TIMEOUT_S * 1000, _on_timeout)
+
+    response = simpledialog.askstring("Agent asks", question, parent=root)
+    root.destroy()
+
+    if not done.is_set():
+        result["response"] = response or "(no response)"
+        done.set()
+        return json.dumps(result)
+
+    _ask_user_timed_out = True
+    return timeout_msg
+
+
+def _ask_user_console(question: str, timeout_msg: str) -> str:
+    global _ask_user_timed_out
+    result = [None]
+    done = threading.Event()
+
+    def _read_input():
+        try:
+            print(f"\n[Agent]: {question}")
+            print(f"(timeout in {_ASK_USER_TIMEOUT_S}s)")
+            response = input("> ")
+            if not done.is_set():
+                result[0] = response or "(no response)"
+            done.set()
+        except Exception:
+            if not done.is_set():
+                result[0] = "(input error)"
+            done.set()
+
+    t = threading.Thread(target=_read_input, daemon=True)
+    t.start()
+    done.wait(timeout=_ASK_USER_TIMEOUT_S)
+
+    if not done.is_set():
+        _ask_user_timed_out = True
+        done.set()
+        print(f"\n[Agent] ask_user timed out after {_ASK_USER_TIMEOUT_S}s. "
+              "Agent will not call ask_user again this session.")
+        return timeout_msg
+
+    response = result[0]
+    if response is not None:
         return json.dumps({"response": response})
+    return timeout_msg
 
 
 def _get_kb():

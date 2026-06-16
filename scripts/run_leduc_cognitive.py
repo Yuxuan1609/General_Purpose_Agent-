@@ -154,6 +154,7 @@ def main():
     from core.executor import Executor
     executor = Executor(layer_root=chain, llm_client=llm_client,
                         learning_dir=PROJECT_ROOT / "data" / "learning")
+    from core.tools.consolidation_tools import set_learning_context; set_learning_context(executor=executor)
 
     from scripts.leduc_cognitive_agent import LeducCognitiveAgent
     agent = LeducCognitiveAgent(executor, temperature=args.temperature)

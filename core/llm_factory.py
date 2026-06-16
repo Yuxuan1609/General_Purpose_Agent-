@@ -37,4 +37,6 @@ def build_llm_client(config_path: Path | None = None, model=None,
     llm.temperature = temperature
     if cfg.get("thinking", False):
         llm.thinking_enabled = True
+        effort = cfg.get("thinking_effort", "high")
+        llm.thinking_effort = effort
     return llm

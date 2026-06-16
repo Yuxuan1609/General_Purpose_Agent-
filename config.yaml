@@ -3,7 +3,8 @@ main_llm:
   model: deepseek-v4-flash
   api_key_env: DEEPSEEK_API_KEY
   base_url: https://api.deepseek.com
-  thinking: false
+  thinking: true
+  thinking_effort: high
 
 auxiliary_llm:
   provider: deepseek

@@ -108,6 +108,7 @@ def _make_agent(
                 chain = layers
             executor = Executor(layer_root=chain, llm_client=llm_client,
                                 learning_dir=PROJECT_ROOT / "data" / "learning")
+            from core.tools.consolidation_tools import set_learning_context; set_learning_context(executor=executor)
             return DouZeroCognitiveAgent(executor=executor, position=position)
         else:
             from scripts.douzero_agent import DouZeroLLMAgent

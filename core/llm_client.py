@@ -28,12 +28,19 @@ class LLMClient:
     def __init__(self, client, model: str):
         self._client = client
         self.model = model
+        self.thinking_enabled = False
 
     def chat(self, messages: list, tools: list | None = None,
              json_mode: bool = False, **kwargs) -> LLMResponse:
         params = {"model": self.model, "messages": messages}
         if json_mode:
             params["response_format"] = {"type": "json_object"}
+        if getattr(self, "thinking_enabled", False):
+            extra = params.setdefault("extra_body", {})
+            thinking = extra.setdefault("thinking", {})
+            thinking["type"] = "enabled"
+            if hasattr(self, "thinking_effort"):
+                thinking["effort"] = self.thinking_effort
         params.update(kwargs)
         if tools:
             params["tools"] = [
