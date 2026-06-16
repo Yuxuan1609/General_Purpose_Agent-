@@ -15,3 +15,5 @@ _archive/
 data/learning/pending/
 data/interaction/
 data/tool_proposals/
+embeddinggemma/
+embeddinggemma-transformers-embeddinggemma-300m-v1.tar.gz
