@@ -34,7 +34,8 @@ def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Shell command to execute"}
+                    "command": {"type": "string", "description": "Shell command to execute"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
                 },
                 "required": ["command"]
             }

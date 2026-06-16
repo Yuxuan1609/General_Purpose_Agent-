@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-16 | **sync-as-Agent-param**：所有工具 schema 新增 `sync` 可选参数（Agent 可逐次覆盖默认值）。`_call_llm` 按 sync 拆分 sync_batch/async_calls 分别走 run_sync_batch 和 TaskRunner.submit。删除 `kb_query_async`/`kb_fill_gap_async` 独立变体。`kb_check_task`/`kb_collect_tasks` 重命名为通用 `check_task`/`collect_tasks`。`ask_user` 改为 tkinter 弹窗 + console fallback。 |
 | 2026-06-15 | **KB SQLite Backend**：新增 `core/storage/kb_store.py`（KBSQLiteStore），KnowledgeBase 新增 `meta_db_path` 参数，激活后 metadata 写入 SQLite 而非 kb.json。向后兼容：不传 meta_db_path 时行为不变。 |
 | 2026-06-13 | **Step 3 文档**：KB query-response 两阶段检索设计（Stage 1 txtai 粗筛 + Stage 2 Agent LLM 精排）、`knowledge_select` capture_tool、Agent while-loop 集成、推广到 L1/L2/L3 内部通信。见 `docs/superpowers/specs/2026-06-13-kb-query-response.md`。 |
 | 2026-06-13 | **Step 2 文档**：KB 维护 task 规格（cleanup/fill_gaps/link_related/dedup），触发机制，质量指标，与 Step 3 query-response 关系。见 `docs/superpowers/specs/2026-06-13-kb-maintenance-tasks.md`。 |
@@ -36,18 +37,17 @@
 | `ToolRegistry.get_tools_for_domain` | `(domain) → list[ToolEntry]` | 按域名过滤工具列表，无 registry 时返回全部 | L2Manager, Executor | DomainRegistry.get_primary_items() |
 | `ToolRegistry.clear` | `()` | 重置所有条目（仅测试用） | test fixtures | — |
 
-## core/tools/kb_tools.py (async handlers)
+## core/tools/kb_tools.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `_kb_query_async_handler` | `(args) → str` | 异步提交 kb_query 到 TaskRunner，立即返回 task_id | ToolRegistry.dispatch | TaskRunner.submit(), SubAgentLoop |
-| `_kb_fill_gap_async_handler` | `(args) → str` | 异步提交 kb_fill_gap 到 TaskRunner，立即返回 task_id | ToolRegistry.dispatch | TaskRunner.submit(), FillGapLoop |
+| `_ask_user_handler` | `(args) → str` | tkinter 弹窗向用户提问，fallback 到 console input | ToolRegistry.dispatch | tkinter.simpledialog |
 
 ## core/tools/async_tools.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `register_async_tools` | `(registry)` | 注册 kb_check_task 和 kb_collect_tasks 工具 | register_all_tools() | ToolRegistry.register() |
+| `register_async_tools` | `(registry)` | 注册 check_task 和 collect_tasks 通用异步任务管理工具 | register_all_tools() | ToolRegistry.register() |
 | `_check_task_handler` | `(args) → str` | 查询单个异步任务状态 | ToolRegistry.dispatch | TaskRunner.check() |
 | `_collect_tasks_handler` | `(args) → str` | 批量收集已完成异步任务的结果 | ToolRegistry.dispatch | TaskRunner.collect(), TaskRunner.pending_tasks() |
 
@@ -488,7 +488,7 @@
 | 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent.set_injector` | `(injector) → None` | **新增**，注入 LayerInjector/DictInjector | setup scripts, _setup_lX_consolidation() | — |
-| `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数，指定 tool 的 arguments 直接作为结构化输出（替代 JSON-in-prompt schema 注入）；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call() |
+| `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit() |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | **新增**：JSON Schema → OpenAI function-calling tool 定义，供 capture_tools 模式使用。 | decide() | — |
 | `DictInjector` | `__init__(handlers: dict[str, callable])` | **新增**：轻量工具注入器，用于 consolidation 场景替代完整 CapabilityRegistry。 | _setup_lX_consolidation() | — |
 

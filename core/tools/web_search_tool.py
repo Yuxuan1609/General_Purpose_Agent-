@@ -79,6 +79,7 @@ def register_web_search_tool(registry):
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
                     "max_results": {"type": "integer", "description": "Maximum number of results (default: 5)"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
                 },
                 "required": ["query"],
             },
@@ -148,6 +149,7 @@ def register_tavily_search_tool(registry):
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
                     "max_results": {"type": "integer", "description": "Maximum number of results (default: 5)"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
                 },
                 "required": ["query"],
             },

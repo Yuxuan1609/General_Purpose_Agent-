@@ -64,6 +64,10 @@ def register_create_domain(tool_registry):
                         "type": "string",
                         "description": "Related domains or notes, e.g. 'sibling of game/leduc'. Optional.",
                     },
+                    "sync": {
+                        "type": "boolean",
+                        "description": "true=blocking(default), false=fire-and-forget returns task_id",
+                    },
                 },
                 "required": ["path", "description"],
             },

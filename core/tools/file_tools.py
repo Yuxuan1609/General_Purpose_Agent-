@@ -102,6 +102,10 @@ def register_read_file(registry):
                         "type": "integer",
                         "description": "Max lines to read (default 200, max 2000)",
                     },
+                    "sync": {
+                        "type": "boolean",
+                        "description": "true=blocking(default), false=fire-and-forget returns task_id",
+                    },
                 },
                 "required": ["path"],
             },
@@ -165,6 +169,10 @@ def register_grep(registry):
                             "File glob pattern to filter (e.g. '*.py', '*.{ts,tsx}'). "
                             "Default: all files"
                         ),
+                    },
+                    "sync": {
+                        "type": "boolean",
+                        "description": "true=blocking(default), false=fire-and-forget returns task_id",
                     },
                 },
                 "required": ["pattern"],

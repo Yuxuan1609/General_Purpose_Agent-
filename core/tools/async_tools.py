@@ -1,29 +1,30 @@
-"""Async task management tools: check_task, collect_tasks."""
+"""Generic async task management tools: check_task, collect_tasks."""
 from __future__ import annotations
 import json
 
 
 def register_async_tools(registry):
-    registry.register("kb_check_task", {
+    registry.register("check_task", {
         "type": "function",
         "function": {
-            "name": "kb_check_task",
-            "description": "Check status of an async KB task. Returns running/done/error.",
+            "name": "check_task",
+            "description": "Check status of an async task. Returns running/done/error.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "task_id": {"type": "string"},
+                    "sync": {"type": "boolean", "description": "Sync mode (default true)"},
                 },
                 "required": ["task_id"],
             },
         },
     }, _check_task_handler, toolset="core", sync=True)
 
-    registry.register("kb_collect_tasks", {
+    registry.register("collect_tasks", {
         "type": "function",
         "function": {
-            "name": "kb_collect_tasks",
-            "description": "Collect results of completed async KB tasks. Only returns done/error tasks. Running tasks are skipped.",
+            "name": "collect_tasks",
+            "description": "Collect results of completed async tasks.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -32,6 +33,7 @@ def register_async_tools(registry):
                         "items": {"type": "string"},
                         "description": "List of task IDs to collect",
                     },
+                    "sync": {"type": "boolean", "description": "Sync mode (default true)"},
                 },
                 "required": ["task_ids"],
             },

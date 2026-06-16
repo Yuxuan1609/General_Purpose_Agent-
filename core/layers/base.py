@@ -169,51 +169,92 @@ class LayerAgent(ABC):
                 if not executable_calls:
                     continue  # all calls were captured
 
-                # Execute remaining tools — parallel batch
-                from core.task_runner import get_task_runner
-                runner = get_task_runner()
-                batch = []
+                # Split by sync param
+                sync_batch = []
+                async_calls = []
                 for tc in executable_calls:
-                    inj = self._injector
-                    l = layer
-                    n = tc.function.name
-                    a = tc.function.arguments
-                    self._log.debug("  ├─ call  : %s(%s) id=%s",
-                                   n, a[:400], tc.id)
-                    def _make_exec(_inj, _l, _n, _a):
-                        def _exec():
-                            return _inj.execute_tool_call(_l, _n, _a)
-                        return _exec
-                    batch.append({
-                        "id": tc.id,
-                        "tool": n,
-                        "exec": _make_exec(inj, l, n, a),
-                    })
-
-                outcomes = runner.run_sync_batch(batch, timeout=30)
-                for outcome in outcomes:
-                    tc_id = outcome["id"]
-                    if outcome["success"]:
-                        raw = outcome["data"]
-                        result_content = raw.data
-                        result_str = str(raw.data.get("result", "")
-                                         if isinstance(raw.data, dict)
-                                         else raw.data)[:800]
-                        self._log.debug("  └─ result (success=%s, id=%s): %s",
-                                       raw.success, tc_id, str(result_str)[:800])
+                    try:
+                        raw_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    except json.JSONDecodeError:
+                        raw_args = {}
+                    sync = raw_args.get("sync", True)
+                    if sync:
+                        sync_batch.append(tc)
                     else:
-                        result_content = outcome["data"]
-                        result_str = outcome.get("error", "unknown error")
-                        self._log.warning("  └─ result (error, id=%s): %s",
-                                         tc_id, result_str)
-                    serialized = json.dumps(result_content, ensure_ascii=False)
-                    self._log.debug("     → role:tool content (%d chars): %s",
-                                   len(serialized), serialized[:500])
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": serialized,
-                    })
+                        async_calls.append(tc)
+
+                # Process async calls — submit to TaskRunner
+                if async_calls:
+                    from core.task_runner import get_task_runner
+                    runner = get_task_runner()
+                    for tc in async_calls:
+                        name = tc.function.name
+                        args_json = tc.function.arguments
+                        self._log.debug("  ├─ async : %s(%s) id=%s",
+                                       name, args_json[:400], tc.id)
+                        def _make_async_exec(_inj, _l, _n, _a):
+                            def _exec():
+                                return _inj.execute_tool_call(_l, _n, _a)
+                            return _exec
+                        exec_fn = _make_async_exec(self._injector, layer, name, args_json)
+                        tid = runner.submit(name, exec_fn)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps({"task_id": tid, "status": "running"}),
+                        })
+
+                # Process sync calls — parallel batch
+                if sync_batch:
+                    from core.task_runner import get_task_runner
+                    runner = get_task_runner()
+                    batch = []
+                    for tc in sync_batch:
+                        inj = self._injector
+                        l = layer
+                        n = tc.function.name
+                        a = tc.function.arguments
+                        self._log.debug("  ├─ call  : %s(%s) id=%s",
+                                       n, a[:400], tc.id)
+                        def _make_exec(_inj, _l, _n, _a):
+                            def _exec():
+                                return _inj.execute_tool_call(_l, _n, _a)
+                            return _exec
+                        batch.append({
+                            "id": tc.id,
+                            "tool": n,
+                            "exec": _make_exec(inj, l, n, a),
+                        })
+
+                    outcomes = runner.run_sync_batch(batch, timeout=30)
+                    for outcome in outcomes:
+                        tc_id = outcome["id"]
+                        if outcome["success"]:
+                            raw = outcome["data"]
+                            result_content = raw.data
+                            result_str = str(raw.data.get("result", "")
+                                             if isinstance(raw.data, dict)
+                                             else raw.data)[:800]
+                            self._log.debug("  └─ result (success=%s, id=%s): %s",
+                                           raw.success, tc_id, str(result_str)[:800])
+                        else:
+                            result_content = outcome["data"]
+                            result_str = outcome.get("error", "unknown error")
+                            self._log.warning("  └─ result (error, id=%s): %s",
+                                             tc_id, result_str)
+                        serialized = json.dumps(result_content, ensure_ascii=False)
+                        self._log.debug("     → role:tool content (%d chars): %s",
+                                       len(serialized), serialized[:500])
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": serialized,
+                        })
+
+                if async_calls:
+                    pending_text = f"[Pending async tasks: {len(async_calls)}. Use collect_tasks to retrieve results.]"
+                    messages.append({"role": "system", "content": pending_text})
+
                 continue  # next turn
 
             # No tool calls → final answer

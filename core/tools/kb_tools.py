@@ -27,12 +27,14 @@ def register_kb_tools(registry):
             "description": (
                 "深度查询知识库：搜索→读meta→refine→修正meta→返回findings+suggestions。"
                 "知识库仅保存低时效敏感、易于验证的客观信息（成熟框架文档、法律条文等）。"
+                "默认异步(sync=false)，返回task_id。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "搜索查询"},
                     "domain": {"type": "string", "description": "可选 domain 过滤"},
+                    "sync": {"type": "boolean", "description": "true=blocking, false=fire-and-forget returns task_id (default false)"},
                 },
                 "required": ["query"],
             },
@@ -51,6 +53,7 @@ def register_kb_tools(registry):
                 "properties": {
                     "doc_id": {"type": "string", "description": "要删除的文档 ID"},
                     "reason": {"type": "string", "description": "删除原因"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
                 },
                 "required": ["doc_id"],
             },
@@ -63,6 +66,7 @@ def register_kb_tools(registry):
             "description": (
                 "填补知识库缺口：KB确认→外部工具搜索→提案（不直接保存）。"
                 "知识库仅保存低时效敏感、易于验证的客观信息。"
+                "默认异步(sync=false)，返回task_id。"
             ),
             "parameters": {
                 "type": "object",
@@ -76,6 +80,7 @@ def register_kb_tools(registry):
                         "description": "Phase 1 已检索到的相关文档 ID",
                     },
                     "user_context": {"type": "string", "description": "用户补充的信息（仅在 ask_user 后重新调用时填写）"},
+                    "sync": {"type": "boolean", "description": "true=blocking, false=fire-and-forget returns task_id (default false)"},
                 },
                 "required": ["domain", "topic"],
             },
@@ -86,22 +91,16 @@ def register_kb_tools(registry):
     registry.register("kb_delete", _schema("kb_delete"), _kb_delete_handler, toolset="core")
     registry.register("kb_fill_gap", _schema("kb_fill_gap"), _kb_fill_gap_handler, toolset="core")
 
-    # ── Async variants ──
-    registry.register("kb_query_async", _schema("kb_query"), _kb_query_async_handler,
-                      toolset="core", sync=False)
-    registry.register("kb_fill_gap_async", _schema("kb_fill_gap"), _kb_fill_gap_async_handler,
-                      toolset="core", sync=False)
-
-    # ── ask_user: available to both main agent and fill-gap sub-agent ──
     _KB_SCHEMAS["ask_user"] = {
         "type": "function",
         "function": {
             "name": "ask_user",
-            "description": "向用户提问以获取缺失的信息。最后一招，在搜索工具都无法满足时使用。",
+            "description": "向用户提问以获取缺失的信息。最后一招，在搜索工具都无法满足时使用。必须同步(sync=true)。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {"type": "string", "description": "要问用户的问题"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default, must block), false=not supported"},
                 },
                 "required": ["question"],
             },
@@ -112,11 +111,22 @@ def register_kb_tools(registry):
 
 def _ask_user_handler(args: dict | None = None) -> str:
     question = (args or {}).get("question", "")
-    return json.dumps({
-        "status": "waiting",
-        "question": question,
-        "note": "用户回复后将通过 user_context 继续任务",
-    })
+    if not question:
+        return json.dumps({"response": "(no question)"})
+    try:
+        import tkinter as tk
+        from tkinter import simpledialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        response = simpledialog.askstring(
+            "Agent asks", question, parent=root)
+        root.destroy()
+        return json.dumps({"response": response or "(no response)"})
+    except Exception:
+        print(f"\n[Agent]: {question}")
+        response = input("> ")
+        return json.dumps({"response": response})
 
 
 def _get_kb():
@@ -128,46 +138,6 @@ def _get_llm():
     from core.llm_factory import build_llm_client
     return build_llm_client(temperature=0.1)
 
-
-def _kb_query_async_handler(args: dict | None = None) -> str:
-    query = (args or {}).get("query", "")
-    domain = (args or {}).get("domain")
-    if not query:
-        return json.dumps({"error": "No query provided"})
-
-    def _run():
-        from scripts.interactive_kb_agent import SubAgentLoop
-        kb = _get_kb()
-        kb.load()
-        llm = _get_llm()
-        agent = SubAgentLoop(llm, kb, trace=False)
-        result = agent.run(query, domain)
-        kb.close()
-        return result
-
-    from core.task_runner import get_task_runner
-    tid = get_task_runner().submit("kb_query_async", _run)
-    return json.dumps({"task_id": tid, "status": "running"})
-
-
-def _kb_fill_gap_async_handler(args: dict | None = None) -> str:
-    suggestion = (args or {})
-    domain = suggestion.get("domain", "")
-    topic = suggestion.get("topic", "")
-    if not domain or not topic:
-        return json.dumps({"error": "domain and topic required"})
-
-    def _run():
-        from scripts.interactive_kb_agent import FillGapLoop
-        kb = _get_kb()
-        kb.load()
-        llm = _get_llm()
-        agent = FillGapLoop(llm, kb, trace=False)
-        return agent.run(suggestion)
-
-    from core.task_runner import get_task_runner
-    tid = get_task_runner().submit("kb_fill_gap_async", _run)
-    return json.dumps({"task_id": tid, "status": "running"})
 
 
 def _kb_query_handler(args: dict | None = None) -> str:
