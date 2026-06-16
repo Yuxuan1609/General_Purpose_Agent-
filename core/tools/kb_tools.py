@@ -27,14 +27,13 @@ def register_kb_tools(registry):
             "description": (
                 "深度查询知识库：搜索→读meta→refine→修正meta→返回findings+suggestions。"
                 "知识库仅保存低时效敏感、易于验证的客观信息（成熟框架文档、法律条文等）。"
-                "默认异步(sync=false)，返回task_id。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "搜索查询"},
                     "domain": {"type": "string", "description": "可选 domain 过滤"},
-                    "sync": {"type": "boolean", "description": "true=blocking, false=fire-and-forget returns task_id (default false)"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
                 },
                 "required": ["query"],
             },
@@ -66,7 +65,6 @@ def register_kb_tools(registry):
             "description": (
                 "填补知识库缺口：KB确认→外部工具搜索→提案（不直接保存）。"
                 "知识库仅保存低时效敏感、易于验证的客观信息。"
-                "默认异步(sync=false)，返回task_id。"
             ),
             "parameters": {
                 "type": "object",
@@ -80,7 +78,7 @@ def register_kb_tools(registry):
                         "description": "Phase 1 已检索到的相关文档 ID",
                     },
                     "user_context": {"type": "string", "description": "用户补充的信息（仅在 ask_user 后重新调用时填写）"},
-                    "sync": {"type": "boolean", "description": "true=blocking, false=fire-and-forget returns task_id (default false)"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
                 },
                 "required": ["domain", "topic"],
             },

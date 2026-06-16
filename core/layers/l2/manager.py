@@ -192,13 +192,11 @@ class L2Agent(LayerAgent):
         extra = f"\n{static_context}\n" if static_context else ""
         tool_rules = (
             "## 工具调用规则\n"
-            "- sync=true 的工具结果在本轮结束时返回给你\n"
-            "- sync=false 的工具会立即返回 task_id，你需要在下几轮调用\n"
-            "  collect_tasks 来获取结果\n"
-            "- check_task(task_id) 可以查询单个任务的状态\n"
-            "- 同一个决策轮中，先提交 sync=false 的任务，再提交 sync=true 的任务，"
-            "然后等待本轮结果\n"
-            "- 如果某轮没有 sync=true 的工具调用，直接进入下一轮\n"
+            "- 所有工具都有 sync 参数。sync=true(默认)阻塞等结果，sync=false 返回 task_id\n"
+            "- sync=false 的任务用 collect_tasks(task_ids) 收割结果\n"
+            "- check_task(task_id) 可查单个任务状态\n"
+            "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
+            "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
         )
         return (
             f"## 认知层架构\n"
