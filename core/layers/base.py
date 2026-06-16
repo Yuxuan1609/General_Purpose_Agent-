@@ -169,33 +169,49 @@ class LayerAgent(ABC):
                 if not executable_calls:
                     continue  # all calls were captured
 
-                # Execute remaining tools
+                # Execute remaining tools — parallel batch
+                from core.task_runner import get_task_runner
+                runner = get_task_runner()
+                batch = []
                 for tc in executable_calls:
+                    inj = self._injector
+                    l = layer
+                    n = tc.function.name
+                    a = tc.function.arguments
                     self._log.debug("  ├─ call  : %s(%s) id=%s",
-                                   tc.function.name,
-                                   tc.function.arguments[:400],
-                                   tc.id)
-                    raw = self._injector.execute_tool_call(
-                        layer, tc.function.name,
-                        tc.function.arguments,
-                    )
-                    if raw.success:
+                                   n, a[:400], tc.id)
+                    def _make_exec(_inj, _l, _n, _a):
+                        def _exec():
+                            return _inj.execute_tool_call(_l, _n, _a)
+                        return _exec
+                    batch.append({
+                        "id": tc.id,
+                        "tool": n,
+                        "exec": _make_exec(inj, l, n, a),
+                    })
+
+                outcomes = runner.run_sync_batch(batch, timeout=30)
+                for outcome in outcomes:
+                    tc_id = outcome["id"]
+                    if outcome["success"]:
+                        raw = outcome["data"]
                         result_content = raw.data
-                        result_str = str(raw.data.get("result", "") if isinstance(raw.data, dict) else raw.data)[:800]
+                        result_str = str(raw.data.get("result", "")
+                                         if isinstance(raw.data, dict)
+                                         else raw.data)[:800]
+                        self._log.debug("  └─ result (success=%s, id=%s): %s",
+                                       raw.success, tc_id, str(result_str)[:800])
                     else:
-                        result_content = {"error": raw.error}
-                        fb = getattr(raw, 'fallback', None)
-                        if fb:
-                            result_content.update(fb)
-                        result_str = raw.error
-                    self._log.debug("  └─ result (success=%s, id=%s): %s",
-                                   raw.success, tc.id, str(result_str)[:800])
+                        result_content = outcome["data"]
+                        result_str = outcome.get("error", "unknown error")
+                        self._log.warning("  └─ result (error, id=%s): %s",
+                                         tc_id, result_str)
                     serialized = json.dumps(result_content, ensure_ascii=False)
                     self._log.debug("     → role:tool content (%d chars): %s",
                                    len(serialized), serialized[:500])
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": tc_id,
                         "content": serialized,
                     })
                 continue  # next turn
