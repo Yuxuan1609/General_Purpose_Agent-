@@ -159,6 +159,16 @@ class L3Agent(LayerAgent):
         self._registry = domain_registry
 
     def _build_system_prompt(self, instruction: str, meta: str) -> str:
+        tool_rules = (
+            "## 工具调用规则\n"
+            "- sync=true 的工具结果在本轮结束时返回给你\n"
+            "- sync=false 的工具会立即返回 task_id，你需要在下几轮调用\n"
+            "  kb_collect_tasks 来获取结果\n"
+            "- kb_check_task(task_id) 可以查询单个任务的状态\n"
+            "- 同一个决策轮中，先提交 sync=false 的任务，再提交 sync=true 的任务，"
+            "然后等待本轮结果\n"
+            "- 如果某轮没有 sync=true 的工具调用，直接进入下一轮\n"
+        )
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
@@ -168,6 +178,7 @@ class L3Agent(LayerAgent):
             f"你只管理 L3 技能（Skills / SKILL.md）。\n"
             f"不要修改 L1 的行为准则或 L2 的知识卡片。\n\n"
             f"## 指令\n{instruction}\n\n"
+            f"{tool_rules}\n"
             f"[Meta]\n{meta}"
         )
 

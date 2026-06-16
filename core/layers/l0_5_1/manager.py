@@ -262,6 +262,16 @@ class L1Agent(LayerAgent):
         rules = self._philosophy.all_rules()
         rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
+        tool_rules = (
+            "## 工具调用规则\n"
+            "- sync=true 的工具结果在本轮结束时返回给你\n"
+            "- sync=false 的工具会立即返回 task_id，你需要在下几轮调用\n"
+            "  kb_collect_tasks 来获取结果\n"
+            "- kb_check_task(task_id) 可以查询单个任务的状态\n"
+            "- 同一个决策轮中，先提交 sync=false 的任务，再提交 sync=true 的任务，"
+            "然后等待本轮结果\n"
+            "- 如果某轮没有 sync=true 的工具调用，直接进入下一轮\n"
+        )
         return (
             f"## 认知层架构\n"
             f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。可调用 create_domain 创建新领域。不调用其他工具。\n"
@@ -272,6 +282,7 @@ class L1Agent(LayerAgent):
             f"不要修改 L2 的知识卡片或 L3 的技能。\n"
             f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 call_l2=true 下发给 L2/L3 执行。\n\n"
             f"## 指令\n{instruction}\n\n"
+            f"{tool_rules}\n"
             f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
             f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"
