@@ -4,6 +4,8 @@ import json, uuid, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.llm_factory import build_llm_client
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -16,7 +18,7 @@ def register_record_learning(registry, pending_dir: str = "data/learning/pending
             "name": "record_learning",
             "description": (
                 "记录值得学习的内容（仅L1可用）。提供 domain + learning_target + importance + reasoning。"
-                "L2/L3的详细evidence由后台自动补充后写入pending文件夹。默认异步(sync=false)，返回task_id。"
+                "L2/L3的详细evidence由后台 sub-agent 自动补充后写入pending文件夹。默认异步(sync=false)，返回task_id。"
             ),
             "parameters": {
                 "type": "object",
@@ -42,9 +44,7 @@ def _record_learning_handler(args=None):
     if not domain or not target:
         return json.dumps({"error": "domain and learning_target required"})
 
-    sync = d.get("sync", False)
-
-    if sync:
+    if d.get("sync", False):
         record = _build_and_save(domain, target, importance, reasoning)
         return json.dumps(record, ensure_ascii=False, default=str)
 
@@ -58,10 +58,7 @@ def _record_learning_handler(args=None):
 
 def _build_and_save(domain, target, importance, reasoning):
     from core.round_tree import get_round_history
-    tree_data = get_round_history().all_as_dict()
-
-    source_rounds = list(range(max(1, len(tree_data) - min(5, len(tree_data)) + 1),
-                                len(tree_data) + 1))
+    tree_nodes = get_round_history().snapshot()
 
     record = {
         "id": uuid.uuid4().hex,
@@ -72,11 +69,12 @@ def _build_and_save(domain, target, importance, reasoning):
         "l1_observations": [],
         "l2_observations": [],
         "l3_observations": [],
-        "source_rounds": source_rounds,
+        "source_rounds": list(range(1, len(tree_nodes) + 1)),
         "recorded_at": _now(),
     }
 
-    _fill_observations(record, tree_data)
+    # Fill L2/L3 via LLM sub-agent
+    _fill_observations_llm(record, tree_nodes, target)
 
     pending_path = Path("data/learning/pending") / domain.replace("/", "_")
     pending_path.mkdir(parents=True, exist_ok=True)
@@ -91,19 +89,104 @@ def _build_and_save(domain, target, importance, reasoning):
     return {"status": "ok", "file": str(filepath), "id": record["id"]}
 
 
-def _fill_observations(record: dict, tree_data: list[dict]):
-    for round_node in tree_data:
-        for child in round_node.get("children", []):
-            if child["layer"] == "l2" and child.get("result"):
-                record["l2_observations"].append({
-                    "finding": f"L2: {child['query'][:200]}",
-                    "evidence": child["result"][:500],
-                    "implication": "",
-                })
-            for grandchild in child.get("children", []):
-                if grandchild["layer"] == "l3" and grandchild.get("result"):
-                    record["l3_observations"].append({
-                        "finding": f"L3: {grandchild.get('query', '')[:100]}",
-                        "evidence": grandchild["result"][:500],
-                        "implication": "",
-                    })
+SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target 扫描决策树，
+提取 L2 和 L3 层中与该目标相关的 observation。
+
+决策树结构（缩进表示父子关系）：
+  L1[name=root]: 本轮最高决策
+    └─ L2[name=child]: L2 层的查询处理
+         └─ L3[name=grandchild]: L3 层的技能执行
+
+你需要输出严格的 JSON（json_mode），格式如下：
+{
+  "l2_observations": [
+    {
+      "finding": "L2层发现了什么或处理了什么",
+      "evidence": "摘录自决策树中 L2 节点的 result 字段（原文引用）",
+      "implication": "这对 learning_target 意味着什么",
+      "relevance": "high | medium | low"
+    }
+  ],
+  "l3_observations": [
+    { "finding": "...", "evidence": "...", "implication": "...", "relevance": "high | medium | low" }
+  ]
+}
+
+规则：
+- 只提取与 learning_target 语义相关的 observation。不相关的跳过。
+- evidence 必须是 decision_tree 中某节点的 result 原文（截取前 500 字），不能编造。
+- implication 是推论：例如"因为 L2 没有该领域的卡片，所以应该补充"。
+- 如果 L2 节点在某轮中无实质发现（result 为空或纯状态信息如 status:ok），跳过该节点。
+- 最多每层返回 5 条 observation，按 relevance 降序。
+- 如果没有相关 observation，返回空数组 []。
+- L3 节点仅在其内容与 learning_target 相关时才提取。
+- 注意保留树结构中的 parent-child 关系——observation 的 evidence 应该清晰地指出来自哪个 L2 节点及其子 L3 节点。
+"""
+
+
+def _format_tree_for_llm(nodes: list) -> str:
+    """Format RoundTree with structure-aware indentation for LLM consumption."""
+    lines = []
+
+    def _walk(node, depth=0):
+        prefix = "  " * depth + ("L1" if depth == 0 else "└─ L2" if depth == 1 else "     └─ L3")
+        if hasattr(node, 'layer'):
+            layer = node.layer
+            query = getattr(node, 'query', '')
+            result = getattr(node, 'result', '')
+            reasoning = getattr(node, 'reasoning', '')
+        elif isinstance(node, dict):
+            layer = node.get("layer", "?")
+            query = node.get("query", "")
+            result = node.get("result", "")
+            reasoning = node.get("reasoning", "")
+        else:
+            return
+        label = {"l0_5_1": "L1", "l2": "L2", "l3": "L3"}.get(layer, layer)
+        indent = "  " * depth
+        lines.append(f"{indent}[{label}] query: {str(query)[:200]}")
+        if result:
+            lines.append(f"{indent}[{label}] result: {str(result)[:500]}")
+        if reasoning:
+            lines.append(f"{indent}[{label}] reasoning: {str(reasoning)[:300]}")
+        children = getattr(node, 'children', []) if hasattr(node, 'children') else node.get('children', [])
+        for child in children:
+            _walk(child, depth + 1)
+
+    for n in nodes:
+        _walk(n, 0)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _fill_observations_llm(record: dict, tree_nodes: list, target: str):
+    """Use LLM to extract L2/L3 observations from RoundTree, with strict JSON mode."""
+    tree_text = _format_tree_for_llm(tree_nodes)
+    if not tree_text.strip():
+        return
+
+    prompt = (
+        f"learning_target: {target}\n"
+        f"importance: {record.get('importance', 'medium')}\n"
+        f"reasoning: {record.get('reasoning', '')}\n\n"
+        f"decision_tree:\n{tree_text}"
+    )
+
+    try:
+        llm = build_llm_client(temperature=0.1)
+        messages = [
+            {"role": "system", "content": SUB_AGENT_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        resp = llm.chat(messages=messages, json_mode=True)
+        text = resp.text if hasattr(resp, 'text') else str(resp)
+
+        try:
+            filled = json.loads(text)
+        except json.JSONDecodeError:
+            filled = {}
+
+        record["l2_observations"] = filled.get("l2_observations", [])
+        record["l3_observations"] = filled.get("l3_observations", [])
+    except Exception:
+        pass  # LLM unavailable → observations stay empty

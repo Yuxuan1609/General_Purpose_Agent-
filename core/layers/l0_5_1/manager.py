@@ -3,14 +3,14 @@ import json
 import logging
 from typing import Any
 from core.types import TaskObservation
-from core.layers.base import LayerManager, LayerAgent, _indent, DictInjector
+from core.layers.base import LayerManager, LayerAgent, _indent
 from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l0_5_1")
 
 # Tools are mounted on L1Agent via LayerInjector.set_injector() (see chain_factory).
 # L1 does NOT call tools directly — it delegates tool-requiring tasks to L2/L3.
-# When consolidation is triggered, L1 uses its own consolidation tools (DictInjector).
+# Consolidation tools are registered in ToolRegistry (core/tools/consolidation_tools.py).
 
 
 class L1Agent(LayerAgent):
@@ -25,232 +25,6 @@ class L1Agent(LayerAgent):
     """
 
     MAX_LOOPS = 1
-
-    # Consolidation tools — modifications via tool calls
-    _L1_CONSOLIDATION_TOOLS: list[dict] = [
-        {"type": "function", "function": {
-            "name": "create_domain",
-            "description": "Create a new domain. Must provide at least one L2 card or L3 skill as initial content — empty domains are not allowed.",
-            "parameters": {"type": "object", "properties": {
-                "path": {"type": "string", "description": "Domain path, e.g. 'interaction'"},
-                "parent": {"type": "string", "description": "Parent domain. Default: 'general'."},
-                "description": {"type": "string", "description": "Brief description (1-2 sentences)"},
-                "relations": {"type": "string", "description": "Related domains or notes. Optional."},
-                "initial_cards": {
-                    "type": "array", "items": {
-                        "type": "object", "properties": {
-                            "content": {"type": "string"},
-                        }, "required": ["content"]
-                    },
-                    "description": "Initial L2 knowledge cards for this domain"
-                },
-                "initial_skills": {
-                    "type": "array", "items": {
-                        "type": "object", "properties": {
-                            "name": {"type": "string"},
-                            "content": {"type": "string"},
-                        }, "required": ["name", "content"]
-                    },
-                    "description": "Initial L3 skills for this domain"
-                },
-            }, "required": ["path", "description"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "query_domain",
-            "description": "List all L2 cards and L3 skills in a domain. Use to inspect domain contents before splitting or merging.",
-            "parameters": {"type": "object", "properties": {
-                "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
-            }, "required": ["domain"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "deprecate_domain",
-            "description": "Remove a domain. Before calling, ensure all L2/L3 items have been migrated to other domains. Will fail if items still reference ONLY this domain.",
-            "parameters": {"type": "object", "properties": {
-                "domain": {"type": "string", "description": "Domain path to deprecate"},
-                "reason": {"type": "string", "description": "Why this domain is being removed"},
-            }, "required": ["domain", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "merge_domain",
-            "description": "Merge source domain into target: moves all items, merges correlations, deprecates source. One-click operation — Agent only provides two domain names.",
-            "parameters": {"type": "object", "properties": {
-                "source": {"type": "string", "description": "Domain to merge FROM (will be removed)"},
-                "target": {"type": "string", "description": "Domain to merge INTO (survives)"},
-                "reason": {"type": "string", "description": "Why merging"},
-            }, "required": ["source", "target", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "deprecate_l1_rule",
-            "description": "废弃（删除）一条 L1 行为准则。用于移除重复、低质量或违反跨领域原则的规则。",
-            "parameters": {"type": "object", "properties": {
-                "rule_id": {"type": "string", "description": "要删除的规则 id，如 l1_001"},
-                "reason": {"type": "string", "description": "删除理由，如'与另一条重复'或'内容模糊'"},
-            }, "required": ["rule_id", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "create_l1_rule",
-            "description": "创建一条新的 L1 行为准则。用于合并重复规则或添加新的通用原则。",
-            "parameters": {"type": "object", "properties": {
-                "content": {"type": "string", "description": "完整规则文本，1-2句清晰可执行的行为准则"},
-                "reason": {"type": "string", "description": "创建理由，如'合并了3条概率决策规则'"},
-            }, "required": ["content", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "modify_l1_rule",
-            "description": "Modify an existing L1 rule. Use content to update rule text, or pass only usefulness/misleading/comment to record quality feedback without changing content.\n\nQuality fields (both range -5 to +5):\n  usefulness: +5=critical help for correct decision, +3=helpful guidance, +1=slightly useful, 0=unset/no opinion, -1=not very useful, -3=useless/wasted tokens, -5=harmful leading to wrong decision.\n  misleading: +5=severely misleading causing critical error, +3=clearly misled reasoning, +1=slightly inaccurate/outdated, 0=unset/no opinion, -1=mostly accurate, -3=highly accurate/trustworthy, -5=completely reliable never misleads.\n  comment: natural language quality note, max 100 chars. Omit if no opinion.",
-            "parameters": {"type": "object", "properties": {
-                "rule_id": {"type": "string", "description": "Rule id to modify, e.g. l1_001"},
-                "content": {"type": "string", "description": "Full modified rule text. Omit if only recording quality feedback without content change."},
-                "reason": {"type": "string", "description": "Reason for modification or quality update"},
-                "usefulness": {"type": "integer", "description": "How useful this rule was during reflection. Range -5 to +5."},
-                "misleading": {"type": "integer", "description": "How misleading this rule was during reflection. Range -5 to +5."},
-                "comment": {"type": "string", "description": "Quality description, max 100 chars."},
-            }, "required": ["rule_id", "reason"], "additionalProperties": False},
-        }},
-    ]
-
-    def _setup_l1_consolidation(self):
-        """Wire DictInjector for L1 consolidation tools.
-
-        NOTE: DictInjector is the legacy consolidation tool path.
-              AgentContext (via core/agent_context.py) will replace it
-              once consolidation tools are moved to ToolRegistry.
-        """
-        agent = self
-
-        def _getter(layer, domain):
-            if layer == "l2" and agent._l2_store:
-                return [c.content for c in agent._l2_store.cards
-                        if domain in c.available_domains]
-            if layer == "l3" and agent._l3_store:
-                return [m.description for n, m in agent._l3_store._skills.items()
-                        if domain in m.available_domains]
-            return []
-
-        def query_domain(args: dict) -> str:
-            domain = args["domain"]
-            if agent._registry is None:
-                return json.dumps({"error": "DomainRegistry not connected"})
-            l2_ids = set(agent._registry._reverse_index.get("l2", {}).get(domain, []))
-            l3_ids = set(agent._registry._reverse_index.get("l3", {}).get(domain, []))
-            cards = []
-            if agent._l2_store:
-                for c in agent._l2_store.cards:
-                    if c.id in l2_ids:
-                        cards.append({"id": c.id, "content": c.content[:150],
-                                      "usefulness": c.usefulness, "last_used": str(c.last_used.isoformat())[:10]})
-            skills = []
-            if agent._l3_store:
-                for name, m in agent._l3_store._skills.items():
-                    if name in l3_ids:
-                        skills.append({"name": name, "description": m.description[:150],
-                                       "usefulness": m.usefulness, "last_used": str(m.last_used.isoformat())[:10]})
-            return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
-                              ensure_ascii=False, default=str)
-
-        def deprecate_domain(args: dict) -> str:
-            domain = args["domain"]
-            if agent._registry is None:
-                return json.dumps({"error": "DomainRegistry not connected"})
-            try:
-                agent._registry.deprecate_domain(domain)
-                return json.dumps({"success": True, "message": f"Domain '{domain}' removed"})
-            except ValueError as e:
-                return json.dumps({"error": str(e)})
-
-        def merge_domain(args: dict) -> str:
-            source = args["source"]
-            target = args["target"]
-            if agent._registry is None:
-                return json.dumps({"error": "DomainRegistry not connected"})
-            try:
-                result = agent._registry.merge_domain(source, target, content_getter=_getter)
-                return json.dumps({"success": True, "message": f"Merged '{source}' → '{target}', {result['moved_items']} items moved"})
-            except ValueError as e:
-                return json.dumps({"error": str(e)})
-
-        def create_domain(args: dict) -> str:
-            path = args.get("path", "")
-            parent = args.get("parent", "general")
-            description = args.get("description", "")
-            relations = args.get("relations", "")
-            initial_cards = args.get("initial_cards", [])
-            initial_skills = args.get("initial_skills", [])
-            if not path or not description:
-                return json.dumps({"error": "path and description are required"})
-            if not initial_cards and not initial_skills:
-                return json.dumps({"error": "Domain must have at least one initial card or skill. Empty domains are not allowed."})
-            if agent._registry is None:
-                return json.dumps({"error": "DomainRegistry not connected"})
-            try:
-                agent._registry.add_node(path, parent, description, {}, relations)
-                created_cards = 0
-                if agent._l2_store:
-                    from core.task import Domain
-                    for card_data in initial_cards:
-                        agent._l2_store.add_card(
-                            content=card_data["content"],
-                            domain=Domain(path, "specific"),
-                            source="learning_env",
-                        )
-                        created_cards += 1
-                created_skills = 0
-                if agent._l3_store:
-                    from core.task import Domain
-                    for skill_data in initial_skills:
-                        agent._l3_store.create_skill(
-                            name=skill_data["name"],
-                            content=skill_data["content"],
-                            domain=Domain(path, "specific"),
-                            created_by="learning_env",
-                        )
-                        created_skills += 1
-                agent._registry.compute_embedding(path, content_getter=_getter)
-                return json.dumps({
-                    "success": True,
-                    "message": f"Domain '{path}' created under '{parent}'. Cards: {created_cards}, Skills: {created_skills}",
-                }, ensure_ascii=False)
-            except Exception as e:
-                return json.dumps({"error": str(e)})
-
-        def deprecate_l1_rule(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "deprecate", "target": args["rule_id"],
-                "reason": args["reason"], "layer": "l1",
-            })
-            return f"已记录: 删除 {args['rule_id']}"
-
-        def create_l1_rule(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "create", "target": "", "layer": "l1",
-                "reason": args["reason"],
-                "payload": {"content": args["content"]},
-            })
-            return f"已记录: 创建新规则"
-
-        def modify_l1_rule(args: dict) -> str:
-            payload = {"content": args.get("content", "")}
-            if "usefulness" in args:
-                payload["usefulness"] = args["usefulness"]
-            if "misleading" in args:
-                payload["misleading"] = args["misleading"]
-            if "comment" in args:
-                payload["comment"] = args["comment"]
-            agent._pending_mods.append({
-                "type": "update", "target": args["rule_id"], "layer": "l1",
-                "reason": args["reason"], "payload": payload,
-            })
-            return f"已记录: 修改 {args['rule_id']}"
-
-        self._injector = DictInjector({
-            "create_domain": create_domain,
-            "query_domain": query_domain,
-            "deprecate_domain": deprecate_domain,
-            "merge_domain": merge_domain,
-            "deprecate_l1_rule": deprecate_l1_rule,
-            "create_l1_rule": create_l1_rule,
-            "modify_l1_rule": modify_l1_rule,
-        })
 
     def __init__(self, llm_client, philosophy, domain_registry=None,
                  knowledge_stores: dict | None = None):
@@ -397,13 +171,12 @@ class L1Agent(LayerAgent):
         user = "\n\n".join(user_parts)
 
         if l1_fmt:
-            _saved_injector = self._injector
-            self._setup_l1_consolidation()
-            # Wire fallback: DictInjector delegates unknown tools to LayerInjector
-            self._injector._fallback = _saved_injector
+            from core.tools.registry import ToolRegistry
+            from core.tools.consolidation_tools import L1_CONSOLIDATION_TOOL_NAMES
             _allowed = {"kb_query", "ask_user"}
             base_tools = [t for t in (self._get_tools(layer) or [])
                           if t["function"]["name"] in _allowed]
+            consol_schemas = ToolRegistry().get_definitions(L1_CONSOLIDATION_TOOL_NAMES)
             report_tool = self._schema_to_tool(
                 "l1_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -417,7 +190,7 @@ class L1Agent(LayerAgent):
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = base_tools + self._L1_CONSOLIDATION_TOOLS + [report_tool]
+            all_tools = base_tools + consol_schemas + [report_tool]
             self._log.debug("  tools: %s",
                            [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
@@ -428,7 +201,6 @@ class L1Agent(LayerAgent):
                 "reasoning": result.get("reasoning", ""),
                 "queries": [],
             }
-            self._injector = _saved_injector
             return result
 
         # Normal mode: two capture tools
@@ -678,9 +450,9 @@ class L0_5_1Manager(LayerManager):
     def notify(self) -> Any:
         if self._l1_notify:
             result = dict(self._l1_notify)
-            if self._agent:
-                mods = self._agent.get_pending_mods()
-                if mods:
-                    result["l1_modifications"] = mods
+            from core.tools.consolidation_tools import get_pending_mods
+            mods = get_pending_mods()
+            if mods:
+                result["l1_modifications"] = mods
             return result
         return {"status": "ok", "layer": self.name}

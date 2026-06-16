@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from core.task import Domain
 from core.types import TaskObservation
-from core.layers.base import LayerManager, LayerAgent, DictInjector
+from core.layers.base import LayerManager, LayerAgent
 from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l3")
@@ -46,112 +46,7 @@ class L3Agent(LayerAgent):
         "required": ["done", "reasoning"],
     }
 
-    # Consolidation tools — modifications via tool calls
-    _L3_CONSOLIDATION_TOOLS: list[dict] = [
-        {"type": "function", "function": {
-            "name": "deprecate_l3_skill",
-            "description": "废弃（删除）一个 L3 技能。用于移除低质量、从未使用或功能重叠的技能。",
-            "parameters": {"type": "object", "properties": {
-                "skill_name": {"type": "string", "description": "技能名称，如 leduc-bad-1"},
-                "reason": {"type": "string", "description": "删除理由，如'低质量从未被匹配'或'与另一技能功能重叠'"},
-            }, "required": ["skill_name", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "create_l3_skill",
-            "description": "创建一个新的 L3 技能。用于将高激活同域卡片编译为可复用的标准化技能。",
-            "parameters": {"type": "object", "properties": {
-                "name": {"type": "string", "description": "技能名称，kebab-case 格式如 leduc-preflop-strategy"},
-                "content": {"type": "string", "description": "完整 SKILL.md 内容（YAML frontmatter + Markdown body）"},
-                "domain": {"type": "string", "description": "所属 domain，如 game/leduc"},
-                "reason": {"type": "string", "description": "创建理由，如'编译自3张高激活配对加注卡片'"},
-            }, "required": ["name", "content", "domain", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "modify_l3_skill",
-            "description": "Modify an existing L3 skill. Use content to update SKILL.md, domain to change domain assignment, or pass only quality fields for feedback.\n\nQuality fields (both range -5 to +5):\n  usefulness: +5=critical help, ... \n  misleading: +5=severely misleading, ...\n  comment: natural language quality note, max 100 chars.",
-            "parameters": {"type": "object", "properties": {
-                "skill_name": {"type": "string", "description": "Skill name to modify"},
-                "content": {"type": "string", "description": "Full modified SKILL.md content. Omit if only recording quality feedback without content change."},
-                "domain": {"type": "string", "description": "New domain path for this skill. Use to move skill to a different/sub domain during split/merge."},
-                "reason": {"type": "string", "description": "Reason for modification or quality update"},
-                "usefulness": {"type": "integer", "description": "How useful this skill was during reflection. Range -5 to +5."},
-                "misleading": {"type": "integer", "description": "How misleading this skill was during reflection. Range -5 to +5."},
-                "comment": {"type": "string", "description": "Quality description, max 100 chars."},
-            }, "required": ["skill_name", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "query_domain",
-            "description": "List all L2 cards and L3 skills in a domain. Use to inspect domain contents before splitting or merging.",
-            "parameters": {"type": "object", "properties": {
-                "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
-            }, "required": ["domain"], "additionalProperties": False},
-        }},
-    ]
 
-    def _setup_l3_consolidation(self):
-        agent = self
-
-        def deprecate_l3_skill(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "deprecate", "target": args["skill_name"],
-                "reason": args["reason"], "layer": "l3",
-            })
-            return f"已记录: 删除 {args['skill_name']}"
-
-        def create_l3_skill(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "create", "target": args["name"], "layer": "l3",
-                "reason": args["reason"],
-                "payload": {
-                    "content": args["content"],
-                    "domain": args.get("domain", "general"),
-                },
-            })
-            return f"已记录: 创建 {args['name']}"
-
-        def modify_l3_skill(args: dict) -> str:
-            payload = {"content": args.get("content", "")}
-            if "domain" in args and args["domain"]:
-                payload["domain"] = args["domain"]
-            if "usefulness" in args:
-                payload["usefulness"] = args["usefulness"]
-            if "misleading" in args:
-                payload["misleading"] = args["misleading"]
-            if "comment" in args:
-                payload["comment"] = args["comment"]
-            agent._pending_mods.append({
-                "type": "update", "target": args["skill_name"], "layer": "l3",
-                "reason": args["reason"], "payload": payload,
-            })
-            return f"已记录: 修改 {args['skill_name']}"
-
-        def query_domain(args: dict) -> str:
-            domain = args["domain"]
-            if agent._registry is None:
-                return json.dumps({"error": "DomainRegistry not connected"})
-            l2_ids = set(agent._registry._reverse_index.get("l2", {}).get(domain, []))
-            l3_ids = set(agent._registry._reverse_index.get("l3", {}).get(domain, []))
-            cards = []
-            if l2_ids:
-                cards = [{"id": i} for i in l2_ids]
-            skills = []
-            for name in l3_ids:
-                if agent._skill_layer:
-                    m = agent._skill_layer._skills.get(name)
-                    if m:
-                        skills.append({"name": m.name, "description": m.description[:150],
-                                       "usefulness": m.usefulness, "last_used": str(m.last_used.isoformat())[:10]})
-                else:
-                    skills.append({"name": name})
-            return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
-                              ensure_ascii=False, default=str)
-
-        self._injector = DictInjector({
-            "query_domain": query_domain,
-            "deprecate_l3_skill": deprecate_l3_skill,
-            "create_l3_skill": create_l3_skill,
-            "modify_l3_skill": modify_l3_skill,
-        })
 
     def __init__(self, llm_client, skill_layer=None, domain_registry=None):
         super().__init__(llm_client, logger)
@@ -258,12 +153,12 @@ class L3Agent(LayerAgent):
         )
 
         if l3_fmt:
-            _saved_injector = self._injector
-            self._setup_l3_consolidation()
-            self._injector._fallback = _saved_injector
+            from core.tools.registry import ToolRegistry
+            from core.tools.consolidation_tools import L3_CONSOLIDATION_TOOL_NAMES
             _allowed = {"kb_query", "read_file", "grep"}
             base_tools = [t for t in (self._get_tools(layer) or [])
                           if t["function"]["name"] in _allowed]
+            consol_schemas = ToolRegistry().get_definitions(L3_CONSOLIDATION_TOOL_NAMES)
             report_tool = self._schema_to_tool(
                 "l3_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -278,7 +173,7 @@ class L3Agent(LayerAgent):
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = base_tools + self._L3_CONSOLIDATION_TOOLS + [report_tool]
+            all_tools = base_tools + consol_schemas + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                     capture_tools={"l3_report"})
@@ -452,9 +347,9 @@ class L3Manager(LayerManager):
     def notify(self) -> Any:
         if self._l3_notify:
             result = dict(self._l3_notify)
-            if self._agent:
-                mods = self._agent.get_pending_mods()
-                if mods:
-                    result["l3_modifications"] = mods
+            from core.tools.consolidation_tools import get_pending_mods
+            mods = get_pending_mods()
+            if mods:
+                result["l3_modifications"] = mods
             return result
         return {"status": "ok", "layer": "l3", "skills_matched": len(self._matched)}

@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-16 | **Consolidation→ToolRegistry 迁移**：将 L1/L2/L3 consolidation 工具从 DictInjector 硬编码迁移到 ToolRegistry。新增 `core/tools/consolidation_tools.py`（10 工具注册 + module-level pending_mods）。Manager notify() 改用 `consolidation_tools.get_pending_mods()`。`config/tools.yaml` 新增 consolidation allowlist。`DictInjector` 标记为 dead code。 |
 | 2026-06-16 | **sync-as-Agent-param**：所有工具 schema 新增 `sync` 可选参数（Agent 可逐次覆盖默认值）。`_call_llm` 按 sync 拆分 sync_batch/async_calls 分别走 run_sync_batch 和 TaskRunner.submit。删除 `kb_query_async`/`kb_fill_gap_async` 独立变体。`kb_check_task`/`kb_collect_tasks` 重命名为通用 `check_task`/`collect_tasks`。`ask_user` 改为 tkinter 弹窗 + console fallback。 |
 | 2026-06-15 | **KB SQLite Backend**：新增 `core/storage/kb_store.py`（KBSQLiteStore），KnowledgeBase 新增 `meta_db_path` 参数，激活后 metadata 写入 SQLite 而非 kb.json。向后兼容：不传 meta_db_path 时行为不变。 |
 | 2026-06-13 | **Step 3 文档**：KB query-response 两阶段检索设计（Stage 1 txtai 粗筛 + Stage 2 Agent LLM 精排）、`knowledge_select` capture_tool、Agent while-loop 集成、推广到 L1/L2/L3 内部通信。见 `docs/superpowers/specs/2026-06-13-kb-query-response.md`。 |
@@ -50,6 +51,17 @@
 | `register_async_tools` | `(registry)` | 注册 check_task 和 collect_tasks 通用异步任务管理工具 | register_all_tools() | ToolRegistry.register() |
 | `_check_task_handler` | `(args) → str` | 查询单个异步任务状态 | ToolRegistry.dispatch | TaskRunner.check() |
 | `_collect_tasks_handler` | `(args) → str` | 批量收集已完成异步任务的结果 | ToolRegistry.dispatch | TaskRunner.collect(), TaskRunner.pending_tasks() |
+
+## core/tools/consolidation_tools.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `set_consolidation_stores` | `(phil, fk, sl, reg) → None` | 设置模块级 store 引用，供 handler 访问 | chain_factory.build_default_chain() | — |
+| `get_pending_mods` | `() → list[dict]` | 获取并清空所有待处理的 consolidation 修改记录 | L0_5_1Manager.notify(), L2Manager.notify(), L3Manager.notify() | — |
+| `register_consolidation_tools` | `(tool_registry) → None` | 注册全部 consolidation 工具（L1 rule/L2 card/L3 skill CRUD + domain ops） | register_all_tools() | ToolRegistry.register() |
+| `L1_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L1 consolidation 可用工具名集合 | L1Agent.decide() | ToolRegistry.get_definitions() |
+| `L2_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L2 consolidation 可用工具名集合 | L2Agent.decide() | ToolRegistry.get_definitions() |
+| `L3_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L3 consolidation 可用工具名集合 | L3Agent.decide() | ToolRegistry.get_definitions() |
 
 ## core/domain_registry.py (Task 3)
 
@@ -122,10 +134,10 @@
 | `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call() |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义，供 capture_tools 使用。 | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
-| `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector/DictInjector 以启用工具调用。 | setup scripts, _setup_lX_consolidation() | — |
-| `LayerAgent.get_pending_mods` | `() → list[dict]` | 获取并清空待处理的 consolidation 修改记录。 | Manager notify() | — |
+| `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
+| `LayerAgent.get_pending_mods` | `() → list[dict]` | (legacy, unused) 获取并清空待处理的 consolidation 修改记录。已迁移到 consolidation_tools.get_pending_mods()。 | — | — |
 | `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | _call_llm(), _schema_to_tool() |
-| `DictInjector` | `__init__(handlers: dict[str, callable])` | 轻量工具注入器，映射函数名到 handler。用于 consolidation 场景（各层 `_setup_lX_consolidation()` 注入修改工具）。 | _setup_lX_consolidation() | — |
+| `DictInjector` | `__init__(handlers: dict[str, callable])` | (deprecated, dead code) 轻量工具注入器。Consolidation 已迁移到 ToolRegistry (consolidation_tools.py)。 | — | — |
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
@@ -162,8 +174,7 @@
 | `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
 | `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
 | `L3Agent` | `__init__(llm_client, skill_layer=None, domain_registry=None)` | L3 LLM Agent：基于匹配技能执行认知任务 | L3Manager.query() | — |
-| `L3Agent.decide` | `(meta, state, context, tools, layer) → dict{done, result, skills_used, reasoning}` | 单步决策：通过 capture_tool（l3_continue/l3_report）输出；`l3_output_format` 时用 consolidation 工具。 | L3Manager.query() | _call_llm(), _schema_to_tool() |
-| `L3Agent._setup_l3_consolidation` | `() → None` | 注册 deprecate/create/modify/query_domain L3 技能的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
+| `L3Agent.decide` | `(meta, state, context, tools, layer) → dict{done, result, skills_used, reasoning}` | 单步决策：通过 capture_tool（l3_continue/l3_report）输出；`l3_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。 | L3Manager.query() | _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
 
 ## core/layers/l2/manager.py (Phase 1)
 
@@ -174,8 +185,7 @@
 | `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
 | `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
 | `L2Agent` | `__init__(llm_client, knowledge)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
-| `L2Agent.decide` | `(query, meta, state, context, tools, layer) → dict{done, reply, selected_nodes, selected_cards, queries_to_L3, reasoning}` | 单步决策：通过 capture_tool（l2_query/l2_report）输出；`l2_output_format` 时用 consolidation 工具。 | L2Manager.query() | _get_cards_for_nodes(), _call_llm(), _schema_to_tool() |
-| `L2Agent._setup_l2_consolidation` | `() → None` | 注册 query_domain/deprecate/create/modify L2 卡片的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
+| `L2Agent.decide` | `(query, meta, state, context, tools, layer) → dict{done, reply, selected_nodes, selected_cards, queries_to_L3, reasoning}` | 单步决策：通过 capture_tool（l2_query/l2_report）输出；`l2_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。 | L2Manager.query() | _get_cards_for_nodes(), _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
 | `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | decide() | FlexibleKnowledge.get_domain_cards() |
 
 ## core/layers/l0_5_1/manager.py (Phase 1)
@@ -187,8 +197,7 @@
 | `L0_5_1Manager.notify` | `() → dict` | 返回 `{done, result, reasoning}` 或 `{status:"ok"}` | collect_notify() | — |
 | `L0_5_1Manager.process` | `(data) → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | LayerManager.query() | — |
 | `L1Agent` | `__init__(llm_client, philosophy, domain_registry, knowledge_stores)` | L1 层 LLM Agent，while-loop 决策 | L0_5_1Manager | — |
-| `L1Agent.decide` | `(meta, state, history, tools, layer) → dict{done, result, queries, reasoning}` | 单步决策：通过 capture_tool（l1_query/l1_report）输出；`l1_output_format` 时用 consolidation 工具 + DictInjector。 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm(), _schema_to_tool() |
-| `L1Agent._setup_l1_consolidation` | `() → None` | 注册 query_domain/deprecate_domain/merge_domain/create_domain + deprecate/create/modify L1 规则的 DictInjector handler。 | decide() (consolidation mode) | DictInjector() |
+| `L1Agent.decide` | `(meta, state, history, tools, layer) → dict{done, result, queries, reasoning}` | 单步决策：通过 capture_tool（l1_query/l1_report）输出；`l1_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
 | `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
 | `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
 
@@ -487,10 +496,10 @@
 
 | 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `LayerAgent.set_injector` | `(injector) → None` | **新增**，注入 LayerInjector/DictInjector | setup scripts, _setup_lX_consolidation() | — |
+| `LayerAgent.set_injector` | `(injector) → None` | **新增**，注入 LayerInjector | chain_factory._mount_tools() | — |
 | `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit() |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | **新增**：JSON Schema → OpenAI function-calling tool 定义，供 capture_tools 模式使用。 | decide() | — |
-| `DictInjector` | `__init__(handlers: dict[str, callable])` | **新增**：轻量工具注入器，用于 consolidation 场景替代完整 CapabilityRegistry。 | _setup_lX_consolidation() | — |
+| `DictInjector` | `__init__(handlers: dict[str, callable])` | (deprecated, dead code) 已被 consolidation_tools.py + ToolRegistry 替代。 | — | — |
 
 ## core/env/learning_env.py — Phase 3 更新
 
@@ -622,7 +631,7 @@
 |-------|------|-------------|
 | `last_used` | `str` | ISO timestamp of last KB query hit |
 
-### Consolidation Tools (L1 DictInjector)
+### Consolidation Tools (ToolRegistry — core/tools/consolidation_tools.py)
 
 | Tool | Description |
 |------|-------------|

@@ -121,3 +121,100 @@ tools:
     fallback:
       max_retries: 0
       degrade: []
+
+  # ── Consolidation tools ──
+  deprecate_l1_rule:
+    sync: true
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  create_l1_rule:
+    sync: true
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  modify_l1_rule:
+    sync: true
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  deprecate_l2_card:
+    sync: true
+    timeout: 5
+    allowlist: [l2]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  create_l2_card:
+    sync: true
+    timeout: 5
+    allowlist: [l2]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  modify_l2_card:
+    sync: true
+    timeout: 5
+    allowlist: [l2]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  deprecate_l3_skill:
+    sync: true
+    timeout: 5
+    allowlist: [l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  create_l3_skill:
+    sync: true
+    timeout: 5
+    allowlist: [l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  modify_l3_skill:
+    sync: true
+    timeout: 5
+    allowlist: [l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  query_domain:
+    sync: true
+    timeout: 5
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  deprecate_domain:
+    sync: true
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  merge_domain:
+    sync: true
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []

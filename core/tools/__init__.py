@@ -17,6 +17,7 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     from core.tools.domain_tool import register_create_domain, set_domain_registry
     from core.tools.kb_tools import register_kb_tools
     from core.tools.async_tools import register_async_tools
+    from core.tools.consolidation_tools import register_consolidation_tools
 
     register_terminal_tool(registry)
     register_web_search_tool(registry)
@@ -27,6 +28,7 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     register_create_domain(registry)
     register_kb_tools(registry)
     register_async_tools(registry)
+    register_consolidation_tools(registry)
 
     from core.tools.record_learning_tool import register_record_learning
     register_record_learning(registry)

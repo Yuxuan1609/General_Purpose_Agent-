@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from core.task import Domain
 from core.types import TaskObservation
-from core.layers.base import LayerManager, LayerAgent, _indent, DictInjector
+from core.layers.base import LayerManager, LayerAgent, _indent
 from core.layers.comm import AgentPacket
 from core.layer_message import LayerMessage
 
@@ -36,7 +36,7 @@ class L2Agent(LayerAgent):
       - l2_query: delegate subtask to L3
       - l2_report: deliver final answer to upper layer
 
-    Consolidation mode uses l2_report with DictInjector handlers.
+    Consolidation mode uses l2_report with ToolRegistry handlers.
     """
 
     MAX_NODES = 5
@@ -83,107 +83,7 @@ class L2Agent(LayerAgent):
         "required": ["done", "reasoning"],
     }
 
-    # Consolidation tools — modifications via tool calls
-    _L2_CONSOLIDATION_TOOLS: list[dict] = [
-        {"type": "function", "function": {
-            "name": "deprecate_l2_card",
-            "description": "废弃（删除）一张 L2 知识卡片。用于移除低置信度、从未使用或高度冗余的策略卡片。",
-            "parameters": {"type": "object", "properties": {
-                "card_id": {"type": "string", "description": "卡片 id，如 card_xxxxxxxx"},
-                "reason": {"type": "string", "description": "删除理由，如'合并到 leduc_K_preflop'或'低置信度从未使用'"},
-            }, "required": ["card_id", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "create_l2_card",
-            "description": "创建一张新的 L2 知识卡片。用于合并多张相似卡片为一条精炼策略。",
-            "parameters": {"type": "object", "properties": {
-                "content": {"type": "string", "description": "完整卡片内容，格式：[场景] → [行动] + [理由]"},
-                "domain": {"type": "string", "description": "所属 domain，如 game/leduc 或 game/doudizhu"},
-                "reason": {"type": "string", "description": "创建理由，如'合并了3张K翻牌前加注策略卡片'"},
-            }, "required": ["content", "domain", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "modify_l2_card",
-            "description": "Modify an existing L2 card. Use content to update card text, domain to change domain assignment, or pass only quality fields for feedback.\n\nQuality fields (both range -5 to +5):\n  usefulness: +5=critical help, ... \n  misleading: +5=severely misleading, ...\n  comment: natural language quality note, max 100 chars.",
-            "parameters": {"type": "object", "properties": {
-                "card_id": {"type": "string", "description": "Card id to modify, e.g. card_xxxxxxxx"},
-                "content": {"type": "string", "description": "Full modified card content. Omit if only recording quality feedback without content change."},
-                "domain": {"type": "string", "description": "New domain path for this card. Use to move card to a different/sub domain during split/merge."},
-                "reason": {"type": "string", "description": "Reason for modification or quality update"},
-                "usefulness": {"type": "integer", "description": "How useful this card was during reflection. Range -5 to +5."},
-                "misleading": {"type": "integer", "description": "How misleading this card was during reflection. Range -5 to +5."},
-                "comment": {"type": "string", "description": "Quality description, max 100 chars."},
-            }, "required": ["card_id", "reason"], "additionalProperties": False},
-        }},
-        {"type": "function", "function": {
-            "name": "query_domain",
-            "description": "List all L2 cards and L3 skills in a domain. Use to inspect domain contents before splitting or merging.",
-            "parameters": {"type": "object", "properties": {
-                "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
-            }, "required": ["domain"], "additionalProperties": False},
-        }},
-    ]
 
-    def _setup_l2_consolidation(self):
-        agent = self
-
-        def deprecate_l2_card(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "deprecate", "target": args["card_id"],
-                "reason": args["reason"], "layer": "l2",
-            })
-            return f"已记录: 删除 {args['card_id']}"
-
-        def create_l2_card(args: dict) -> str:
-            agent._pending_mods.append({
-                "type": "create", "target": "", "layer": "l2",
-                "reason": args["reason"],
-                "payload": {
-                    "content": args["content"],
-                    "domain": args.get("domain", "general"),
-                },
-            })
-            return f"已记录: 创建新卡片"
-
-        def modify_l2_card(args: dict) -> str:
-            payload = {"content": args.get("content", "")}
-            if "domain" in args and args["domain"]:
-                payload["domain"] = args["domain"]
-            if "usefulness" in args:
-                payload["usefulness"] = args["usefulness"]
-            if "misleading" in args:
-                payload["misleading"] = args["misleading"]
-            if "comment" in args:
-                payload["comment"] = args["comment"]
-            agent._pending_mods.append({
-                "type": "update", "target": args["card_id"], "layer": "l2",
-                "reason": args["reason"], "payload": payload,
-            })
-            return f"已记录: 修改 {args['card_id']}"
-
-        def query_domain(args: dict) -> str:
-            domain = args["domain"]
-            if agent._registry is None:
-                return json.dumps({"error": "DomainRegistry not connected"})
-            l2_ids = set(agent._registry._reverse_index.get("l2", {}).get(domain, []))
-            l3_ids = set(agent._registry._reverse_index.get("l3", {}).get(domain, []))
-            cards = []
-            for c in agent._knowledge.cards:
-                if c.id in l2_ids:
-                    cards.append({"id": c.id, "content": c.content[:150],
-                                  "usefulness": c.usefulness, "last_used": str(c.last_used.isoformat())[:10]})
-            skills = []
-            if l3_ids:
-                skills = [{"name": n} for n in l3_ids]
-            return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
-                              ensure_ascii=False, default=str)
-
-        self._injector = DictInjector({
-            "query_domain": query_domain,
-            "deprecate_l2_card": deprecate_l2_card,
-            "create_l2_card": create_l2_card,
-            "modify_l2_card": modify_l2_card,
-        })
 
     def __init__(self, llm_client, knowledge, domain_nodes: list[dict] | None = None,
                  domain_registry=None):
@@ -350,12 +250,12 @@ class L2Agent(LayerAgent):
         )
 
         if l2_fmt:
-            _saved_injector = self._injector
-            self._setup_l2_consolidation()
-            self._injector._fallback = _saved_injector
+            from core.tools.registry import ToolRegistry
+            from core.tools.consolidation_tools import L2_CONSOLIDATION_TOOL_NAMES
             _allowed = {"kb_query", "read_file", "grep"}
             base_tools = [t for t in (self._get_tools(layer) or [])
                           if t["function"]["name"] in _allowed]
+            consol_schemas = ToolRegistry().get_definitions(L2_CONSOLIDATION_TOOL_NAMES)
             report_tool = self._schema_to_tool(
                 "l2_report",
                 "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
@@ -369,7 +269,7 @@ class L2Agent(LayerAgent):
                     "required": ["done", "reasoning"],
                 },
             )
-            all_tools = base_tools + self._L2_CONSOLIDATION_TOOLS + [report_tool]
+            all_tools = base_tools + consol_schemas + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                     capture_tools={"l2_report"})
@@ -658,10 +558,10 @@ class L2Manager(LayerManager):
     def notify(self) -> Any:
         if self._l2_notify:
             result = dict(self._l2_notify)
-            if self._agent:
-                mods = self._agent.get_pending_mods()
-                if mods:
-                    result["l2_modifications"] = mods
+            from core.tools.consolidation_tools import get_pending_mods
+            mods = get_pending_mods()
+            if mods:
+                result["l2_modifications"] = mods
             return result
         return {"status": "ok", "layer": self.name}
 
