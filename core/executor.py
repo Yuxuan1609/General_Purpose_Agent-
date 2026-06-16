@@ -85,8 +85,10 @@ class Executor:
             "notify_layers": notify_layers,
         }
 
-        if self._learning_dir and session.get("enable_learning", True):
-            self._write_pending(obs, notify_layers, result)
+        # _write_pending is deprecated — Agent uses record_learning tool instead.
+        # Learning records are now written by record_learning → pending dir.
+        # if self._learning_dir and session.get("enable_learning", True):
+        #     self._write_pending(obs, notify_layers, result)
 
         return result
 

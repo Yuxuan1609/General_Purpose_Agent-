@@ -67,9 +67,9 @@ class TestExecutor:
         assert result["notify_layers"]["l2"]["cards"] == 3
         assert result["notify_layers"]["l3"]["skills"] == 2
 
-    def test_execute_writes_pending_when_learning_enabled(self, mock_llm, layer_chain, tmp_path):
+    def test_execute_no_longer_writes_pending(self, mock_llm, layer_chain, tmp_path):
+        """_write_pending is deprecated — record_learning tool handles learning now."""
         from core.executor import Executor
-        import json
 
         learning_dir = tmp_path / "data" / "learning"
         executor = Executor(
@@ -87,15 +87,8 @@ class TestExecutor:
         executor.execute(obs)
 
         pending = learning_dir / "pending"
-        assert pending.exists()
-        files = list(pending.rglob("*.json"))
-        assert len(files) == 1
-
-        with open(files[0], encoding="utf-8") as f:
-            recs = json.load(f)
-        assert isinstance(recs, list) and len(recs) == 1
-        assert recs[0]["session"]["id"] == "test-session"
-        assert "notify_layers" in recs[0]
+        files = list(pending.rglob("*.json")) if pending.exists() else []
+        assert len(files) == 0
 
     def test_execute_skips_pending_when_learning_disabled(self, mock_llm, layer_chain, tmp_path):
         from core.executor import Executor

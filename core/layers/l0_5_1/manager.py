@@ -270,6 +270,15 @@ class L1Agent(LayerAgent):
             "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
             "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
         )
+        learning_guidance = (
+            "## 学习记录\n"
+            "如果本轮产生了值得固化的知识，调用 record_learning。判断标准:\n"
+            "- 完成了复杂任务且用到了可复用策略\n"
+            "- 发现 L2知识缺口或 L3技能缺口\n"
+            "- 用户给出明确的正向/负向反馈\n"
+            "只填 domain, learning_target, importance, reasoning。\n"
+            "L2/L3的详细evidence会由后台自动补充。\n"
+        )
         return (
             f"## 认知层架构\n"
             f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。可调用 create_domain 创建新领域。不调用其他工具。\n"
@@ -281,6 +290,7 @@ class L1Agent(LayerAgent):
             f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 call_l2=true 下发给 L2/L3 执行。\n\n"
             f"## 指令\n{instruction}\n\n"
             f"{tool_rules}\n"
+            f"{learning_guidance}\n"
             f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
             f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"

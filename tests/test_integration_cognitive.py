@@ -62,8 +62,8 @@ class TestEndToEnd:
         assert "l2" in result["notify_layers"]
         assert "l3" in result["notify_layers"]
 
-    def test_execute_writes_pending_files(self, full_chain, mock_llm_with_action, tmp_path):
-        """Executor writes to pending/ when learning_dir is set (enable_learning default True)."""
+    def test_execute_no_longer_writes_pending(self, full_chain, mock_llm_with_action, tmp_path):
+        """_write_pending is deprecated — record_learning tool handles learning now."""
         learning_dir = tmp_path / "learning"
         executor = Executor(layer_root=full_chain, llm_client=mock_llm_with_action,
                            learning_dir=learning_dir)
@@ -75,5 +75,5 @@ class TestEndToEnd:
         executor.execute(obs)
 
         pending = learning_dir / "pending"
-        files = list(pending.rglob("*.json"))
-        assert len(files) == 1
+        files = list(pending.rglob("*.json")) if pending.exists() else []
+        assert len(files) == 0

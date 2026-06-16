@@ -69,10 +69,17 @@ class LayerAgent(ABC):
         """Attach a LayerInjector for tool calling capability."""
         self._injector = injector
 
+    def set_context(self, ctx) -> None:
+        self._context = ctx
+
     def _get_tools(self, layer: str) -> list[dict] | None:
         """Return tools from injector for the given layer, if available."""
         if self._injector is None:
             return None
+        ctx = getattr(self, '_context', None)
+        if ctx is not None:
+            from core.tools.registry import ToolRegistry
+            return ctx.resolve(ToolRegistry())
         getter = getattr(self._injector, "get_tools_for_layer", None)
         if getter is None:
             return None
