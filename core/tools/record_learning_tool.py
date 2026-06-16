@@ -125,11 +125,11 @@ SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target
 
 
 def _format_tree_for_llm(nodes: list) -> str:
-    """Format RoundTree with structure-aware indentation for LLM consumption."""
+    """Format RoundTree with structure-aware numbering (1, 1.1, 1.1.1) for LLM."""
     lines = []
+    l1_idx = 0
 
-    def _walk(node, depth=0):
-        prefix = "  " * depth + ("L1" if depth == 0 else "└─ L2" if depth == 1 else "     └─ L3")
+    def _walk(node, prefix: str = ""):
         if hasattr(node, 'layer'):
             layer = node.layer
             query = getattr(node, 'query', '')
@@ -143,18 +143,18 @@ def _format_tree_for_llm(nodes: list) -> str:
         else:
             return
         label = {"l0_5_1": "L1", "l2": "L2", "l3": "L3"}.get(layer, layer)
-        indent = "  " * depth
-        lines.append(f"{indent}[{label}] query: {str(query)[:200]}")
+        lines.append(f"[{prefix}{label}] query: {str(query)[:200]}")
         if result:
-            lines.append(f"{indent}[{label}] result: {str(result)[:500]}")
+            lines.append(f"[{prefix}{label}] result: {str(result)[:500]}")
         if reasoning:
-            lines.append(f"{indent}[{label}] reasoning: {str(reasoning)[:300]}")
+            lines.append(f"[{prefix}{label}] reasoning: {str(reasoning)[:300]}")
         children = getattr(node, 'children', []) if hasattr(node, 'children') else node.get('children', [])
-        for child in children:
-            _walk(child, depth + 1)
+        for c_idx, child in enumerate(children):
+            _walk(child, f"{prefix}{c_idx + 1}.")
 
     for n in nodes:
-        _walk(n, 0)
+        l1_idx += 1
+        _walk(n, f"{l1_idx}.")
         lines.append("")
     return "\n".join(lines)
 
