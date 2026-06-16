@@ -20,10 +20,14 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     if data_root is None:
         data_root = Path(__file__).resolve().parent.parent
 
+    data_path = data_root / "data" / "cognitive"
+    data_path.mkdir(parents=True, exist_ok=True)
+
     from core.seed_knowledge import init_registry
     from core.model_manager import set_model_path
     set_model_path(str(data_root / "embeddinggemma"))
-    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json")
+    reg = init_registry(data_root / "data" / "layers" / "domain_registry.json",
+                        db_path=data_path / "domain.db")
 
     meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(data_root / "data" / "layers" / "l1_rules.json")
@@ -31,8 +35,11 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         data_root / "data" / "layers" / "knowledge",
         data_root / "data" / "layers" / "knowledge" / "l2_index.json",
         domain_registry=reg,
+        db_path=data_path / "l2.db",
     )
-    sl = SkillLayer(data_root / "data" / "layers" / "skills", domain_registry=reg)
+    sl = SkillLayer(data_root / "data" / "layers" / "skills",
+                    domain_registry=reg,
+                    db_path=data_path / "l3.db")
 
     if seed:
         from core.seed_knowledge import seed_knowledge
@@ -42,6 +49,13 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm,
                     domain_registry=reg, knowledge_stores=knowledge_stores)
     _mount_tools(chain, data_root)
+
+    from core.agent_context import AgentContext
+    normal_ctx = AgentContext()
+    for layer in _iter_layers(chain):
+        if layer._agent:
+            layer._agent.set_context(normal_ctx)
+
     return chain
 
 

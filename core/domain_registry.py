@@ -325,6 +325,8 @@ class DomainRegistry:
         return {"moved_items": moved}
 
     def save(self, filepath: Path) -> None:
+        # domain_registry.json is the fallback when db_path is not set.
+        # When SQLite is active, persistence is handled by DomainSQLiteStore.
         if self._db:
             return
         import json
@@ -353,6 +355,8 @@ class DomainRegistry:
 
     @classmethod
     def load(cls, filepath: Path) -> DomainRegistry:
+        # domain_registry.json is the fallback when db_path is not set.
+        # When SQLite is active, persistence is handled by DomainSQLiteStore.
         import json
         if not filepath.exists():
             return cls()

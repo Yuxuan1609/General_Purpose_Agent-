@@ -12,7 +12,7 @@
   "backend": "numpy",
   "offset": 2,
   "build": {
-    "create": "2026-06-16T05:45:08Z",
+    "create": "2026-06-16T06:40:17Z",
     "python": "3.13.14",
     "settings": {
       "numpy": "2.2.4"
@@ -20,6 +20,6 @@
     "system": "Windows (AMD64)",
     "txtai": "8.0.0-fork"
   },
-  "update": "2026-06-16T05:45:38Z",
+  "update": "2026-06-16T06:40:45Z",
   "autoid": 1
 }

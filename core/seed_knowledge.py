@@ -7,7 +7,8 @@ from core.task import Domain
 logger = logging.getLogger(__name__)
 
 
-def init_registry(registry_path: Path, embedding_model_path: str | None = None) -> "DomainRegistry":
+def init_registry(registry_path: Path, embedding_model_path: str | None = None,
+                   db_path: Path | None = None) -> "DomainRegistry":
     from core.domain_registry import DomainRegistry
     reg = DomainRegistry.load(registry_path)
     if len(reg) == 0:
@@ -15,6 +16,20 @@ def init_registry(registry_path: Path, embedding_model_path: str | None = None) 
         reg.save(registry_path)
     if embedding_model_path:
         reg._embedding_model_path = embedding_model_path
+    if db_path:
+        from core.storage.domain_store import DomainSQLiteStore
+        reg._db = DomainSQLiteStore(db_path)
+        if reg._db.count() > 0:
+            reg._load_from_db()
+        else:
+            for path, node in reg._nodes.items():
+                reg._db.insert_node({
+                    "path": node.path,
+                    "parent": node.parent,
+                    "description": node.description,
+                    "correlations": node.correlations,
+                    "relations": node.relations,
+                })
     return reg
 
 

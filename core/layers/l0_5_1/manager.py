@@ -110,7 +110,12 @@ class L1Agent(LayerAgent):
     ]
 
     def _setup_l1_consolidation(self):
-        """Wire DictInjector for L1 consolidation tools."""
+        """Wire DictInjector for L1 consolidation tools.
+
+        NOTE: DictInjector is the legacy consolidation tool path.
+              AgentContext (via core/agent_context.py) will replace it
+              once consolidation tools are moved to ToolRegistry.
+        """
         agent = self
 
         def _getter(layer, domain):
