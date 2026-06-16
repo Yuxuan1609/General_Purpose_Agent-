@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-16 | **record_learning + RoundTree + consolidation→ToolRegistry migration + AgentContext + SQLite wiring** |
 | 2026-06-16 | **Consolidation→ToolRegistry 迁移**：将 L1/L2/L3 consolidation 工具从 DictInjector 硬编码迁移到 ToolRegistry。新增 `core/tools/consolidation_tools.py`（10 工具注册 + module-level pending_mods）。Manager notify() 改用 `consolidation_tools.get_pending_mods()`。`config/tools.yaml` 新增 consolidation allowlist。`DictInjector` 标记为 dead code。 |
 | 2026-06-16 | **sync-as-Agent-param**：所有工具 schema 新增 `sync` 可选参数（Agent 可逐次覆盖默认值）。`_call_llm` 按 sync 拆分 sync_batch/async_calls 分别走 run_sync_batch 和 TaskRunner.submit。删除 `kb_query_async`/`kb_fill_gap_async` 独立变体。`kb_check_task`/`kb_collect_tasks` 重命名为通用 `check_task`/`collect_tasks`。`ask_user` 改为 tkinter 弹窗 + console fallback。 |
 | 2026-06-15 | **KB SQLite Backend**：新增 `core/storage/kb_store.py`（KBSQLiteStore），KnowledgeBase 新增 `meta_db_path` 参数，激活后 metadata 写入 SQLite 而非 kb.json。向后兼容：不传 meta_db_path 时行为不变。 |
@@ -51,6 +52,54 @@
 | `register_async_tools` | `(registry)` | 注册 check_task 和 collect_tasks 通用异步任务管理工具 | register_all_tools() | ToolRegistry.register() |
 | `_check_task_handler` | `(args) → str` | 查询单个异步任务状态 | ToolRegistry.dispatch | TaskRunner.check() |
 | `_collect_tasks_handler` | `(args) → str` | 批量收集已完成异步任务的结果 | ToolRegistry.dispatch | TaskRunner.collect(), TaskRunner.pending_tasks() |
+
+## core/task_runner.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `TaskRunner` | `__init__(max_workers=8)` | Thread pool + task lifecycle + stats, WAL-safe singleton | _call_llm, tool handlers | threading.Lock, ThreadPoolExecutor |
+| `TaskRunner.submit` | `(tool_name, fn) → str` | Submit async task, returns task_id | async tool handlers | ThreadPoolExecutor.submit |
+| `TaskRunner.run_sync_batch` | `(calls, timeout) → list[dict]` | Parallel execution of sync tools in batch | _call_llm | — |
+| `TaskRunner.collect` | `(task_ids) → list[dict]` | Collect completed tasks, auto-remove | collect_tasks handler | — |
+| `TaskRunner.check` | `(task_id) → TaskState\|None` | Query single task status | check_task handler | — |
+| `TaskRunner.pending_tasks` | `() → list[str]` | List running task IDs | collect_tasks handler | — |
+| `TaskRunner.stats` | `() → dict` | Running statistics (count/success/error/duration) | — | — |
+| `get_task_runner` | `() → TaskRunner` | Global singleton access | _call_llm, tool handlers | — |
+
+## core/round_tree.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `DecisionNode` | `@dataclass(layer, query, result, reasoning, children, timestamp)` | Single decision tree node | L0_5_1Manager, L2Manager | — |
+| `RoundHistory` | `__init__(max_rounds=5)` | FIFO queue of decision trees (deque) | L0_5_1Manager.query() | — |
+| `RoundHistory.push` | `(l1_node) → None` | Append L1 root node (with L2/L3 children) | L0_5_1Manager.query() | — |
+| `RoundHistory.snapshot` | `(count?) → list[DecisionNode]` | Return recent N rounds | _build_and_save | — |
+| `get_round_history` | `() → RoundHistory` | Global singleton | — | — |
+
+## core/tools/record_learning_tool.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_record_learning` | `(registry, pending_dir) → None` | Register record_learning tool (sync=false) | register_all_tools() | ToolRegistry.register |
+| `_record_learning_handler` | `(args) → str` | Submit to TaskRunner, return task_id | ToolRegistry.dispatch | TaskRunner.submit, _build_and_save |
+| `_build_and_save` | `(domain, target, importance, reasoning) → dict` | Build stub → LLM fills observations → write pending JSON | _record_learning_handler | RoundTree.snapshot, _fill_observations_llm |
+| `_fill_observations_llm` | `(record, tree_nodes, target) → None` | LLM sub-agent: scan tree, extract L2/L3 observations (json_mode) | _build_and_save | build_llm_client, LLM.chat |
+| `_format_tree_for_llm` | `(nodes) → str` | Structure-aware tree formatting with numbering (1, 1.1, 1.1.1) | _fill_observations_llm | — |
+
+## core/model_manager.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `set_model_path` | `(path) → None` | Set embeddinggemma path before first load | chain_factory | — |
+| `get_model_path` | `() → str` | Return configured model path | knowledge_base, domain_registry | — |
+| `get_embedding_model` | `() → Embeddings` | Lazy-load singleton Embeddings instance | compute_embedding, KnowledgeBase | vendor.txtai_core.embeddings.Embeddings |
+
+## core/agent_context.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `AgentContext` | `@dataclass(allowed_tools, denied_tools)` | Per-environment tool allow/deny filter | chain_factory, LearningEnv | — |
+| `AgentContext.resolve` | `(registry) → list[dict]` | Return visible tool schemas | LayerAgent._get_tools | — |
 
 ## core/tools/consolidation_tools.py
 
@@ -131,13 +180,13 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。含 `_pending_mods`、`_injector` 属性。 | L1Agent, L2Agent | — |
-| `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call() |
+| `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch() |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义，供 capture_tools 使用。 | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
 | `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
 | `LayerAgent.get_pending_mods` | `() → list[dict]` | (legacy, unused) 获取并清空待处理的 consolidation 修改记录。已迁移到 consolidation_tools.get_pending_mods()。 | — | — |
 | `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | _call_llm(), _schema_to_tool() |
-| `DictInjector` | `__init__(handlers: dict[str, callable])` | (deprecated, dead code) 轻量工具注入器。Consolidation 已迁移到 ToolRegistry (consolidation_tools.py)。 | — | — |
+| `DictInjector` | `__init__(handlers: dict[str, callable])` | **(legacy, dead code)** 轻量工具注入器。Consolidation tools now in ToolRegistry (consolidation_tools.py)。 | — | — |
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |

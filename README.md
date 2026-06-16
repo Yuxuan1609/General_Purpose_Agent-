@@ -44,10 +44,10 @@ AgentRuntime → Executor → L(0.5+1) ↔ L2 ↔ L3
 **通信协议**（已实现）：
 
 ```
-Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
- 各层 Manager 驱动 Agent while-loop 循环
- NOTIFY 链返回 → Executor 组装 prompt → LLM → action
- ExecutionRecord → pending/
+Executor → QUERY 下发 → L(0.5+1)→L2→L3
+  Agent while-loop 决策（sync 工具并行，async 工具 fire-and-collect）
+  NOTIFY 返回 → Executor 收结果
+  Agent 通过 record_learning 工具自行提案学习内容
 ```
 
 - Comm Agent（UpwardComm/DownwardComm）：确定性协议处理
@@ -66,7 +66,7 @@ Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
 | **R1** | Environment 不碰 Agent 内部（不注入 tool、不修改 prompt、不调 ToolRegistry） |
 | **R2** | Agent 不感知 Environment 类型（不 `if env_type == ...`，只读 `meta`/`state` 字段） |
 | **R3** | 工具挂载由 Agent 层自主决定（Environment 只设 `state` 信号，不注入 tool 定义） |
-| **R4** | 持久化由 Executor 执行，Environment 只设 `enable_learning` 标志位 |
+| **R4** | 持久化由 Agent 通过 record_learning 工具控制，写入 data/learning/pending/ |
 | **R5** | Layer feedback 通过 `state` 字段注入，不走旁路 |
 
 **三个 Environment 对照**：
@@ -77,7 +77,7 @@ Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
 | meta 角色 | 游戏状态 + action 格式 | 修改建议格式 + 统计 | system_prompt |
 | state 信号 | 合法动作 | `lX_output_format` + feedback | `current` + `history` |
 | 工具挂载 | 无 | consolidation tools | 无（预留） |
-| 持久化 | Executor 每步写 | 不重复记录 | Executor 每轮写 |
+| 持久化 | Agent 通过 record_learning 提案 | 同上 | Executor 每轮写 |
 
 ---
 
@@ -189,6 +189,15 @@ python scripts/test_consolidation_real.py
 # 能力系统测试
 python scripts/smoke_test_injector.py
 python scripts/integration_test_capability.py
+
+# E2E 测试（11 场景）
+python scripts/test_e2e_full.py
+
+# record_learning 测试
+python scripts/test_record_learning.py
+
+# KB I/O 测试
+python scripts/test_kb_io.py
 ```
 
 ---
@@ -216,6 +225,39 @@ python scripts/integration_test_capability.py
 | L3 | 全部（含 `web_search`, `skills_*`） |
 
 > 当 `tools` 注入时自动禁用 `json_mode`（DeepSeek 不兼容）。输出改用 `@modify` markup 格式或 tool call 原生格式。
+
+---
+
+## 异步任务调度
+
+sync 是所有工具的通用参数（Agent 可逐次覆盖）：
+- sync=true（默认）：本轮阻塞等结果，同轮多个 sync 工具通过 run_sync_batch 并行执行
+- sync=false：fire-and-forget，返回 task_id，Agent 通过 collect_tasks 后续收割
+
+后端：TaskRunner（core/task_runner.py）— 线程池 + WAL 安全 task store + 运行统计。
+
+## 学习记录（record_learning）
+
+Agent 通过 record_learning 工具主动提案学习内容：
+1. L1 Agent 提供 domain + learning_target + importance + reasoning
+2. 后台 sub-agent 扫描 RoundTree（多轮 L1→L2→L3 决策树）补充 L2/L3 evidence
+3. 写入 data/learning/pending/{domain}/{uuid}.json
+4. LearningEnv 独立消费（与 Executor 解耦）
+
+## 工具系统架构
+
+所有工具通过 ToolRegistry 统一注册，AgentContext 按上下文过滤：
+- Normal mode: tools.yaml allowlist → LayerInjector → Agent
+- Consolidation mode: AgentContext.allowed_tools → ToolRegistry → Agent
+- DictInjector 已废弃（consolidation tools 迁入 ToolRegistry）
+
+## SQLite 存储
+
+运行时数据统一存 SQLite（WAL 模式，多并发安全）：
+- data/cognitive/l2.db — L2 知识卡片
+- data/cognitive/l3.db — L3 技能（含 SKILL.md 内容）
+- data/cognitive/domain.db — 领域节点 + reverse_index
+- data/cognitive/kb.db — KB 元数据
 
 ---
 
