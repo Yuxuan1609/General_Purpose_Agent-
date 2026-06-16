@@ -85,6 +85,8 @@
 | `_build_and_save` | `(domain, target, importance, reasoning) → dict` | Build stub → LLM fills observations → write pending JSON | _record_learning_handler | RoundTree.snapshot, _fill_observations_llm |
 | `_fill_observations_llm` | `(record, tree_nodes, target) → None` | LLM sub-agent: scan tree, extract L2/L3 observations (json_mode) | _build_and_save | build_llm_client, LLM.chat |
 | `_format_tree_for_llm` | `(nodes) → str` | Structure-aware tree formatting with numbering (1, 1.1, 1.1.1) | _fill_observations_llm | — |
+| `_check_auto_trigger` | `(pending_path, domain) → None` | 检查 pending/{domain}/ 下 ≥5 个文件时触发 auto-learning | _build_and_save | TaskRunner.submit |
+| `_dispatch_learning` | `(domain, pending_path, json_files) → None` | 读取记录→archive→LearningEnv→Executor→layers→step→apply 的完整学习循环 | _check_auto_trigger (via TaskRunner) | get_learning_context, LearningEnv.process_in_memory, Executor.execute, LearningEnv.step |
 
 ## core/model_manager.py
 
@@ -111,6 +113,8 @@
 | `L1_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L1 consolidation 可用工具名集合 | L1Agent.decide() | ToolRegistry.get_definitions() |
 | `L2_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L2 consolidation 可用工具名集合 | L2Agent.decide() | ToolRegistry.get_definitions() |
 | `L3_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L3 consolidation 可用工具名集合 | L3Agent.decide() | ToolRegistry.get_definitions() |
+| `set_learning_context` | `(executor, knowledge_stores) → None` | 设置全局 Executor/knowledge 引用，供 auto-learning 使用 | chain_factory, scripts | — |
+| `get_learning_context` | `() → dict` | 获取全局 Executor/knowledge 引用 | _dispatch_learning | — |
 
 ## core/domain_registry.py (Task 3)
 
@@ -448,6 +452,7 @@
 | `LearningEnv.build_task_observation` | `() → TaskObservation` | 构建 TaskObservation 供 Executor+Layers 消费 | run_leduc_cognitive.py | — |
 | `LearningEnv.build_consolidation_task` | `() → TaskObservation\|None` | L2/L3 超限时构建整理任务 | orchestrator | — |
 | `LearningEnv.archive_pending` | `() → int` | 移动已处理 records 到 learned/ | run_leduc_cognitive.py | — |
+| `LearningEnv.process_in_memory` | `(records, domain) → TaskObservation` | 从内存中的 record_learning 记录构建 TaskObservation（跳过 LLM1，简单任务格式） | _dispatch_learning | — |
 
 ## core/env/interaction_env.py
 

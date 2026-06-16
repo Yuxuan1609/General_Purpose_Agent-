@@ -9,6 +9,7 @@ _philosophy = None
 _knowledge = None
 _skill_layer = None
 _registry = None
+_executor = None
 
 _pending_mods: list[dict] = []
 
@@ -19,6 +20,26 @@ def set_consolidation_stores(phil, fk, sl, reg):
     _knowledge = fk
     _skill_layer = sl
     _registry = reg
+
+
+def set_learning_context(executor=None, knowledge_stores: dict | None = None):
+    global _executor, _philosophy, _knowledge, _skill_layer
+    if executor is not None:
+        _executor = executor
+    if knowledge_stores:
+        _philosophy = knowledge_stores.get("l1", _philosophy)
+        _knowledge = knowledge_stores.get("l2", _knowledge)
+        _skill_layer = knowledge_stores.get("l3", _skill_layer)
+
+
+def get_learning_context():
+    return {
+        "executor": _executor,
+        "philosophy": _philosophy,
+        "knowledge": _knowledge,
+        "skill_layer": _skill_layer,
+        "registry": _registry,
+    }
 
 
 def get_pending_mods() -> list[dict]:

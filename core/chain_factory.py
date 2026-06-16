@@ -50,8 +50,9 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
                     domain_registry=reg, knowledge_stores=knowledge_stores)
     _mount_tools(chain, data_root)
 
-    from core.tools.consolidation_tools import set_consolidation_stores
+    from core.tools.consolidation_tools import set_consolidation_stores, set_learning_context
     set_consolidation_stores(phil, fk, sl, reg)
+    set_learning_context(knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
 
     from core.agent_context import AgentContext
     normal_ctx = AgentContext()

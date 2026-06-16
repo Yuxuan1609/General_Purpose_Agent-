@@ -86,7 +86,76 @@ def _build_and_save(domain, target, importance, reasoning):
         f.write(content)
     Path(tmp).replace(filepath)
 
+    _check_auto_trigger(pending_path, domain)
+
     return {"status": "ok", "file": str(filepath), "id": record["id"]}
+
+
+def _check_auto_trigger(pending_path: Path, domain: str):
+    json_files = sorted(pending_path.glob("*.json"))
+    if len(json_files) < 5:
+        return
+
+    from core.task_runner import get_task_runner
+    get_task_runner().submit(
+        "auto_learning", lambda d=domain, p=pending_path, files=json_files:
+        _dispatch_learning(d, p, files))
+
+
+def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
+    import json as _json
+    import shutil
+    import logging
+    _log = logging.getLogger(__name__)
+
+    # 1. Read all records into memory
+    records = []
+    for fp in json_files:
+        try:
+            records.append(_json.loads(fp.read_text(encoding="utf-8")))
+        except (_json.JSONDecodeError, OSError):
+            _log.warning("Failed to read pending file: %s", fp)
+
+    if not records:
+        return
+
+    # 2. Move files to archive
+    archive_dir = Path("data/learning/archive") / domain.replace("/", "_")
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    for fp in json_files:
+        try:
+            shutil.move(str(fp), str(archive_dir / fp.name))
+        except OSError:
+            pass
+    _log.info("Auto-learning: archived %d files → %s", len(json_files), archive_dir)
+
+    # 3. Get learning context
+    from core.tools.consolidation_tools import get_learning_context
+    ctx = get_learning_context()
+    executor = ctx.get("executor")
+    knowledge = {"l1": ctx.get("philosophy"), "l2": ctx.get("knowledge"),
+                 "l3": ctx.get("skill_layer")}
+
+    if not executor:
+        _log.warning("Auto-learning: no Executor in context, skipping")
+        return
+
+    # 4. Create LearningEnv and build task
+    from core.env.learning_env import LearningEnv
+    lenv = LearningEnv(pending_path.parent, knowledge)
+    obs = lenv.process_in_memory(records, domain)
+    if obs is None:
+        _log.warning("Auto-learning: failed to build task observation")
+        return
+
+    # 5. Execute through layers → apply
+    try:
+        result = executor.execute(obs)
+        notify = result.get("notify_layers", {})
+        step = lenv.step(_json.dumps(notify, ensure_ascii=False, default=str))
+        _log.info("Auto-learning done: %s", step.state.observation)
+    except Exception as e:
+        _log.warning("Auto-learning execute failed: %s", e)
 
 
 SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target 扫描决策树，

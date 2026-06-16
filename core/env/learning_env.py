@@ -629,6 +629,81 @@ class LearningEnv(Environment):
         logger.info("Archived %d pending file(s) -> %s", moved, learned_dir)
         return moved
 
+    def process_in_memory(self, records: list[dict], domain: str):
+        """Build learning TaskObservation from in-memory record_learning records.
+
+        Skips LLM1 preprocessing. Formats records as '任务1: json1 ... 任务N: jsonN'.
+        Keeps L1/L2/L3 output schemas so consolidation tools are triggered.
+        """
+        task_texts = []
+        for i, rec in enumerate(records, 1):
+            task_texts.append(f"任务{i}:\n{json.dumps(rec, ensure_ascii=False, indent=2)}")
+
+        meta = (
+            f"## 自动学习任务 — {domain}\n\n"
+            f"从 {len(records)} 条记录中学习。\n\n\n"
+            + "\n\n".join(task_texts)
+        )
+
+        l1_task = (
+            "## L1 Learning Task\n\n"
+            "基于以上记录分析行为准则是否存在缺陷或改进机会。\n\n"
+            "### Judgment Criteria\n"
+            "- **deprecate**: duplicate rules, domain-specific content (→L2), vague rules\n"
+            "- **modify**: merge multiple rules, update usefulness/misleading/comment\n"
+            "- **create**: new cross-domain methodology\n\n"
+            "Use tools: deprecate_l1_rule / create_l1_rule / modify_l1_rule"
+        )
+
+        l2_task = json.dumps({
+            "criteria": (
+                f"### Context\n{domain} records.\n\n"
+                "### Judgment Criteria\n"
+                "- **deprecate**: unused/placeholder cards, >80% semantic overlap\n"
+                "- **modify**: merge similar cards, update usefulness/misleading/comment\n"
+                "- **create**: cross-domain generalization from multiple similar cards\n\n"
+                "Use tools: deprecate_l2_card / create_l2_card / modify_l2_card"
+            ),
+        }, ensure_ascii=False)
+
+        l3_task = json.dumps({
+            "criteria": (
+                f"### Context\n{domain} records.\n\n"
+                "### Judgment Criteria\n"
+                "- **deprecate**: never matched/used skills, vague content\n"
+                "- **modify**: add missing process steps, update outdated instructions\n"
+                "- **create**: compile cards into SKILL.md (YAML + Markdown)\n\n"
+                "Use tools: deprecate_l3_skill / create_l3_skill / modify_l3_skill"
+            ),
+        }, ensure_ascii=False)
+
+        session_id = f"learning_auto_{_now_iso().replace(':', '-')[:19]}"
+        return TaskObservation(
+            meta=meta,
+            state={
+                "current": meta,
+                "history": "",
+                "learning_units": records,
+                "l1_output_format": _L1_OUTPUT,
+                "l2_output_format": _L2_OUTPUT,
+                "l3_output_format": _L3_OUTPUT,
+                "l1_task": l1_task,
+                "l2_task": l2_task,
+                "l3_task": l3_task,
+                "feedback": "",
+                "l1_feedback": "",
+                "l2_feedback": "",
+                "l3_feedback": "",
+            },
+            session={
+                "domain": domain,
+                "domains_hint": ["learning/reflect", domain],
+                "id": session_id,
+                "step_index": 0,
+                "enable_learning": False,
+            },
+        )
+
     # ── notify parsing ──────────────────────────────────────────────────
 
     def _parse_notify_layers(self, action: str) -> dict:
