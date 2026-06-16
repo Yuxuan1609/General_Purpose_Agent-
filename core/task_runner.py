@@ -69,18 +69,20 @@ class TaskRunner:
         """
         futures: dict[str, Future] = {}
         for c in calls:
-            def _wrap(fn):
-                start = time.time()
-                try:
-                    result = fn()
-                    elapsed = time.time() - start
-                    self._record_stat(c["tool"], "success", elapsed)
-                    return result
-                except Exception as e:
-                    elapsed = time.time() - start
-                    self._record_stat(c["tool"], "error", elapsed)
-                    raise e
-            futures[c["id"]] = self._pool.submit(_wrap, c["exec"])
+            def _make_wrap(tool_name, fn):
+                def _wrap():
+                    start = time.time()
+                    try:
+                        result = fn()
+                        elapsed = time.time() - start
+                        self._record_stat(tool_name, "success", elapsed)
+                        return result
+                    except Exception as e:
+                        elapsed = time.time() - start
+                        self._record_stat(tool_name, "error", elapsed)
+                        raise e
+                return _wrap
+            futures[c["id"]] = self._pool.submit(_make_wrap(c["tool"], c["exec"]))
 
         results = []
         for c in calls:
