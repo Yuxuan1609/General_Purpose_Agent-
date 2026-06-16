@@ -28,5 +28,8 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     register_kb_tools(registry)
     register_async_tools(registry)
 
+    from core.tools.record_learning_tool import register_record_learning
+    register_record_learning(registry)
+
     if proposal_dir:
         set_proposal_dir(proposal_dir)

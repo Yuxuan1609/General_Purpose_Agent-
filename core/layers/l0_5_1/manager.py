@@ -536,6 +536,31 @@ class L0_5_1Manager(LayerManager):
                     "result": result.get("result", ""),
                     "reasoning": result.get("reasoning", ""),
                 }
+                # Build RoundTree node
+                from core.round_tree import DecisionNode, get_round_history
+                l1_node = DecisionNode(
+                    layer="l0_5_1",
+                    query=meta,
+                    result=self._l1_notify.get("result", ""),
+                    reasoning=self._l1_notify.get("reasoning", ""),
+                )
+                for h in self._l2_history:
+                    l2_data = h.get("l2_reply", {})
+                    l2_node = DecisionNode(
+                        layer="l2",
+                        query=str(h.get("query", "")),
+                        result=str(l2_data.get("reply", "")),
+                        reasoning=str(l2_data.get("reasoning", "")),
+                    )
+                    l3_children = l2_data.get("_l3_children", [])
+                    for l3 in l3_children:
+                        l2_node.children.append(DecisionNode(
+                            layer="l3",
+                            query=str(l3.get("task", "")),
+                            result=str(l3.get("result", "")),
+                        ))
+                    l1_node.children.append(l2_node)
+                get_round_history().push(l1_node)
                 # Cascade consolidation to L2/L3
                 if "l1_output_format" in state and self._downstream:
                     cascade_obs = TaskObservation(

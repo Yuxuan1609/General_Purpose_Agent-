@@ -113,3 +113,11 @@ tools:
     fallback:
       max_retries: 0
       degrade: []
+
+  record_learning:
+    sync: false
+    timeout: 5
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []

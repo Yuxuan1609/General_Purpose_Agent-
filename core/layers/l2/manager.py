@@ -600,6 +600,16 @@ class L2Manager(LayerManager):
                 "reply": l3_result_text[:1000],
             })
 
+        # Collect L3 children for RoundTree
+        if self._l2_notify and self._l3_history:
+            l3_children = []
+            for h in self._l3_history:
+                l3_children.append({
+                    "task": h.get("query", ""),
+                    "result": h.get("reply", ""),
+                })
+            self._l2_notify["_l3_children"] = l3_children
+
     def _propagate(self, obs, trace_id: str, l3_task: str = "",
                    selected_nodes: list[dict] | None = None) -> None:
         if self._downstream:
