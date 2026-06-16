@@ -546,6 +546,11 @@ class L0_5_1Manager(LayerManager):
                             "domains_hint": obs.session.get("domains_hint", [])
                                 if obs.session else [],
                         },
+                        session={
+                            "domain": (obs.session.get("domains_hint", ["general"])[0]
+                                       if obs.session else "general"),
+                            "enable_learning": False,
+                        },
                     )
                     self._downstream.query(cascade_obs, trace_id)
                     l2_notify = self._downstream.collect_notify()

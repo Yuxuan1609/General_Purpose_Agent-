@@ -20,6 +20,10 @@ def cascade_consolidation_to_l3(downstream, meta, state, trace_id):
             "context_history": [],
             "domains_hint": state.get("domains_hint", []),
         },
+        session={
+            "domain": state.get("domains_hint", ["general"])[0],
+            "enable_learning": False,
+        },
     )
     downstream.query(cascade_obs, trace_id)
     return downstream.collect_notify()
