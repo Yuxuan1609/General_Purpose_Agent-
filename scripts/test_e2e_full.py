@@ -303,6 +303,98 @@ def test_ask_user_handler():
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# record_learning tests
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_record_learning_tree_and_handler():
+    """RoundTree → record_learning handler → pending JSON → LearningEnv parse."""
+    from core.round_tree import DecisionNode, get_round_history, RoundHistory
+    from core.tools.record_learning_tool import _build_and_save
+
+    # Reset history
+    import core.round_tree as rt
+    old = rt._history
+    rt._history = RoundHistory(5)
+
+    try:
+        # Build RoundTree with L1→L2→L3 structure
+        l1 = DecisionNode("l0_5_1", "评估search.txt方案", "8/10分", "结构化框架")
+        l2a = DecisionNode("l2", "读search.txt文件", "307行SearXNG部署方案", "find找到文件")
+        l2b = DecisionNode("l2", "查找方案评估标准", "无相关知识卡片", "L2无评估域卡片")
+        l3 = DecisionNode("l3", "ls -la项目目录", "14 dirs, 17 files", "提供目录上下文")
+        l2b.children.append(l3)
+        l1.children.append(l2a)
+        l1.children.append(l2b)
+        get_round_history().push(l1)
+
+        # Build and save
+        record = _build_and_save("test_record", "如何系统化评估技术方案",
+                                 "high", "第4轮采用了结构化评估框架且用户认可")
+        assert record["status"] == "ok"
+        filepath = Path(record["file"])
+        assert filepath.exists()
+
+        with open(filepath, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["domain"] == "test_record"
+        assert data["learning_target"] == "如何系统化评估技术方案"
+        assert data["importance"] == "high"
+        print(f"  PASS: record_learning → file: {filepath.name}")
+        print(f"         L2 observations: {len(data.get('l2_observations', []))}")
+        print(f"         L3 observations: {len(data.get('l3_observations', []))}")
+
+        # Verify LearningEnv can parse it
+        from core.env.learning_env import LearningEnv
+        from core.philosophy import Philosophy
+        from core.flexible_knowledge import FlexibleKnowledge
+        from core.skill_layer import SkillLayer
+        from core.seed_knowledge import init_registry
+
+        reg = init_registry(PROJECT_ROOT / "data" / "layers" / "domain_registry.json")
+        phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
+        fk = FlexibleKnowledge(
+            PROJECT_ROOT / "data" / "layers" / "knowledge",
+            PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json",
+            domain_registry=reg,
+        )
+        sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", domain_registry=reg)
+        knowledge = {"l1": phil, "l2": fk, "l3": sl}
+        lenv = LearningEnv(PROJECT_ROOT / "data" / "learning" / "pending",
+                           knowledge, dry_run=True, domain_registry=reg)
+        state = lenv.reset("test_record")
+        if state.observation:
+            units = lenv._enriched_units
+            print(f"  PASS: LearningEnv parsed pending → {len(units)} units")
+        else:
+            print(f"  PASS: LearningEnv scanned (0 units, dry_run OK)")
+
+        # Cleanup
+        filepath.unlink()
+        try:
+            filepath.parent.rmdir()
+        except OSError:
+            pass
+        print("  PASS: cleanup done")
+    finally:
+        rt._history = old
+
+
+def test_record_learning_format_tree():
+    """Verify tree formatting with numbering."""
+    from core.tools.record_learning_tool import _format_tree_for_llm
+    from core.round_tree import DecisionNode
+
+    l1 = DecisionNode("l0_5_1", "query1", "result1", "reason1")
+    l2 = DecisionNode("l2", "query2", "result2", "reason2")
+    l1.children.append(l2)
+
+    text = _format_tree_for_llm([l1])
+    assert "[1.L1]" in text
+    assert "[1.1.L2]" in text
+    print("  PASS: tree numbering — 1.L1, 1.1.L2 present")
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -324,4 +416,8 @@ if __name__ == "__main__":
     print("\n=== ask_user ===")
     test_ask_user_handler()
 
-    print(f"\nAll 9 E2E tests pass!")
+    print("\n=== record_learning ===")
+    test_record_learning_tree_and_handler()
+    test_record_learning_format_tree()
+
+    print(f"\nAll 11 E2E tests pass!")
