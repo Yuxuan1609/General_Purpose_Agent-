@@ -51,13 +51,13 @@ class KnowledgeBase:
     def _ensure_emb(self):
         if self._emb is not None:
             return
-        from core.model_manager import get_model_path
+        from core.model_manager import get_model_path, get_models_cache
         self._emb = Embeddings({
             "path": get_model_path(),
             "trust_remote_code": True,
             "content": "sqlite",
             "keyword": "bm25",
-        })
+        }, models=get_models_cache())
 
     def add(self, doc: KnowledgeDoc) -> list[str]:
         return self._chunk_and_add(doc)
@@ -218,7 +218,7 @@ class KnowledgeBase:
         config_path = p / "config"
         if config_path.exists():
             try:
-                self._emb = Embeddings()
+                self._emb = Embeddings(models=get_models_cache())
                 self._emb.load(str(self._storage_path))
             except Exception:
                 logger.exception("failed to load txtai from disk, rebuilding")

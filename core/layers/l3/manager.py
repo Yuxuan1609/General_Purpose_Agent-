@@ -170,7 +170,7 @@ class L3Agent(LayerAgent):
                         "skills_used": {"type": "array", "items": {"type": "string"}},
                         "reasoning": {"type": "string"},
                     },
-                    "required": ["done", "reasoning"],
+                    "required": ["done", "result", "reasoning"],
                 },
             )
             all_tools = base_tools + consol_schemas + [report_tool]
@@ -220,6 +220,11 @@ class L3Agent(LayerAgent):
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l3_continue", "l3_report"})
+        if not result.get("done"):
+            raw = result.get("_raw") or result.get("result") or result.get("reply") or ""
+            if raw:
+                return {"done": True, "result": str(raw), "reasoning": "direct reply",
+                        "skills_used": []}
         return result
 
 
@@ -235,11 +240,14 @@ class L3Manager(LayerManager):
 
     def __init__(self, skill_layer, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None, max_rounds=3):
+                 domain_registry=None, max_rounds=None):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
         self._agent = L3Agent(auxiliary_llm, skill_layer=skill_layer, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
+        if max_rounds is None:
+            from core.config_loader import get_section
+            max_rounds = get_section('runtime', default={}).get('max_rounds_l3', 3)
         self.max_rounds = max_rounds
         self._matched: list[str] = []
         self._matched_skills: list[dict] = []

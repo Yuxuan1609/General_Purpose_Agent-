@@ -9,7 +9,8 @@
 
 | 日期 | 变更 |
 |------|------|
-| 2026-06-16 | **record_learning + RoundTree + consolidation→ToolRegistry migration + AgentContext + SQLite wiring** |
+| 2026-06-17 | **Config Overhaul**：统一 `config.yaml` 为唯一配置入口。新建 `core/config_loader.py`（`load_config`/`get_section`）。所有模块从 config 读默认值 + 构造函数可覆盖。删除 `config/layers/`（6 个 yaml）和 `config/consolidation_tools.yaml`。Consolidation spec 合并进 config.yaml。 |MAINTAIN.md 修复签名不匹配（A）、删死引用（B）、修正 dataclass 字段（C）、补缺失方法文档（D）、修正上下游引用错误（E）。README 工具表/项目结构/测试数更新。COOKBOOK 标注过时。 |`DomainRegistry.unindex_item_all()` 替代外部 `_reverse_index` 直接访问（`flexible_knowledge.py`、`consolidation_tools.py`、`threshold_scorer.py`）。删 `sub_tags` 字段链（无消费者）。删 `apply_updates` + `add_failed_proposal_record`（零调用者）。`_apply_l2`/`_apply_l3` domain 变更前校验路径存在于 DomainRegistry。 |
+| 2026-06-17 | **MetaDriver 解散 + F39 索引同步**：`validate_l1_change` 迁入 `Philosophy.add_rule/modify_rule` 内置校验。`filter_dangerous`、`check_completion`、`L1ProposalProxy` 删除。`delete_skill` 加 `unindex_item` 调用。`_apply_l2`/`_apply_l3` domain 变更后调用 `DomainRegistry.update_item_domains()`。 |
 | 2026-06-16 | **Consolidation→ToolRegistry 迁移**：将 L1/L2/L3 consolidation 工具从 DictInjector 硬编码迁移到 ToolRegistry。新增 `core/tools/consolidation_tools.py`（10 工具注册 + module-level pending_mods）。Manager notify() 改用 `consolidation_tools.get_pending_mods()`。`config/tools.yaml` 新增 consolidation allowlist。`DictInjector` 标记为 dead code。 |
 | 2026-06-16 | **sync-as-Agent-param**：所有工具 schema 新增 `sync` 可选参数（Agent 可逐次覆盖默认值）。`_call_llm` 按 sync 拆分 sync_batch/async_calls 分别走 run_sync_batch 和 TaskRunner.submit。删除 `kb_query_async`/`kb_fill_gap_async` 独立变体。`kb_check_task`/`kb_collect_tasks` 重命名为通用 `check_task`/`collect_tasks`。`ask_user` 改为 tkinter 弹窗 + console fallback。 |
 | 2026-06-15 | **KB SQLite Backend**：新增 `core/storage/kb_store.py`（KBSQLiteStore），KnowledgeBase 新增 `meta_db_path` 参数，激活后 metadata 写入 SQLite 而非 kb.json。向后兼容：不传 meta_db_path 时行为不变。 |
@@ -34,9 +35,9 @@
 | `ToolRegistry` | `__init__(domain_registry=None)` → singleton | 线程安全工具注册中心，支持域名索引 | setup scripts, LayerAgent | DomainRegistry.index_item() |
 | `ToolRegistry.register` | `(name, schema, handler, check_fn, toolset, available_domains, override, sync)` | 注册工具，可选同步到 DomainRegistry reverse index | setup scripts | DomainRegistry.index_item() |
 | `ToolRegistry.get_definitions` | `(requested=None) → list[dict]` | 获取所有可见工具的 OpenAI schema 列表 | Executor, LayerInjector | — |
-| `ToolRegistry.dispatch` | `(name, args, context) → str` | 按名分发工具调用 | ToolCapability | entry.handler() |
+| `ToolRegistry.dispatch` | `(name, args, context=None, timeout=None) → str` | 按名分发工具调用 | ToolCapability | entry.handler() |
 | `ToolRegistry.deregister` | `(name)` | 注销工具 | — | — |
-| `ToolRegistry.get_tools_for_domain` | `(domain) → list[ToolEntry]` | 按域名过滤工具列表，无 registry 时返回全部 | L2Manager, Executor | DomainRegistry.get_primary_items() |
+| `ToolRegistry.get_tools_for_domain` | `(domain) → list[ToolEntry]` | 按域名过滤工具列表，无 registry 时返回全部 | L2Manager | DomainRegistry.get_primary_items() |
 | `ToolRegistry.clear` | `()` | 重置所有条目（仅测试用） | test fixtures | — |
 
 ## core/tools/kb_tools.py
@@ -100,8 +101,9 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `AgentContext` | `@dataclass(allowed_tools, denied_tools)` | Per-environment tool allow/deny filter | chain_factory, LearningEnv | — |
-| `AgentContext.resolve` | `(registry) → list[dict]` | Return visible tool schemas | LayerAgent._get_tools | — |
+| `AgentContext` | `@dataclass(allowed_tools, denied_tools)` | Per-environment tool filter。从 `Environment.tool_policy` 构造（`from_policy()`） | chain_factory, Environment | — |
+| `AgentContext.from_policy` | `(policy: dict\|None) → AgentContext\|None` | 从 env tool_policy dict 构造；无策略返回 None | chain_factory | — |
+| `AgentContext.resolve` | `(tools: list[dict]) → list[dict]` | 按 allow/deny 过滤预过滤的 tool schema 列表。优先级：allowed > denied > pass | LayerAgent._get_tools | — |
 
 ## core/tools/consolidation_tools.py
 
@@ -113,15 +115,14 @@
 | `L1_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L1 consolidation 可用工具名集合 | L1Agent.decide() | ToolRegistry.get_definitions() |
 | `L2_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L2 consolidation 可用工具名集合 | L2Agent.decide() | ToolRegistry.get_definitions() |
 | `L3_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L3 consolidation 可用工具名集合 | L3Agent.decide() | ToolRegistry.get_definitions() |
-| `set_learning_context` | `(executor, knowledge_stores) → None` | 设置全局 Executor/knowledge 引用，供 auto-learning 使用 | chain_factory, scripts | — |
+| `set_learning_context` | `(executor=None, knowledge_stores=None) → None` | 设置全局 Executor/knowledge 引用，供 auto-learning 使用 | chain_factory, scripts | — |
 | `get_learning_context` | `() → dict` | 获取全局 Executor/knowledge 引用 | _dispatch_learning | — |
 
 ## core/domain_registry.py (Task 3)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `DomainRetrieveResult` | `@dataclass(path, depth, correlation, primary_count, explore_count, total_count)` | 单域名检索结果容器 | DomainRegistry.retrieve_from_root() | Executor, L2Manager |
-| `DomainNode` | `@dataclass(path, parent, description, correlations, relations)` | 领域树节点 | DomainRegistry | — |
+| `DomainNode` | `@dataclass(path, parent, description, correlations, relations, embedding_vector)` | 领域树节点 | DomainRegistry | — |
 | `DomainRegistry` | `__init__(nodes, embedding_model_path=None, db_path=None)` | 领域注册中心，管理 domain tree + reverse index + embedding（可选 SQLite 后端） | build_chain, seed_knowledge | DomainSQLiteStore (if db_path) |
 | `DomainRegistry._load_from_db` | `() → None` | 从 SQLite 加载 nodes + reverse_index 到内存 | __init__ | DomainSQLiteStore.list_nodes(), get_all_index() |
 | `DomainRegistry.get_node` | `(path) → DomainNode\|None` | 按路径查找节点 | L2Agent, Executor | — |
@@ -130,7 +131,13 @@
 | `DomainRegistry.get_primary_items` | `(layer, domain) → list[str]` | 获取某 layer 下某 domain 的主项 ID 列表 | L2Manager, Executor | — |
 | `DomainRegistry.get_explore_items` | `(layer, domain, threshold=0.5) → list[str]` | 按关联权重阈值获取相邻 domain 的项 ID | L2Manager, Executor | — |
 | `DomainRegistry.get_items_for_domains` | `(layer, domains) → list[str]` | 批量获取多个 domain 的项 ID（去重） | L2Manager, Executor | — |
-| `DomainRegistry.retrieve_from_root` | `(root_path, layer, depth, correlation_threshold) → list[DomainRetrieveResult]` | 从 root 递归检索子孙邻域及自身项 | L2Manager | get_primary_items, get_explore_items, children_of |
+| `DomainRegistry.index_item` | `(layer, domain, item_id) → None` | 将 item 按 domain 注册到反向索引 | FlexibleKnowledge.add_card, SkillLayer.create_skill | DomainSQLiteStore.index_item() |
+| `DomainRegistry.unindex_item` | `(layer, domain, item_id) → None` | 从反向索引移除单条 item | FlexibleKnowledge.remove_card, SkillLayer.delete_skill | DomainSQLiteStore.unindex_item() |
+| `DomainRegistry.unindex_item_all` | `(layer, item_id) → None` | 从所有 domain 索引中移除 item | consolidation_tools, FlexibleKnowledge | DomainSQLiteStore.unindex_item() |
+| `DomainRegistry.update_item_domains` | `(layer, item_id, domains) → None` | 更新 item 的 domain 归属（先清旧、后加新） | LearningEnv._apply_l2(), _apply_l3() | index_item(), unindex_item() |
+| `DomainRegistry.add_node` | `(path, parent, description, correlations, relations) → DomainNode` | 添加新的 domain 树节点 | consolidation_tools, seed_knowledge | DomainSQLiteStore.insert_node() |
+| `DomainRegistry.update_correlation` | `(a, b, weight) → None` | 更新两个 domain 间的关联权重 | consolidation_tools, compute_correlation | DomainSQLiteStore.update_node() |
+| `DomainRegistry.update_node` | `(path, **fields) → DomainNode\|None` | 按字段更新 domain 节点 | consolidation_tools | DomainSQLiteStore.update_node() |
 | `DomainRegistry.save` | `(filepath) → None` | 原子持久化 nodes + reverse_index 到 JSON（db_path 激活时为 no-op） | seed_knowledge | — |
 | `DomainRegistry.load` | `(filepath) → DomainRegistry` | 从 JSON 加载注册中心 | build_chain | — |
 
@@ -140,7 +147,6 @@
 |----------|------|------|-----------|---------|
 | `TaskObservation` | `@dataclass(meta:str, state:dict, session:dict\|None)` | 环境观测的统一格式（单步）。meta 为自然语言游戏规则 | 通信层脚本 build_prompt() | Executor.execute(), LayerManager.query() |
 | `ExecutionRecord` | `@dataclass(session, observation, notify_layers, action, result)` | Execute 后的存档记录，写入 data/learning/pending/ | Executor._write_pending() | LearningEnv |
-| `LearningUnit.enable_learning` | `bool = False` | 学习开关，True 时写入知识卡片/规则等 | LearningUnit 定义 | 学习管道 |
 
 ## core/task.py
 
@@ -149,27 +155,27 @@
 | `Domain` | `@dataclass(frozen=True, path:str, level:str)` | 层级领域标识，frozen 可用作 dict key | LearningUnit 定义 | L2 激活计算, L3 技能匹配 |
 | `Domain.parent` | `property → Domain\|None` | 返回上一级领域 | L2._domain_match_score() | — |
 | `Domain.is_ancestor_of` | `(other:Domain) → bool` | 判断是否祖先领域 | L2._domain_match_score() | — |
-| `LearningUnit` | `@dataclass(description, domain, context, needs_decomposition, subtasks, enable_learning, token_count)` | 最小学习单元，1个 Session 可拆为多个。区别于 TaskObservation（单步观测） | AgentRuntime | Executor.execute() |
+| `LearningUnit` | `@dataclass(description, domain)` | 最小学习单元，1个 Session 可拆为多个。区别于 TaskObservation（单步观测） | AgentRuntime | Executor.execute() |
 
 ## core/executor.py (NEW in Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `Executor` | `__init__(layer_root, llm_client, learning_dir, max_tokens, temperature)` | 独立决策者，只收不发 | AgentRuntime / 脚本 | LayerManager.query(), LLMClient.chat() |
-| `Executor.execute` | `(obs:TaskObservation) → dict{action_text, context, notify_layers}` | 动作周期：LayerMessage(QUERY) 链 → collect_notify → prompt → LLM | DouZeroCognitiveAgent.act() | LayerManager.query(), collect_notify(), _call_llm() |
+| `Executor.execute` | `(obs:TaskObservation) → dict{action_text, notify_layers}` | 动作周期：LayerMessage(QUERY) 链 → collect_notify → prompt → LLM | DouZeroCognitiveAgent.act() | LayerManager.query(), collect_notify(), _call_llm() |
 | `Executor._assemble_context` | `(obs) → dict{meta, state}` | 拼接 obs.meta + obs.state | execute() | _call_llm() |
 | `Executor._call_llm` | `(context:dict) → str` | _build_system_prompt + _build_user_prompt → LLM | execute() | LLMClient.chat() |
 | `Executor._build_system_prompt` | `(context) → str` | 组装 [任务说明]+[行为准则](state.l1_rules)+[相关知识](state.l2_cards)+[可用技能](state.l3_skills) | _call_llm() | — |
 | `Executor._build_user_prompt` | `(context) → str` | 组装 [对局历史]+[当前局面] 从 state 提取 | _call_llm() | — |
-| `Executor._write_pending` | `(obs, notify_layers, result) → None` | enable_learning=True 时写 ExecutionRecord 到 pending/ | execute() | 文件系统 |
 
 ## config/ (Phase 1.5)
 
 | 文件 | 内容 | 使用者 |
 |------|------|--------|
-| `config/layers/l1.yaml` | L1 种子规则、max_rules、max_rule_length | Philosophy 初始化 |
-| `config/layers/l2.yaml` | L2 激活权重、decay_rate、domain_match 分数 | FlexibleKnowledge 初始化 |
-| `config/layers/l3.yaml` | L3 编译阈值、技能匹配分数 | SkillLayer 初始化 |
+| `config/layers/consolidation.yaml` | 各层内容规格与整理策略 | `LearningEnv.load_consolidation_spec()` |
+| `config.yaml` | 主配置入口（main_llm / auxiliary_llm） | `llm_factory.py` |
+| `config/layers/*` (其余) | 未接线，待 config overhaul | — |
+| `config/tools.yaml` | 工具 per-layer allowlist | `ToolCapability._get_allowlist()` |
 
 ## core/layers/comm.py (Phase 1.5)
 
@@ -183,14 +189,12 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。含 `_pending_mods`、`_injector` 属性。 | L1Agent, L2Agent | — |
+| `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。含 `_injector` 属性。 | L1Agent, L2Agent | — |
 | `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch() |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义，供 capture_tools 使用。 | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
 | `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
-| `LayerAgent.get_pending_mods` | `() → list[dict]` | (legacy, unused) 获取并清空待处理的 consolidation 修改记录。已迁移到 consolidation_tools.get_pending_mods()。 | — | — |
 | `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | _call_llm(), _schema_to_tool() |
-| `DictInjector` | `__init__(handlers: dict[str, callable])` | **(legacy, dead code)** 轻量工具注入器。Consolidation tools now in ToolRegistry (consolidation_tools.py)。 | — | — |
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
@@ -222,7 +226,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3Manager` | `__init__(skill_layer, downstream, upward, downward, auxiliary_llm)` | L3 层 Manager，包裹 SkillLayer + L3Agent | build_chain() | — |
+| `L3Manager` | `__init__(skill_layer, downstream, upward, downward, auxiliary_llm, domain_registry=None, max_rounds=3)` | L3 层 Manager，包裹 SkillLayer + L3Agent | build_chain() | — |
 | `L3Manager.query` | `(msg, trace_id) → None` | 确定性匹配技能 → while 循环 decide() 决策执行 | L2Manager._propagate | SkillLayer.match(), L3Agent.decide() |
 | `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
 | `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
@@ -233,7 +237,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent | build_chain() | — |
+| `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm, domain_registry=None, max_rounds=3)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent | build_chain() | — |
 | `L2Manager.query` | `(msg, trace_id) → None` | while 循环 + decide() → propagate queries_to_L3 → 收集 NOTIFY | L0_5_1 DownwardComm | L2Agent.decide(), _propagate(), collect_notify() |
 | `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
 | `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
@@ -245,7 +249,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L0_5_1Manager` | `__init__(meta_driver, philosophy, auxiliary_llm, downstream, upward, downward, domain_registry, max_rounds, knowledge_stores)` | L(0.5+1) 层 Manager，包裹 MetaDriver + Philosophy | build_chain() | — |
+| `L0_5_1Manager` | `__init__(philosophy, auxiliary_llm, downstream, upward, downward, domain_registry, max_rounds, knowledge_stores)` | L(0.5+1) 层 Manager，包裹 Philosophy + L1Agent | build_chain() | — |
 | `L0_5_1Manager.query` | `(msg, trace_id) → None` | while 循环调用 decide() → propagate queries 到 L2 → 收集 NOTIFY | Executor / 上层 | self._agent.decide(), self._downward.wrap_query(), collect_notify() |
 | `L0_5_1Manager.notify` | `() → dict` | 返回 `{done, result, reasoning}` 或 `{status:"ok"}` | collect_notify() | — |
 | `L0_5_1Manager.process` | `(data) → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | LayerManager.query() | — |
@@ -267,52 +271,54 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `_seed_knowledge` | `(fk, phil, sl) → None` | 注入 seed: L1 规则 + L2 卡片 + L3 技能(L2 Node 映射) | build_chain() | fk.add_card(), sl.create_skill() |
-| `_seed_l3_skills` | `(sl) → None` | 创建 leduc + doudizhu 的 L3 技能(含 relevance_domain) | _seed_knowledge() | SkillLayer.create_skill() |
 | `_setup_logging` | `() → log_dir` | 创建 per-agent 文件日志(l0_5_1.log, l2.log, l3.log, executor.log) | main() | logging |
 
 ## core/layers/__init__.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `build_chain` | `(meta_driver, philosophy, flexible_knowledge, skill_layer, auxiliary_llm, domain_registry, knowledge_stores) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1) | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
-| `_make_content_getter` | `(fk, sl) → Callable[[str, str], list[str]]` | 构造 content_getter 闭包，供 DomainRegistry.compute_embedding 使用 | chain_factory 内部 | fk.cards, sl._skills |
-
-## core/meta_driver.py
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `MetaDriver` | `__init__(validation_rules, auxiliary_llm, max_rules, max_rule_length)` | L0.5 验证器 + 安全过滤 | L0_5_1Manager, build_chain | — |
-| `MetaDriver.validate_l1_change` | `(proposal, existing_rules) → tuple[bool, str]` | 检查 not_duplicate + no_contradiction + under_limit + under_length | LearningEnv._apply_l1() | ValidationRule.check_fn |
-| `MetaDriver.filter_dangerous` | `(tool_calls:list) → list` | 过滤危险工具调用 | — | — |
-| `MetaDriver.check_completion` | `(task, messages) → str` | 判断任务完成 ("done"/"continue") | — | — |
-| `ValidationRule` | `@dataclass(id, description, check_fn)` | 验证规则容器 | DEFAULT_VALIDATORS | MetaDriver |
-| `DEFAULT_VALIDATORS` | `list[ValidationRule]` | 默认验证器 (not_duplicate, no_contradiction) | build_chain, tests | — |
-| `L1ProposalProxy` | `__init__(content, reason, domain)` | L1Proposal 轻量代理 | — | — |
+| `build_chain` | `(philosophy, flexible_knowledge, skill_layer, auxiliary_llm, domain_registry, knowledge_stores) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1) | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
 
 ## core/philosophy.py (已有，层内部使用)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `Philosophy` | `__init__(rules_path, max_rules, max_rule_length)` | L1 可演化行为规则管理（source="l0_5"不可变，"l1"可变） | L0_5_1Manager | — |
+| `Rule` | `@dataclass(id, content, created_by, source, added_at, version, last_modified, usefulness, misleading, comment)` | L1 规则数据类 | Philosophy | — |
+| `L1Proposal` | `@dataclass(content, reason, rule_id, domain)` | 规则变更提案 | LearningEnv | Philosophy.apply() |
+| `Philosophy` | `__init__(rules_path, max_rules, max_rule_length, db_path=None)` | L1 可演化行为规则管理（source="l0_5"不可变，"l1"可变）。内置自动校验。优先 SQLite 加载。 | L0_5_1Manager | L1SQLiteStore (if db_path) |
 | `Philosophy.all_rules` | `() → list[Rule]` | 返回所有规则（L0.5 + L1） | L1Agent._build_system_prompt | — |
 | `Philosophy.l1_rules` | `() → list[Rule]` | 仅返回 L1 可变规则 | Verifier, test | — |
 | `Philosophy.l0_5_rules` | `() → list[Rule]` | 仅返回 L0.5 不可变宪法 | — | — |
-| `Philosophy.add_rule` | `(content, created_by, source="l1") → Rule` | 添加新规则 | seed, L0_5_1Manager | _save() |
-| `Philosophy.modify_rule` | `(rule_id, new_content) → Rule` | 修改规则（拒绝L0.5） | L0_5_1Manager | _save() |
-| `Philosophy.remove_rule` | `(rule_id) → None` | 删除规则（拒绝L0.5） | L0_5_1Manager | _save() |
+| `Philosophy.add_rule` | `(content, created_by, source="l1") → Rule` | 添加新规则（自动校验 not_duplicate + no_contradiction + max_rules） | seed, L0_5_1Manager, LearningEnv | _validate_rule_change(), _save() |
+| `Philosophy.modify_rule` | `(rule_id, new_content) → Rule` | 修改规则（拒绝L0.5，自动校验）| L0_5_1Manager, LearningEnv | _validate_rule_change(), _save() |
+| `Philosophy.remove_rule` | `(rule_id) → None` | 删除规则（拒绝L0.5）| L0_5_1Manager | _save() |
+| `Philosophy._validate_rule_change` | `(content, skip_rule_id) → None` | 校验规则变更：duplicate、contradiction、max_rules；不通过 raise ValueError | add_rule(), modify_rule() | _check_not_duplicate(), _check_no_contradiction() |
+| `Philosophy.apply` | `(proposal: L1Proposal) → Rule` | 按 proposal 调用 add_rule 或 modify_rule | LearningEnv | add_rule(), modify_rule() |
+| `_check_not_duplicate` | `(content, existing_rules) → tuple[bool, str]` | 检查新规则是否与已有规则重复 | _validate_rule_change | — |
+| `_check_no_contradiction` | `(content, existing_rules) → tuple[bool, str]` | 检查新规则是否与已有规则矛盾 | _validate_rule_change | — |
 
 ## core/flexible_knowledge.py (已有，层内部使用)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `FlexibleKnowledge` | `__init__(knowledge_dir, index_path, domain_registry=None, db_path=None)` | L2 知识卡片管理（可选 SQLite 后端） | L2Manager | L2SQLiteStore (if db_path) |
-| `FlexibleKnowledge.get_active_cards` | `(domain, context, top_k) → list[KnowledgeCard]` | 按激活值排序返回 top-k 活跃卡片 | L2Manager.process() | KnowledgeCard.compute_activation() |
+| `FlexibleKnowledge` | `__init__(knowledge_dir, index_path, domain_registry=None, db_path=None)` | L2 知识卡片管理（SQLite 后端） | L2Manager | L2SQLiteStore (if db_path) |
 | `FlexibleKnowledge.get_domain_cards` | `(domain) → list[KnowledgeCard]` | 返回指定 domain 下所有卡片 | L2Agent | — |
-| `FlexibleKnowledge._load_cards_from_files` | `() → list[KnowledgeCard]` | 文件模式加载卡片（当前返回空） | __init__ | — |
 | `FlexibleKnowledge._load_cards_from_db` | `() → list[KnowledgeCard]` | 从 SQLite 加载全部卡片为内存对象 | __init__ | L2SQLiteStore.list_all() |
-| `FlexibleKnowledge.add_card` | `(content, domain, sub_tags, source, available_domains) → KnowledgeCard` | 新增卡片（内存 + SQLite） | seed, L2Manager | L2SQLiteStore.insert() |
-| `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片（内存 + SQLite） | L2Manager | L2SQLiteStore.delete() |
+| `KnowledgeCard` | `@dataclass(id, content, domain, available_domains, last_used, source, created_at, updated_at, usefulness, misleading, comment)` | L2 知识卡片数据类 | FlexibleKnowledge | — |
+| `FlexibleKnowledge.add_card` | `(content, domain, source, available_domains) → KnowledgeCard` | 新增卡片（内存 + SQLite + 索引） | seed, L2Manager | L2SQLiteStore.insert(), DomainRegistry.index_item() |
+| `FlexibleKnowledge.remove_card` | `(card_id) → bool` | 删除卡片（内存 + SQLite + 索引） | L2Manager | L2SQLiteStore.delete() |
 | `FlexibleKnowledge.modify_card` | `(card_id, new_content, usefulness, misleading, comment) → KnowledgeCard\|None` | 修改卡片（内存 + SQLite） | L2Manager | L2SQLiteStore.update() |
+
+## core/storage/l1_store.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `L1SQLiteStore` | `__init__(db_path)` | SQLite WAL 模式存储 L1 规则 | Philosophy | sqlite3 |
+| `L1SQLiteStore.insert` | `(rule: dict) → None` | 插入或替换一条规则 | Philosophy.add_rule | — |
+| `L1SQLiteStore.update` | `(rule_id, **fields) → bool` | 按字段更新规则 | Philosophy.modify_rule | — |
+| `L1SQLiteStore.delete` | `(rule_id) → bool` | 删除规则 | Philosophy.remove_rule | — |
+| `L1SQLiteStore.list_all` | `() → list[dict]` | 返回全部规则 | Philosophy._load_from_db | — |
+| `L1SQLiteStore.count` | `() → int` | 返回规则总数 | Philosophy._load | — |
 
 ## core/storage/l2_store.py
 
@@ -435,20 +441,27 @@
 | `SkillLayer` | `__init__(skills_dir, domain_registry=None, db_path=None)` | L3 技能管理（可选 SQLite 后端） | L3Manager | L3SQLiteStore (if db_path) |
 | `SkillLayer._load_from_db` | `() → None` | 从 SQLite 加载全部技能为内存对象 | __init__ | L3SQLiteStore.list_all() |
 | `SkillLayer.match` | `(domain) → list[SkillMeta]` | 按 domain 匹配技能 | L3Manager.query() | — |
-| `SkillLayer.create_skill` | `(name, content, domain, ...) → SkillMeta` | 创建新技能（内存 + SQLite） | L3Manager | L3SQLiteStore.insert() |
+| `SkillLayer.create_skill` | `(name, content, domain, cross_domain=False, created_by="agent", available_domains=None) → SkillMeta` | 创建新技能（内存 + SQLite） | L3Manager | L3SQLiteStore.insert() |
 | `SkillLayer.edit_skill` | `(name, new_content, usefulness, misleading, comment) → SkillMeta` | 更新技能内容/质量字段（内存 + SQLite） | L3Manager | L3SQLiteStore.update() |
-| `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive + SQLite） | L3Manager | L3SQLiteStore.delete() |
+| `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive + SQLite + unindex from DomainRegistry） | L3Manager | L3SQLiteStore.delete(), DomainRegistry.unindex_item() |
 | `SkillLayer.touch_skill` | `(name) → None` | 标记技能最近使用（更新 last_used） | L3Manager.query() | — |
-| `SkillLayer.should_create_skill` | `(domain, cards) → bool` | 检查 L2→L3 编译条件 | Phase 2: Reflect | — |
-| `SkillLayer.propose_and_create` | `(domain, cards, llm) → SkillMeta\|None` | LLM 编译知识卡片为 SKILL.md | Phase 2: Reflect | — |
+
+## core/env/base.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `EnvState` | `@dataclass(observation, info)` | 环境状态 | — | — |
+| `EnvStep` | `@dataclass(state, reward, done)` | 环境 step 结果 | — | — |
+| `Environment` | `ABC(reset, step)` | 环境抽象基类 | GameEnv, LearningEnv, InteractionEnv | — |
+| `Environment.tool_policy` | `() → dict\|None` | 可选 per-env 工具过滤策略。返回 `{"allowed": [...], "denied": [...]}` 或 None。R1/R3 兼容（只给名字、不注入定义） | chain_factory | AgentContext.from_policy() |
 
 ## core/env/learning_env.py (Phase 2.1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `LearningEnv` | `__init__(pending_dir, knowledge_stores, preprocessing_llm, stats_file, ..., domain_registry=None)` | 学习环境：消费 ExecutionRecords，产出知识变更，与 GameEnv 共享 Executor+LayerChain | run_leduc_cognitive.py | ThresholdScorer, Philosophy，FlexibleKnowledge，SkillLayer, DomainRegistry |
+| `LearningEnv` | `__init__(pending_dir, knowledge_stores, preprocessing_llm, stats_file, l2_card_limit=30, l3_skill_limit=20, dry_run=False, consolidation_spec=None, domain_registry=None)` | 学习环境：消费 ExecutionRecords，产出知识变更，与 GameEnv 共享 Executor+LayerChain | run_leduc_cognitive.py | ThresholdScorer, Philosophy，FlexibleKnowledge，SkillLayer, DomainRegistry |
 | `LearningEnv.reset` | `(task_description) → EnvState` | 扫描 pending/ records，构建 observation | orchestrator | _scan_pending(), _build_learning_units() |
-| `LearningEnv.step` | `(action) → EnvStep` | 解析 NOTIFY layers → 验证 → 应用修改 → 记录统计 | Executor | _parse_notify_layers(), _apply_layer_mod() |
+| `LearningEnv.step` | `(action) → EnvStep` | 解析 NOTIFY layers → 验证 → 应用修改 → 记录统计。domain 变更自动同步 DomainRegistry 索引 | Executor | _parse_notify_layers(), _apply_layer_mod(), DomainRegistry.update_item_domains() |
 | `LearningEnv.build_task_observation` | `() → TaskObservation` | 构建 TaskObservation 供 Executor+Layers 消费 | run_leduc_cognitive.py | — |
 | `LearningEnv.build_consolidation_task` | `() → TaskObservation\|None` | L2/L3 超限时构建整理任务 | orchestrator | — |
 | `LearningEnv.archive_pending` | `() → int` | 移动已处理 records 到 learned/ | run_leduc_cognitive.py | — |
@@ -476,7 +489,7 @@
 | `ThresholdScorer.score` | `(domain) → float` | 计算某 domain 的分数 (count + tokens) | should_trigger() | _domain_records() |
 | `ThresholdScorer.should_trigger` | `(domain) → bool` | 判断是否达到学习触发阈值 | run_leduc_cognitive.py | score() |
 | `ThresholdScorer.domain_count` | `(domain) → int` | 返回某 domain 的 pending records 数量 | test | _domain_records() |
-| `ThresholdScorer.domain_health_report` | `(registry, l2_store, l3_store) → str` | 构建 domain 健康报告 Markdown 表格（card/skill 计数、correlation、状态） | LearningEnv.build_consolidation_task | DomainRegistry.list_all(), _reverse_index |
+| `ThresholdScorer.domain_health_report` | `(registry, l2_store, l3_store) → str` | 构建 domain 健康报告 Markdown 表格（card/skill 计数、correlation、状态） | LearningEnv.build_consolidation_task | DomainRegistry.list_all(), get_primary_items() |
 
 ## core/layer_message.py (已有)
 

@@ -39,9 +39,6 @@ class L2Agent(LayerAgent):
     Consolidation mode uses l2_report with ToolRegistry handlers.
     """
 
-    MAX_NODES = 5
-    MAX_CARDS = 15
-
     L2_DECISION_SCHEMA = {
         "type": "object",
         "properties": {
@@ -90,6 +87,10 @@ class L2Agent(LayerAgent):
         super().__init__(llm_client, logger)
         self._knowledge = knowledge
         self._registry = domain_registry
+        from core.config_loader import get_section
+        l2cfg = get_section('l2', default={})
+        self._max_nodes = l2cfg.get('max_nodes', 5)
+        self._max_cards = l2cfg.get('max_cards', 15)
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
@@ -128,7 +129,9 @@ class L2Agent(LayerAgent):
             if corrs:
                 parts = [f"{k}:{v:.1f}" for k, v in sorted(corrs.items())]
                 corr_str = f" corr={{ {'  '.join(parts)} }}"
-            lines.append(f"  {name} (score={score:.2f}{corr_str})")
+            rel = n.get("relations", "")
+            rel_str = f" [{rel}]" if rel else ""
+            lines.append(f"  {name} (score={score:.2f}{corr_str}){rel_str}")
         return "\n".join(lines) + "\n\n"
 
     def _format_consolidation_cards(self, domains: list[str], stats: dict) -> str:
@@ -214,7 +217,7 @@ class L2Agent(LayerAgent):
             "你有最多 5 轮工具调用次数，用完会自动截断并要求你总结。\n"
             "请在前 3-4 轮集中收集信息，最后 1-2 轮务必调用 l2_report 输出结论。\n\n"
             "*** 输出规则（极其重要）***\n"
-            "1. 如果你需要 L3 的技能来执行具体任务 → 调用【l2_query】工具下发任务\n"
+            "1. 如果你需要 L3 的技能来执行具体任务（如搜索、分析、格式化输出等有明确定义的工作） → 调用【l2_query】工具下发任务\n"
             "2. 如果你已经掌握了足够信息，可以回复上层查询 → 调用【l2_report】工具输出结论\n"
             "3. 禁止以文本方式直接输出JSON或回复，必须调用以上两个工具之一！\n\n"
             "l2_query：向下调度，done固定为false。每次只下发一个技能任务。\n"
@@ -246,7 +249,7 @@ class L2Agent(LayerAgent):
             f"{nodes_section}"
             f"[学习数据]\n{self._build_learning_section(state)}\n\n"
             f"[知识卡片]\n{cards_text}\n\n"
-            f"[L3 返回]\n{l3_text if l3_text else '（无）'}"
+            f"[L3 返回]\n{l3_text if l3_text else '当前领域无预匹配技能。如有明确可执行的任务，可通过 l2_query 下发，L3 自行判断能否完成。'}"
         )
 
         if l2_fmt:
@@ -266,7 +269,7 @@ class L2Agent(LayerAgent):
                         "reply": {"type": "string", "description": "回复上层查询的结论"},
                         "reasoning": {"type": "string"},
                     },
-                    "required": ["done", "reasoning"],
+                    "required": ["done", "reply", "reasoning"],
                 },
             )
             all_tools = base_tools + consol_schemas + [report_tool]
@@ -347,6 +350,11 @@ class L2Agent(LayerAgent):
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l2_query", "l2_report"})
+        if not result.get("done"):
+            raw = result.get("_raw") or result.get("reply") or ""
+            if raw:
+                return {"done": True, "reply": str(raw), "reasoning": "direct reply",
+                        "selected_nodes": [], "selected_cards": [], "queries_to_L3": []}
         return result
 
     def _get_cards_for_nodes(self, nodes: list[dict]) -> list:
@@ -392,11 +400,14 @@ class L2Manager(LayerManager):
 
     def __init__(self, knowledge, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None, max_rounds=3):
+                 domain_registry=None, max_rounds=None):
         super().__init__("l2", downstream, upward=upward, downward=downward)
         self._knowledge = knowledge
         self._agent = L2Agent(auxiliary_llm, knowledge, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
+        if max_rounds is None:
+            from core.config_loader import get_section
+            max_rounds = get_section('runtime', default={}).get('max_rounds_l2', 3)
         self.max_rounds = max_rounds
         self._l2_notify: dict | None = None
         self._cards: list[dict] = []
@@ -437,6 +448,8 @@ class L2Manager(LayerManager):
                 node = self._registry.get_node(name) if name else None
                 if node and node.correlations:
                     n["correlations"] = node.correlations
+                if node and node.relations:
+                    n["relations"] = node.relations
 
         if self._agent is None:
             logger.warning("L2Agent not initialized (no auxiliary_llm), skipping")

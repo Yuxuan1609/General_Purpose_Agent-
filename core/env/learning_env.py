@@ -4,8 +4,6 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
-
 from core.env.base import Environment, EnvState, EnvStep
 from core.env.threshold_scorer import ThresholdScorer
 from core.types import TaskObservation
@@ -15,35 +13,22 @@ logger = logging.getLogger(__name__)
 # ── Consolidation spec loader ──────────────────────────────────────────
 
 def load_consolidation_spec(spec_path: Path | str | None = None) -> dict:
-    """Load consolidation spec from YAML config.
+    """Load consolidation spec from config.yaml (consolidation section).
 
     Args:
-        spec_path: Path to consolidation.yaml. If None, uses the default
-                   config/layers/consolidation.yaml relative to project root.
+        spec_path: Ignored (kept for backward compatibility). Spec is read
+                   from get_section('consolidation').
 
     Returns:
         dict with per-layer entry specs, limits, and consolidation strategies.
-        Returns {} if file not found (graceful degradation).
     """
-    if spec_path is None:
-        # Try project-root-relative default path
-        candidate = Path(__file__).resolve().parent.parent.parent / "config" / "layers" / "consolidation.yaml"
+    from core.config_loader import get_section
+    spec = get_section('consolidation', default={})
+    if spec:
+        logger.debug("Loaded consolidation spec from config.yaml: %s", list(spec.keys()))
     else:
-        candidate = Path(spec_path)
-
-    if not candidate.exists():
-        logger.debug("Consolidation spec not found at %s, using defaults", candidate)
-        return {}
-
-    try:
-        with open(candidate, "r", encoding="utf-8") as f:
-            spec = yaml.safe_load(f) or {}
-        logger.debug("Loaded consolidation spec from %s: %s",
-                     candidate, list(spec.keys()))
-        return spec
-    except Exception as e:
-        logger.warning("Failed to load consolidation spec: %s", e)
-        return {}
+        logger.debug("Consolidation spec not found in config.yaml, using defaults")
+    return spec
 
 # Per-layer output format — each layer checks its key in state and merges
 # the field schema into its JSON output. Field descriptions reference
@@ -199,7 +184,8 @@ class LearningEnv(Environment):
 
     def __init__(self, pending_dir: Path, knowledge_stores: dict,
                  preprocessing_llm=None, stats_file: Path | None = None,
-                 l2_card_limit: int = 30, l3_skill_limit: int = 20,
+                 l2_card_limit: int | None = None,
+                 l3_skill_limit: int | None = None,
                  dry_run: bool = False,
                  consolidation_spec: dict | None = None,
                  domain_registry=None):
@@ -210,8 +196,10 @@ class LearningEnv(Environment):
         self._scorer = ThresholdScorer(pending_dir)
         self._stats_file = Path(stats_file) if stats_file else (
             self._pending_dir.parent / "learning_stats.json")
-        self._l2_limit = l2_card_limit
-        self._l3_limit = l3_skill_limit
+        from core.config_loader import get_section
+        learn_cfg = get_section('learning', default={})
+        self._l2_limit = l2_card_limit if l2_card_limit is not None else learn_cfg.get('l2_card_limit', 30)
+        self._l3_limit = l3_skill_limit if l3_skill_limit is not None else learn_cfg.get('l3_skill_limit', 20)
         self._dry_run = dry_run
 
         # Consolidation spec — loaded from YAML or passed directly
@@ -720,7 +708,8 @@ class LearningEnv(Environment):
         except json.JSONDecodeError:
             if self._pre_llm:
                 return self._parse_notify_llm(action)
-            return {}
+            logger.warning("Cannot parse action as JSON: %s", str(action)[:200])
+            return {"_parse_error": True}
 
         if not isinstance(parsed, dict):
             return {}
@@ -771,7 +760,7 @@ class LearningEnv(Environment):
             }
         except Exception as e:
             logger.warning("LLM parse failed: %s", e)
-            return {}
+            return {"_parse_error": True, "_error": str(e)}
 
     # ── apply ────────────────────────────────────────────────────────────
 
@@ -800,7 +789,9 @@ class LearningEnv(Environment):
         if store is None:
             raise ValueError("L1 store not available")
         content = payload.get("content", "")
-        if len(content) > 500:
+        from core.config_loader import get_section
+        max_rule_len = get_section('l1', default={}).get('max_rule_length', 300)
+        if len(content) > max_rule_len:
             raise ValueError(f"Content too long: {len(content)} chars")
         if mod_type == "create":
             store.add_rule(content, created_by="learning_env", source="l1")
@@ -827,8 +818,12 @@ class LearningEnv(Environment):
             if "domain" in payload:
                 new_domain = payload["domain"]
                 if new_domain and new_domain != result.domain.path:
+                    if self._registry and self._registry.get_node(new_domain) is None:
+                        raise ValueError(f"Domain not found in registry: {new_domain}")
                     result.domain = Domain(new_domain, "specific")
                     result.available_domains = [new_domain]
+                    if self._registry:
+                        self._registry.update_item_domains("l2", card_id, [new_domain])
         elif mod_type == "deprecate":
             if not store.remove_card(card_id):
                 raise ValueError(f"Card not found: {card_id}")
@@ -850,10 +845,14 @@ class LearningEnv(Environment):
             if "domain" in payload:
                 new_domain = payload["domain"]
                 if new_domain:
+                    if self._registry and self._registry.get_node(new_domain) is None:
+                        raise ValueError(f"Domain not found in registry: {new_domain}")
                     meta = store._skills.get(skill_name)
                     if meta:
                         meta.domain = Domain(new_domain, "specific")
                         meta.available_domains = [new_domain]
+                        if self._registry:
+                            self._registry.update_item_domains("l3", skill_name, [new_domain])
         elif mod_type == "deprecate":
             store.delete_skill(skill_name)
 
@@ -883,8 +882,8 @@ class LearningEnv(Environment):
         if self._stats_file.exists():
             try:
                 return json.loads(self._stats_file.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error("Failed to load learning stats from %s: %s", self._stats_file, e)
         return {}
 
     def _save_stats(self) -> None:

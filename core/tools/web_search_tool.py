@@ -27,7 +27,7 @@ def _search_searxng(query: str, max_results: int = 5) -> list[dict] | None:
             })
         return formatted
     except Exception as e:
-        logger.debug("SearXNG search failed: %s", e)
+        logger.warning("SearXNG search failed: %s", e)
     return None
 
 
@@ -116,7 +116,7 @@ def _search_tavily(query: str, max_results: int = 5, api_key: str = "") -> list[
             })
         return formatted
     except Exception as e:
-        logger.debug("Tavily search failed: %s", e)
+        logger.warning("Tavily search failed: %s", e)
     return []
 
 

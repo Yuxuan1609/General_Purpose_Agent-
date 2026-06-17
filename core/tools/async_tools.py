@@ -41,7 +41,7 @@ def register_async_tools(registry):
     }, _collect_tasks_handler, toolset="core", sync=True)
 
 
-def _check_task_handler(args: dict | None = None) -> str:
+def _check_task_handler(args: dict | None = None, **kwargs) -> str:
     task_id = (args or {}).get("task_id", "")
     if not task_id:
         return json.dumps({"error": "task_id required"})
@@ -56,7 +56,7 @@ def _check_task_handler(args: dict | None = None) -> str:
     })
 
 
-def _collect_tasks_handler(args: dict | None = None) -> str:
+def _collect_tasks_handler(args: dict | None = None, **kwargs) -> str:
     task_ids = (args or {}).get("task_ids", [])
     if not task_ids:
         return json.dumps({"results": [], "pending": []})

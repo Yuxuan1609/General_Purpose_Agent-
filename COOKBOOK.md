@@ -1,5 +1,7 @@
 # Cookbook：README 章节 ↔ 代码位置对照表
 
+> **⚠️ 2026-06-17: 本文档大幅过时。** 引用 `core/agent.py`、`core/agent_loop.py`、`core/layer_context.py`、`core/config.py`、`main.py` 等已删除文件。待 config overhaul 完成后统一重写。当前以 `MAINTAIN.md` 为准确参考。
+
 > 每一条 README 中描述的功能/概念，这里给出其在代码库中的精确位置。
 
 ---

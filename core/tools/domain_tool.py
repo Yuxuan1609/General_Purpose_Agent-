@@ -13,7 +13,7 @@ def set_domain_registry(reg) -> None:
 
 
 def register_create_domain(tool_registry):
-    def handler(args=None, context=None):
+    def handler(args=None, context=None, **kwargs):
         path = (args or {}).get("path", "")
         parent = (args or {}).get("parent", "general")
         description = (args or {}).get("description", "")

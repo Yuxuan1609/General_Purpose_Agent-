@@ -2,8 +2,7 @@ import pytest
 import json
 from pathlib import Path
 from core.flexible_knowledge import (
-    KnowledgeCard, FlexibleKnowledge, KnowledgeGraph,
-    RELATION_TYPES,
+    KnowledgeCard, FlexibleKnowledge,
 )
 from core.task import Domain
 
@@ -36,7 +35,6 @@ class TestKnowledgeCard:
             id="card_001",
             content="map_A的钥匙在厨房抽屉里",
             domain=textworld_domain,
-            sub_tags=["navigation", "key_location"],
             source="observation",
         )
         assert card.usefulness == 0
@@ -58,47 +56,12 @@ class TestKnowledgeCard:
         card.comment = "useful for pre-flop strategy"
         assert card.comment == "useful for pre-flop strategy"
 
-    def test_compute_activation_domain_match(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
-        act = card.compute_activation(textworld_domain)
-        assert act == 1.0  # exact domain match
-
-    def test_domain_match_exact(self, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=textworld_domain, source="observation")
-        score = card._domain_match_score(textworld_domain)
-        assert score == 1.0
-
-    def test_domain_match_general(self, general_domain, textworld_domain):
-        card = KnowledgeCard(id="card_001", content="test", domain=general_domain, source="observation")
-        score = card._domain_match_score(textworld_domain)
-        assert score == 0.4
-
-    def test_domain_match_parent(self):
-        parent = Domain("textworld", "general")
-        child = Domain("textworld/map_A", "specific")
-        card = KnowledgeCard(id="card_001", content="test", domain=parent, source="observation")
-        score = card._domain_match_score(child)
-        assert score == 0.7
-
-    def test_domain_match_unrelated(self):
-        card = KnowledgeCard(id="card_001", content="test", domain=Domain("programming/python", "specific"), source="observation")
-        score = card._domain_match_score(Domain("textworld/map_A", "specific"))
-        assert score == 0.0
-
 
 class TestFlexibleKnowledge:
     def test_add_card(self, l2_store, textworld_domain):
-        card = l2_store.add_card("map_A的钥匙在厨房抽屉里", textworld_domain, sub_tags=["key_location"], source="observation")
+        card = l2_store.add_card("map_A的钥匙在厨房抽屉里", textworld_domain, source="observation")
         assert card.id is not None
         assert len(l2_store.cards) == 1
-
-    def test_get_active_cards(self, l2_store, textworld_domain):
-        l2_store.add_card("钥匙在厨房", textworld_domain, source="observation")
-        l2_store.add_card("宝藏在阁楼", textworld_domain, source="observation")
-        l2_store.add_card("无关卡片", Domain("programming/python", "specific"), source="observation")
-        active = l2_store.get_active_cards(textworld_domain, "", top_k=5)
-        assert len(active) <= 3
-        assert all(c.domain.path.startswith("textworld") or c.domain.is_general for c in active)
 
     def test_write_md_and_rebuild_index(self, l2_store, textworld_domain):
         md_path = l2_store._write_md(textworld_domain, "map-navigation.md",
@@ -139,37 +102,3 @@ class TestFlexibleKnowledge:
         assert card.id in reg.get_primary_items("l2", "game/leduc")
         fk.remove_card(card.id)
         assert card.id not in reg.get_primary_items("l2", "game/leduc")
-
-
-class TestKnowledgeGraph:
-    def test_build_from_index(self):
-        index = {
-            "chapters": [],
-            "relations": [
-                {"from": "textworld/map-navigation", "to": "textworld/item-search", "type": "cross_reference"},
-                {"from": "textworld/map-navigation", "to": "general/task-strategy", "type": "parent_child"},
-            ]
-        }
-        graph = KnowledgeGraph(index)
-        adj = graph.get_adjacent("textworld/map-navigation")
-        assert len(adj) == 2
-        assert ("textworld/item-search", "cross_reference") in adj
-
-    def test_spread_activation(self):
-        index = {
-            "chapters": [],
-            "relations": [
-                {"from": "A", "to": "B", "type": "cross_reference"},
-                {"from": "B", "to": "C", "type": "prerequisite"},
-            ]
-        }
-        graph = KnowledgeGraph(index)
-        scores = graph.spread_activation(["A"], steps=2)
-        assert "A" in scores
-        assert scores.get("B", 0) > 0
-        assert scores.get("C", 0) > 0
-
-    def test_empty_index(self):
-        graph = KnowledgeGraph({"chapters": [], "relations": []})
-        assert graph.get_adjacent("nonexistent") == []
-        assert graph.spread_activation(["A"]) == {"A": 1.0}

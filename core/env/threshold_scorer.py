@@ -9,14 +9,18 @@ logger = logging.getLogger(__name__)
 class ThresholdScorer:
     """Score pending learning records by domain to trigger reflection."""
 
-    def __init__(self, pending_dir: Path, task_count_weight: float = 1.0,
-                 complexity_weight: float = 1.0, baseline_tokens: int = 2000,
-                 threshold: float = 5.0):
+    def __init__(self, pending_dir: Path,
+                 task_count_weight: float | None = None,
+                 complexity_weight: float | None = None,
+                 baseline_tokens: int | None = None,
+                 threshold: float | None = None):
         self._pending = pending_dir
-        self._count_weight = task_count_weight
-        self._complex_weight = complexity_weight
-        self._baseline = baseline_tokens
-        self.threshold = threshold
+        from core.config_loader import get_section
+        learn_cfg = get_section('learning', default={})
+        self._count_weight = task_count_weight if task_count_weight is not None else learn_cfg.get('trigger_count_weight', 1.0)
+        self._complex_weight = complexity_weight if complexity_weight is not None else learn_cfg.get('trigger_complexity_weight', 1.0)
+        self._baseline = baseline_tokens if baseline_tokens is not None else learn_cfg.get('trigger_baseline_tokens', 2000)
+        self.threshold = threshold if threshold is not None else learn_cfg.get('trigger_threshold', 5.0)
 
     def score(self, domain: str) -> float:
         records = self._domain_records(domain)
@@ -54,8 +58,8 @@ class ThresholdScorer:
         lines.append("|--------|----------|-----------|-------------|--------|")
         for node in registry.list_all():
             path = node.path
-            l2_count = len(registry._reverse_index.get("l2", {}).get(path, []))
-            l3_count = len(registry._reverse_index.get("l3", {}).get(path, []))
+            l2_count = len(registry.get_primary_items("l2", path))
+            l3_count = len(registry.get_primary_items("l3", path))
             corr_items = sorted(node.correlations.items())
             corr_str = ", ".join(f"{k}={v:.2f}" for k, v in corr_items[:3])
             if len(corr_items) > 3:

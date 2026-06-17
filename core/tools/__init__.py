@@ -29,6 +29,8 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     register_kb_tools(registry)
     register_async_tools(registry)
     register_consolidation_tools(registry)
+    from core.tools.sysinfo_tool import register_sysinfo_tool
+    register_sysinfo_tool(registry)
 
     from core.tools.record_learning_tool import register_record_learning
     register_record_learning(registry)

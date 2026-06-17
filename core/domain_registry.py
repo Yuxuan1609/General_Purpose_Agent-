@@ -1,6 +1,9 @@
 from __future__ import annotations
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,6 +80,15 @@ class DomainRegistry:
                     self._db.unindex_item(layer, d, item_id)
         for d in domains:
             self.index_item(layer, d, item_id)
+
+    def unindex_item_all(self, layer: str, item_id: str) -> None:
+        """Remove item from all domain entries in the reverse index."""
+        idx = self._reverse_index.get(layer, {})
+        for d, lst in idx.items():
+            if item_id in lst:
+                lst.remove(item_id)
+                if self._db:
+                    self._db.unindex_item(layer, d, item_id)
 
     # ── graph management ──
 
@@ -181,7 +193,8 @@ class DomainRegistry:
             if self._db:
                 self._db.update_node(path, embedding_vector=node.embedding_vector)
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to compute embedding for %s: %s", path, e)
             return False
 
     def compute_correlation(self, a: str, b: str) -> float:

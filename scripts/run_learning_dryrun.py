@@ -90,7 +90,6 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     # Setup knowledge stores + chain
     _load_env()
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
@@ -169,8 +168,7 @@ def main():
     # Agent: Executor + Layers (real LLM calls)
     # ═══════════════════════════════════════════════════════════════
     from core.layers import build_chain as _build_chain
-    meta_driver = MetaDriver(DEFAULT_VALIDATORS.copy())
-    chain = _build_chain(meta_driver, phil, fk, sl, auxiliary_llm=pre_llm)
+    chain = _build_chain(phil, fk, sl, auxiliary_llm=pre_llm)
 
     from core.executor import Executor
     executor = Executor(layer_root=chain, llm_client=pre_llm,

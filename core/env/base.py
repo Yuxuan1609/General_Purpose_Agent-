@@ -24,3 +24,14 @@ class Environment(ABC):
     @abstractmethod
     def step(self, action: str) -> EnvStep:
         ...
+
+    @property
+    def tool_policy(self) -> dict | None:
+        """Optional per-environment tool filter.
+
+        Returns None (no filtering) or {"allowed": [...], "denied": [...]}.
+        Priority: allowed > denied > pass.
+        Agents use this to construct AgentContext for per-env filtering.
+        Does NOT inject tool definitions — only name lists (R1/R3 compliant).
+        """
+        return None

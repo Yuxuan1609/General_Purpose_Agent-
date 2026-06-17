@@ -31,9 +31,6 @@ class L1Agent(LayerAgent):
         super().__init__(llm_client, logger)
         self._philosophy = philosophy
         self._registry = domain_registry
-        stores = knowledge_stores or {}
-        self._l2_store = stores.get("l2")
-        self._l3_store = stores.get("l3")
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
@@ -146,7 +143,13 @@ class L1Agent(LayerAgent):
             for i, n in enumerate(domain_nodes):
                 path = n.path if hasattr(n, 'path') else n.get('name', '?')
                 desc = n.description if hasattr(n, 'description') else n.get('description', '')
-                lines.append(f"{i + 1}. {path}\n   {desc}")
+                rel = getattr(n, 'relations', '')
+                line = f"{i + 1}. {path}"
+                if desc:
+                    line += f"\n   {desc}"
+                if rel:
+                    line += f"\n   关联: {rel}"
+                lines.append(line)
             nodes_text = "\n".join(lines)
 
         static_context = f"[领域节点]\n{nodes_text}" if nodes_text else ""
@@ -187,7 +190,7 @@ class L1Agent(LayerAgent):
                         "result": {"type": "string", "description": "最终决策文本"},
                         "reasoning": {"type": "string"},
                     },
-                    "required": ["done", "reasoning"],
+                    "required": ["done", "result", "reasoning"],
                 },
             )
             all_tools = base_tools + consol_schemas + [report_tool]
@@ -250,11 +253,15 @@ class L1Agent(LayerAgent):
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l1_query", "l1_report"})
+        if not result.get("done"):
+            raw = result.get("_raw") or result.get("result") or result.get("reply") or ""
+            if raw:
+                return {"done": True, "result": str(raw), "reasoning": "direct reply", "queries": []}
         return result
 
 
 class L0_5_1Manager(LayerManager):
-    """L(0.5+1) Manager — wraps MetaDriver + Philosophy + L1Agent.
+    """L(0.5+1) Manager — wraps Philosophy + L1Agent.
 
     Overrides query() to drive V-structure loop:
       Stage1 → AgentPacket(QUERY) → L2 → Stage2 → done? NOTIFY : retry
@@ -263,17 +270,19 @@ class L0_5_1Manager(LayerManager):
     TODO: Content may differ per target.
     """
 
-    def __init__(self, meta_driver, philosophy, auxiliary_llm=None,
+    def __init__(self, philosophy, auxiliary_llm=None,
                  downstream: LayerManager | None = None,
                  upward=None, downward=None,
-                 domain_registry=None, max_rounds=3,
+                 domain_registry=None, max_rounds=None,
                  knowledge_stores: dict | None = None):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
-        self._meta = meta_driver
         self._philosophy = philosophy
         self._agent = L1Agent(auxiliary_llm, philosophy, domain_registry,
                               knowledge_stores=knowledge_stores) if auxiliary_llm else None
         self._registry = domain_registry
+        if max_rounds is None:
+            from core.config_loader import get_section
+            max_rounds = get_section('runtime', default={}).get('max_rounds_l1', 5)
         self.max_rounds = max_rounds
         self._l1_notify: dict | None = None
         self._l2_history: list[dict] = []
@@ -294,7 +303,7 @@ class L0_5_1Manager(LayerManager):
 
         if self._agent is None:
             logger.warning("L1Agent not initialized (no auxiliary_llm), skipping")
-            self._l1_notify = {"done": True, "result": "", "reasoning": "no agent"}
+            self._l1_notify = {"done": False, "reasoning": "no agent"}
             return
 
         state = dict(obs.state or {})
@@ -445,7 +454,8 @@ class L0_5_1Manager(LayerManager):
             user=user_text,
             layer="l1",
         )
-        self._l1_notify = {"done": True, "result": str(force), "reasoning": "max_rounds"}
+        force_result = force.get("result", "") or force.get("_raw", "") or str(force)
+        self._l1_notify = {"done": True, "result": force_result, "reasoning": "max_rounds"}
 
     def notify(self) -> Any:
         if self._l1_notify:

@@ -1,5 +1,8 @@
+# Cognitive Agent — unified config
+# Code reads defaults from this file; constructor args can override per-runtime.
+
 main_llm:
-  provider: deepseek           # deepseek | openrouter
+  provider: deepseek
   model: deepseek-v4-flash
   api_key_env: DEEPSEEK_API_KEY
   base_url: https://api.deepseek.com
@@ -12,24 +15,107 @@ auxiliary_llm:
   api_key_env: DEEPSEEK_API_KEY
   base_url: https://api.deepseek.com
 
-max_iterations: 50
-l1_max_rules: 20
-l1_max_rule_length: 100
+# ── Runtime ──
+runtime:
+  max_rounds_l1: 5
+  max_rounds_l2: 3
+  max_rounds_l3: 3
+  max_tool_turns: 5
+  task_runner_workers: 8
 
-# Phase 1a: RLCard Leduc Hold'em
-rlcard:
-  game: leduc-holdem            # leduc-holdem | doudizhu
-  eval_episodes: 100
-  opponent: leduc-holdem-cfr    # leduc-holdem-cfr | doudizhu-rule-v1
-  seed: 42
+# ── L1 Philosophy ──
+l1:
+  max_rules: 20
+  max_rule_length: 300
+  seed_rules:
+    - "面对不确定信息时优先搜索验证，不要直接假设答案"
+    - "当同一种方法连续3次失败时，主动换策略而非坚持"
+    - "代码修改前先用 search/grep 确认改动范围和影响"
+    - "工具调用后必须检查返回结果，不能假设成功"
 
-# Phase 2: Learning pipeline
+# ── L2 FlexibleKnowledge ──
+l2:
+  max_nodes: 5
+  max_cards: 15
+
+# ── L3 SkillLayer ──
+l3:
+  match_exact: 3
+  match_parent: 2
+  match_cross_domain: 1
+  match_same_top_level: 1
+  name_regex: "^[\\w][\\w._-]*$"
+  name_max_length: 64
+
+# ── Executor ──
+executor:
+  max_tokens: 512
+  temperature: 0.1
+
+# ── LearningEnv ──
 learning:
-  enabled: true
-  task_count_weight: 1.0
-  complexity_weight: 1.0
-  baseline_tokens: 2000
-  threshold: 5.0
-  pending_dir: data/learning/pending
-  learned_dir: data/learning/learned
-  raw_dir: data/learning/raw
+  l2_card_limit: 30
+  l3_skill_limit: 20
+  trigger_threshold: 5.0
+  trigger_count_weight: 1.0
+  trigger_complexity_weight: 1.0
+  trigger_baseline_tokens: 2000
+  maintenance_trigger: 5
+
+# ── Consolidation spec (from consolidation.yaml) ──
+consolidation:
+  l1:
+    limits:
+      soft: 15
+      hard: 20
+    entry_spec:
+      fields:
+        - {name: id, type: string, format: "l1_XXXXXX", required: true, generated_by: system}
+        - {name: content, type: string, min_length: 10, max_length: 300, required: true, generated_by: agent}
+        - {name: source, type: enum, values: [l0_5, l1], required: true, generated_by: system}
+        - {name: version, type: integer, min: 1, generated_by: system}
+        - {name: created_by, type: string, values: [seed, learning_env, manual], generated_by: system}
+      anti_patterns:
+        - "与现有规则语义重复（not_duplicate 检查）"
+        - "与现有规则逻辑矛盾（no_contradiction 检查）"
+        - "过于泛化的描述（如'做出好的决策'）"
+  l2:
+    limits:
+      soft: 25
+      hard: 30
+      per_domain_soft: 20
+      per_domain_hard: 25
+    entry_spec:
+      fields:
+        - {name: id, type: string, format: "UUID 8位 hex", required: true, generated_by: system}
+        - {name: content, type: string, min_length: 20, max_length: 500, required: true, generated_by: agent}
+        - {name: domain, type: string, format: "分层路径", required: true, generated_by: agent}
+        - {name: source, type: string, values: [observation, learning_env, seed, manual], generated_by: system}
+      anti_patterns:
+        - "与同 domain 下已有卡片高度重复（>80% 语义相似）"
+        - "内容过于宽泛"
+  l3:
+    limits:
+      soft: 15
+      hard: 20
+    entry_spec:
+      fields:
+        - {name: name, type: string, format: "kebab-case", max_length: 64, pattern: "^[\\w][\\w._-]*$", required: true, generated_by: agent}
+        - {name: content, type: string, format: "YAML frontmatter + Markdown", min_length: 50, max_length: 5000, required: true, generated_by: agent}
+        - {name: domain, type: string, format: "分层路径", required: true, generated_by: agent}
+        - {name: description, type: string, max_length: 200, required: true, generated_by: agent}
+        - {name: created_by, type: string, values: [seed, learning_env, l2_compilation, manual], generated_by: system}
+      anti_patterns:
+        - "与已有技能功能高度重叠"
+  consolidation_levels:
+    0: {label: "无需整理", action: none}
+    1:
+      label: "例行整理"
+      trigger: "任一层超过软上限, 或 overflow <= 5"
+      strategy: "合并相似条目、归档过时内容"
+      reversible: true
+    2:
+      label: "深度整理"
+      trigger: "任一层 overflow > 5"
+      strategy: "激进去重、跨域抽象、L2->L3 编译"
+      reversible: false

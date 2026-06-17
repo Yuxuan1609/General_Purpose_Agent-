@@ -1,20 +1,15 @@
 from __future__ import annotations
 import json
 import logging
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
 from core.types import TaskObservation, ExecutionRecord
 from core.layer_message import LayerMessage, MessageType
+from core.layers.base import _indent
 
 logger = logging.getLogger(__name__)
-
-
-def _indent(text: str, spaces: int) -> str:
-    prefix = " " * spaces
-    return prefix + text.replace("\n", "\n" + prefix)
 
 
 class Executor:
@@ -32,12 +27,14 @@ class Executor:
     """
 
     def __init__(self, layer_root, llm_client, learning_dir: Path | None = None,
-                 max_tokens: int = 512, temperature: float = 0.1):
+                 max_tokens: int | None = None, temperature: float | None = None):
         self._root = layer_root
         self._llm = llm_client
         self._learning_dir = learning_dir
-        self._max_tokens = max_tokens
-        self._temperature = temperature
+        from core.config_loader import get_section
+        ex = get_section('executor', default={})
+        self._max_tokens = max_tokens if max_tokens is not None else ex.get('max_tokens', 512)
+        self._temperature = temperature if temperature is not None else ex.get('temperature', 0.1)
         self._session_files: dict[str, Path] = {}  # session_id → filepath
 
     def execute(self, obs: TaskObservation) -> dict:
@@ -72,7 +69,7 @@ class Executor:
                 continue
             label = layer_name.replace("l0_5_1", "L1").replace("l2", "L2").replace("l3", "L3")
             logger.debug("  %s: %s", label, json.dumps(layer_notify, ensure_ascii=False, default=str))
-        if l1_notify.get("done") and l1_notify.get("result"):
+        if l1_notify.get("done") and "result" in l1_notify:
             action_text = l1_notify["result"]
             logger.debug("  Executor action: %s", action_text)
         else:
@@ -178,7 +175,8 @@ class Executor:
             existing = json.loads(filepath.read_text(encoding="utf-8"))
             if not isinstance(existing, list):
                 existing = [existing]
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to read pending file %s: %s", filepath, e)
             return
 
         existing.append({"type": "game_end", **result})

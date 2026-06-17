@@ -240,7 +240,6 @@ def test_learning_task_e2e():
     from core.skill_layer import SkillLayer
     from core.seed_knowledge import init_registry
     from core.env.learning_env import LearningEnv
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.layers import build_chain as _build_chain
     from core.layers.logging_setup import setup_layer_logging
     from core.executor import Executor
@@ -270,8 +269,7 @@ def test_learning_task_e2e():
     task = lenv.build_task_observation()
     llm = build_llm_client(PROJECT_ROOT / "config.yaml", temperature=0.1)
 
-    meta_driver = MetaDriver(DEFAULT_VALIDATORS.copy())
-    chain = _build_chain(meta_driver, phil, fk, sl, auxiliary_llm=llm,
+    chain = _build_chain(phil, fk, sl, auxiliary_llm=llm,
                          domain_registry=reg,
                          knowledge_stores={"l2": fk, "l3": sl})
     executor = Executor(layer_root=chain, llm_client=llm,

@@ -28,13 +28,6 @@ class TestPhilosophy:
         philosophy.add_rule("rule 2", created_by="test")
         assert len(philosophy.all_rules()) == 2
 
-    def test_get_active_rules_returns_all(self, philosophy):
-        philosophy.add_rule("rule A", created_by="test")
-        philosophy.add_rule("rule B", created_by="test")
-        task = LearningUnit(description="test", domain=Domain("general", "general"))
-        active = philosophy.get_active_rules(task)
-        assert len(active) == 2
-
     def test_modify_rule(self, philosophy):
         rule = philosophy.add_rule("original content", created_by="test")
         modified = philosophy.modify_rule(rule.id, "modified content")

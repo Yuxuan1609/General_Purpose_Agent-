@@ -118,7 +118,7 @@ def register_kb_tools(registry):
     registry.register("ask_user", _schema("ask_user"), _ask_user_handler, toolset="core")
 
 
-def _ask_user_handler(args: dict | None = None) -> str:
+def _ask_user_handler(args: dict | None = None, **kwargs) -> str:
     global _ask_user_timed_out
     question = (args or {}).get("question", "")
     if not question:
@@ -223,7 +223,7 @@ def _get_llm():
 
 
 
-def _kb_query_handler(args: dict | None = None) -> str:
+def _kb_query_handler(args: dict | None = None, **kwargs) -> str:
     query = (args or {}).get("query", "")
     domain = (args or {}).get("domain")
     if not query:
@@ -242,7 +242,7 @@ def _kb_query_handler(args: dict | None = None) -> str:
         return json.dumps({"error": str(e)})
 
 
-def _kb_delete_handler(args: dict | None = None) -> str:
+def _kb_delete_handler(args: dict | None = None, **kwargs) -> str:
     doc_id = (args or {}).get("doc_id", "")
     if not doc_id:
         return json.dumps({"status": "error", "reason": "empty doc_id"})
@@ -263,7 +263,7 @@ def _kb_delete_handler(args: dict | None = None) -> str:
         return json.dumps({"status": "error", "reason": str(e)})
 
 
-def _kb_fill_gap_handler(args: dict | None = None) -> str:
+def _kb_fill_gap_handler(args: dict | None = None, **kwargs) -> str:
     suggestion = (args or {})
     domain = suggestion.get("domain", "")
     topic = suggestion.get("topic", "")

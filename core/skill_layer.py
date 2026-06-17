@@ -14,9 +14,6 @@ def _now():
 
 logger = logging.getLogger(__name__)
 
-L3_CREATION_THRESHOLD_CARDS = 3
-L3_CREATION_THRESHOLD_ACTIVATION = 0.7
-
 
 @dataclass
 class SkillMeta:
@@ -95,29 +92,39 @@ class SkillLayer:
         if self._registry:
             ids = self._registry.get_primary_items("l3", task_domain.path)
             return [self._skills[n] for n in ids if n in self._skills]
+        from core.config_loader import get_section
+        l3cfg = get_section('l3', default={})
+        exact = l3cfg.get('match_exact', 3)
+        parent = l3cfg.get('match_parent', 2)
+        cross = l3cfg.get('match_cross_domain', 1)
+        same_lvl = l3cfg.get('match_same_top_level', 1)
         from core.task import Domain
         all_skills = self.list_all()
         scored = []
         for s in all_skills:
             if s.domain.path == task_domain.path:
-                scored.append((3, s))
+                scored.append((exact, s))
             elif task_domain.parent and s.domain.path == task_domain.parent.path:
-                scored.append((2, s))
+                scored.append((parent, s))
             elif s.cross_domain and s.domain.is_general:
-                scored.append((1, s))
+                scored.append((cross, s))
             elif s.domain.path == task_domain.path.split("/")[0]:
-                scored.append((1, s))
+                scored.append((same_lvl, s))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [s for _, s in scored]
 
     def create_skill(self, name: str, content: str, domain,
                      cross_domain: bool = False, created_by: str = "agent",
                      available_domains: list[str] | None = None) -> SkillMeta:
+        from core.config_loader import get_section
         from core.task import Domain
-        if not re.match(r'^[\w][\w._-]*$', name):
+        l3cfg = get_section('l3', default={})
+        name_regex = l3cfg.get('name_regex', r'^[\w][\w._-]*$')
+        name_max_len = l3cfg.get('name_max_length', 64)
+        if not re.match(name_regex, name):
             raise ValueError(f"Invalid skill name: {name}")
-        if len(name) > 64:
-            raise ValueError(f"Skill name too long: {len(name)} > 64")
+        if len(name) > name_max_len:
+            raise ValueError(f"Skill name too long: {len(name)} > {name_max_len}")
         if available_domains is None:
             available_domains = [domain.path]
         if domain.is_general:
@@ -272,17 +279,6 @@ class SkillLayer:
         meta.updated_at = _now()
         return meta
 
-    def patch_skill(self, name: str, find: str, replace: str) -> SkillMeta:
-        skill_dir = self._find_skill_dir(name)
-        if not skill_dir:
-            raise ValueError(f"Skill not found: {name}")
-        skill_file = skill_dir / "SKILL.md"
-        content = skill_file.read_text(encoding="utf-8")
-        if find not in content:
-            raise ValueError(f"Find text not found in {name}")
-        new_content = content.replace(find, replace, 1)
-        return self.edit_skill(name, new_content)
-
     def delete_skill(self, name: str) -> None:
         skill_dir = self._find_skill_dir(name)
         if not skill_dir:
@@ -292,55 +288,16 @@ class SkillLayer:
         skill_dir.rename(archive_dir / name)
         if self._db:
             self._db.delete(name)
-        self._skills.pop(name, None)
+        meta = self._skills.pop(name, None)
+        if meta and self._registry:
+            for d in meta.available_domains:
+                self._registry.unindex_item("l3", name, d)
 
     def touch_skill(self, name: str) -> None:
         """Mark a skill as recently used."""
         meta = self._skills.get(name)
         if meta:
             meta.last_used = _now()
-
-    def should_create_skill(self, domain, domain_cards: list) -> bool:
-        cards = [c for c in domain_cards if c.domain.path == domain.path]
-        return len(cards) >= L3_CREATION_THRESHOLD_CARDS
-
-    def propose_and_create(self, domain, cards: list, llm_client=None) -> SkillMeta | None:
-        if llm_client is None:
-            return None
-        cards_text = "\n\n".join(
-            f"- [{c.id}] {c.content}"
-            for c in cards if c.domain.path == domain.path
-        )
-        prompt = (
-            f"Create a SKILL.md for domain '{domain.path}' from these knowledge cards:\n\n"
-            f"{cards_text}\n\n"
-            f"Generate YAML frontmatter + markdown body. Include name, description, "
-            f"domain, and a numbered procedure. Format exactly:\n"
-            f"---\nname: skill-name\ndescription: \"...\"\ndomain: {domain.path}\n"
-            f"cross_domain: false\nversion: 1.0.0\n---\n# Title\n\n## Procedure\n1. ..."
-        )
-        try:
-            resp = llm_client.chat(messages=[{"role": "user", "content": prompt}])
-            content = resp.text if hasattr(resp, 'text') else str(resp)
-            meta = self.create_skill(
-                f"{domain.path.replace('/', '-')}-compiled",
-                content, domain, created_by="l2_compilation",
-            )
-            meta.source_cards = [c.id for c in cards if c.domain.path == domain.path]
-            return meta
-        except Exception as e:
-            logger.warning("L2→L3 compilation failed: %s", e)
-            return None
-
-    def import_skill(self, skill_path: Path) -> SkillMeta | None:
-        skill_path = Path(skill_path)
-        if not skill_path.exists():
-            return None
-        content = skill_path.read_text(encoding="utf-8")
-        meta = self._parse_skill_meta(skill_path)
-        if meta is None:
-            return None
-        return self.create_skill(meta.name, content, meta.domain, meta.cross_domain, "seed")
 
     def _parse_skill_meta(self, skill_file: Path) -> SkillMeta | None:
         from core.task import Domain

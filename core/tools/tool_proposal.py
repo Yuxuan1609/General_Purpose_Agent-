@@ -15,7 +15,7 @@ def set_proposal_dir(directory: Path) -> None:
 
 
 def register_tool_proposal(registry):
-    def handler(args=None, context=None):
+    def handler(args=None, context=None, **kwargs):
         name = (args or {}).get("name", "")
         description = (args or {}).get("description", "")
         schema = (args or {}).get("schema", {})

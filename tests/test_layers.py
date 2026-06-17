@@ -58,24 +58,15 @@ def l1_philosophy(tmp_path):
     return Philosophy(rules_path, max_rules=20, max_rule_length=100)
 
 
-@pytest.fixture
-def l0_5_meta():
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
-    return MetaDriver(
-        validation_rules=DEFAULT_VALIDATORS.copy(),
-        auxiliary_llm=None,
-    )
-
-
 class TestL0_5_1Manager:
-    def test_process_returns_status(self, l0_5_meta, l1_philosophy):
-        manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
+    def test_process_returns_status(self, l1_philosophy):
+        manager = L0_5_1Manager(l1_philosophy, auxiliary_llm=None)
         obs = TaskObservation(meta="game rules", state={})
         result = manager.process(obs)
         assert result["status"] == "ok"
 
-    def test_notify_returns_payload(self, l0_5_meta, l1_philosophy):
-        manager = L0_5_1Manager(l0_5_meta, l1_philosophy, auxiliary_llm=None)
+    def test_notify_returns_payload(self, l1_philosophy):
+        manager = L0_5_1Manager(l1_philosophy, auxiliary_llm=None)
         payload = manager.notify()
         assert "status" in payload
         assert payload["layer"] == "l0_5_1"

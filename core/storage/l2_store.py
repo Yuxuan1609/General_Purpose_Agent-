@@ -28,7 +28,6 @@ class L2SQLiteStore:
                 content TEXT NOT NULL,
                 domain TEXT NOT NULL DEFAULT 'general',
                 available_domains TEXT NOT NULL DEFAULT '[]',
-                sub_tags TEXT NOT NULL DEFAULT '[]',
                 source TEXT NOT NULL DEFAULT 'observation',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -43,15 +42,14 @@ class L2SQLiteStore:
     def insert(self, card: dict) -> None:
         self._conn.execute("""
             INSERT OR REPLACE INTO l2_cards
-            (id, content, domain, available_domains, sub_tags, source,
+            (id, content, domain, available_domains, source,
              created_at, updated_at, last_used, usefulness, misleading, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             card["id"],
             card["content"],
             card.get("domain", "general"),
             json.dumps(card.get("available_domains", [])),
-            json.dumps(card.get("sub_tags", [])),
             card.get("source", "observation"),
             card.get("created_at", _now()),
             card.get("updated_at", _now()),
@@ -66,7 +64,7 @@ class L2SQLiteStore:
         sets = []
         values = []
         for k, v in fields.items():
-            if k in ("available_domains", "sub_tags"):
+            if k in ("available_domains",):
                 v = json.dumps(v)
             sets.append(f"{k} = ?")
             values.append(v)
@@ -110,7 +108,6 @@ class L2SQLiteStore:
             return None
         d = dict(row)
         d["available_domains"] = json.loads(d["available_domains"])
-        d["sub_tags"] = json.loads(d["sub_tags"])
         return d
 
     def close(self):

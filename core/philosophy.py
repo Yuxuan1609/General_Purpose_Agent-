@@ -36,14 +36,39 @@ class L1Proposal:
     domain: str = "general"
 
 
-class Philosophy:
-    """L1: Behavioral philosophy. Rules stored in JSON, injected into system prompt."""
+def _check_not_duplicate(content: str, existing_rules: list) -> tuple[bool, str]:
+    for r in existing_rules:
+        if content.strip() == r.content.strip():
+            return False, "新规则与已有规则完全重复"
+    return True, ""
 
-    def __init__(self, rules_path: Path, max_rules: int = 20, max_rule_length: int = 100):
+
+def _check_no_contradiction(content: str, existing_rules: list) -> tuple[bool, str]:
+    negations = ["不要", "禁止", "避免", "别"]
+    for r in existing_rules:
+        rc = r.content
+        for neg in negations:
+            if neg in content and content.replace(neg, "") in rc:
+                return False, f"新规则可能与已有规则矛盾 (涉及'{neg}')"
+    return True, ""
+
+
+class Philosophy:
+    """L1: Behavioral philosophy. Rules stored in SQLite or JSON."""
+
+    def __init__(self, rules_path: Path, max_rules: int | None = None,
+                 max_rule_length: int | None = None,
+                 db_path: Path | None = None):
         self.rules_path = Path(rules_path)
-        self.max_rules = max_rules
-        self.max_rule_length = max_rule_length
+        from core.config_loader import get_section
+        l1cfg = get_section('l1', default={})
+        self.max_rules = max_rules if max_rules is not None else l1cfg.get('max_rules', 20)
+        self.max_rule_length = max_rule_length if max_rule_length is not None else l1cfg.get('max_rule_length', 300)
         self._rules: list[Rule] = []
+        self._db = None
+        if db_path:
+            from core.storage.l1_store import L1SQLiteStore
+            self._db = L1SQLiteStore(db_path)
         self._load()
 
     def all_rules(self) -> list[Rule]:
@@ -58,17 +83,11 @@ class Philosophy:
         """
         return [r for r in self._rules if r.source != "l0_5"]
 
-    def l0_5_rules(self) -> list[Rule]:
-        """Return only L0.5 immutable constitution rules."""
-        return [r for r in self._rules if r.source == "l0_5"]
-
-    def get_active_rules(self, task) -> list[str]:
-        return [r.content for r in self._rules]
-
     def add_rule(self, content: str, created_by: str = "reflection",
                  source: str = "l1") -> Rule:
         if len(content) > self.max_rule_length:
             raise ValueError(f"Rule too long: {len(content)} > {self.max_rule_length}")
+        self._validate_rule_change(content)
         rule = Rule(
             id=f"l1_{uuid.uuid4().hex[:6]}",
             content=content,
@@ -76,6 +95,16 @@ class Philosophy:
             source=source,
         )
         self._rules.append(rule)
+        if self._db:
+            self._db.insert({
+                "id": rule.id,
+                "content": rule.content,
+                "created_by": rule.created_by,
+                "source": rule.source,
+                "added_at": rule.added_at,
+                "version": rule.version,
+                "last_modified": rule.last_modified,
+            })
         self._save()
         return rule
 
@@ -89,15 +118,29 @@ class Philosophy:
                     )
                 if len(new_content) > self.max_rule_length:
                     raise ValueError(f"Rule too long: {len(new_content)} > {self.max_rule_length}")
+                self._validate_rule_change(new_content, skip_rule_id=rule_id)
                 updated = Rule(
                     id=r.id, content=new_content, created_by=r.created_by,
                     source=r.source,
                     added_at=r.added_at, version=r.version + 1, last_modified=_now(),
                 )
                 self._rules[i] = updated
+                if self._db:
+                    self._db.update(rule_id, content=new_content, version=updated.version)
                 self._save()
                 return updated
         raise ValueError(f"Rule not found: {rule_id}")
+
+    def _validate_rule_change(self, content: str, skip_rule_id: str | None = None) -> None:
+        existing = [r for r in self._rules if r.id != skip_rule_id and r.source != "l0_5"]
+        approved, reason = _check_not_duplicate(content, existing)
+        if not approved:
+            raise ValueError(f"[not_duplicate] {reason}")
+        approved, reason = _check_no_contradiction(content, existing)
+        if not approved:
+            raise ValueError(f"[no_contradiction] {reason}")
+        if len(self._rules) >= self.max_rules:
+            raise ValueError(f"规则总数已达上限 {self.max_rules} 条")
 
     def remove_rule(self, rule_id: str) -> None:
         for r in self._rules:
@@ -109,6 +152,8 @@ class Philosophy:
                     )
                 break
         self._rules = [r for r in self._rules if r.id != rule_id]
+        if self._db:
+            self._db.delete(rule_id)
         self._save()
 
     def apply(self, proposal: L1Proposal) -> Rule:
@@ -117,10 +162,33 @@ class Philosophy:
         return self.add_rule(proposal.content, created_by="reflection")
 
     def _load(self):
+        if self._db and self._db.count() > 0:
+            self._load_from_db()
+            return
+        self._load_from_json()
+
+    def _load_from_db(self):
+        self._rules = [
+            Rule(
+                id=r["id"], content=r["content"],
+                created_by=r.get("created_by", "unknown"),
+                source=r.get("source", "l1"),
+                added_at=r.get("added_at", _now()),
+                version=r.get("version", 1),
+                last_modified=r.get("last_modified", _now()),
+                usefulness=r.get("usefulness", 0),
+                misleading=r.get("misleading", 0),
+                comment=r.get("comment", ""),
+            )
+            for r in self._db.list_all()
+        ]
+
+    def _load_from_json(self):
         if self.rules_path.exists():
             try:
                 data = json.loads(self.rules_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error("Failed to load rules from %s: %s", self.rules_path, e)
                 data = {"version": 1, "rules": []}
         else:
             data = {"version": 1, "rules": []}
@@ -137,6 +205,8 @@ class Philosophy:
         ]
 
     def _save(self):
+        if self._db:
+            return
         self.rules_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": 1,

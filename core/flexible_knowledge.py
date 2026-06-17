@@ -9,8 +9,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-RELATION_TYPES = ("parent_child", "cross_reference", "prerequisite", "analogous")
-
 
 def _now():
     return datetime.now(timezone.utc)
@@ -28,7 +26,6 @@ class KnowledgeCard:
     content: str
     domain: "Domain"
     available_domains: list[str] = field(default_factory=list)
-    sub_tags: list[str] = field(default_factory=list)
     last_used: datetime = field(default_factory=_now)
     source: str = "observation"
     created_at: datetime = field(default_factory=_now)
@@ -36,59 +33,6 @@ class KnowledgeCard:
     usefulness: int = 0
     misleading: int = 0
     comment: str = ""
-
-    def compute_activation(self, task_domain, task_context: str = "") -> float:
-        return self._domain_match_score(task_domain)
-
-    def _domain_match_score(self, task_domain) -> float:
-        from core.task import Domain
-        if self.domain.path == task_domain.path:
-            return 1.0
-        if task_domain.is_descendant_of(self.domain):
-            return 0.7
-        if self.domain.is_general:
-            return 0.4
-        if task_domain.parent and self.domain.path == task_domain.parent.path:
-            return 0.7
-        if self.domain.parent and self.domain.parent.path == task_domain.path:
-            return 0.5
-        return 0.0
-
-
-class KnowledgeGraph:
-    """Runtime graph built from l2_index.json relations."""
-
-    def __init__(self, index: dict):
-        self.adjacency: dict[str, list[tuple[str, str]]] = {}
-        self._relation_weights = {
-            "parent_child": 0.8,
-            "cross_reference": 0.6,
-            "prerequisite": 0.5,
-            "analogous": 0.7,
-        }
-        for rel in index.get("relations", []):
-            src = rel["from"]
-            tgt = rel["to"]
-            rtype = rel.get("type", "cross_reference")
-            self.adjacency.setdefault(src, []).append((tgt, rtype))
-
-    def get_adjacent(self, chapter_id: str) -> list[tuple[str, str]]:
-        return self.adjacency.get(chapter_id, [])
-
-    def spread_activation(self, seed_ids: list[str], steps: int = 2) -> dict[str, float]:
-        scores = {sid: 1.0 for sid in seed_ids}
-        current = set(seed_ids)
-        decay = 0.5
-        for _ in range(steps):
-            next_wave = set()
-            for node in current:
-                for neighbor, rtype in self.get_adjacent(node):
-                    if neighbor not in scores:
-                        weight = self._relation_weights.get(rtype, 0.5)
-                        scores[neighbor] = scores[node] * weight * decay
-                        next_wave.add(neighbor)
-            current = next_wave
-        return scores
 
 
 class FlexibleKnowledge:
@@ -99,7 +43,6 @@ class FlexibleKnowledge:
         self.knowledge_dir = Path(knowledge_dir)
         self.index_path = Path(index_path)
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
-        self.graph: KnowledgeGraph | None = None
         self._registry = domain_registry
         self._db = None
         if db_path:
@@ -107,17 +50,7 @@ class FlexibleKnowledge:
             self._db = L2SQLiteStore(db_path)
             self.cards: list[KnowledgeCard] = self._load_cards_from_db()
         else:
-            self.cards: list[KnowledgeCard] = self._load_cards_from_files()
-        self._load_index()
-
-    def get_active_cards(self, task_domain, task_context: str = "", top_k: int = 5) -> list[KnowledgeCard]:
-        scored = []
-        for card in self.cards:
-            act = card.compute_activation(task_domain, task_context)
-            if act > 0:
-                scored.append((act, card))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [c for _, c in scored[:top_k]]
+            self.cards: list[KnowledgeCard] = []
 
     def get_domain_cards(self, domain) -> list[KnowledgeCard]:
         result = []
@@ -125,9 +58,6 @@ class FlexibleKnowledge:
             if card.domain.path == domain.path or card.domain.path.startswith(domain.path + "/"):
                 result.append(card)
         return result
-
-    def _load_cards_from_files(self) -> list[KnowledgeCard]:
-        return []
 
     def _load_cards_from_db(self) -> list[KnowledgeCard]:
         from core.task import Domain
@@ -140,7 +70,6 @@ class FlexibleKnowledge:
                 content=row["content"],
                 domain=domain,
                 available_domains=row.get("available_domains", []),
-                sub_tags=row.get("sub_tags", []),
                 source=row.get("source", "observation"),
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -151,7 +80,7 @@ class FlexibleKnowledge:
             ))
         return cards
 
-    def add_card(self, content: str, domain, sub_tags: list[str] | None = None,
+    def add_card(self, content: str, domain,
                  source: str = "observation",
                  available_domains: list[str] | None = None) -> KnowledgeCard:
         if available_domains is None:
@@ -161,7 +90,6 @@ class FlexibleKnowledge:
             content=content,
             domain=domain,
             available_domains=available_domains,
-            sub_tags=sub_tags or [],
             source=source,
         )
         self.cards.append(card)
@@ -172,7 +100,6 @@ class FlexibleKnowledge:
                 "content": card.content,
                 "domain": card.domain.path,
                 "available_domains": card.available_domains,
-                "sub_tags": card.sub_tags,
                 "source": card.source,
                 "created_at": card.created_at.isoformat(),
                 "updated_at": card.updated_at.isoformat(),
@@ -192,10 +119,7 @@ class FlexibleKnowledge:
     def _unsync_card_index(self, card_id: str) -> None:
         if self._registry is None:
             return
-        idx = self._registry._reverse_index.get("l2", {})
-        for d, ids in idx.items():
-            if card_id in ids:
-                ids.remove(card_id)
+        self._registry.unindex_item_all("l2", card_id)
 
     def remove_card(self, card_id: str) -> bool:
         """Remove a knowledge card by id. Returns True if found and removed."""
@@ -238,37 +162,6 @@ class FlexibleKnowledge:
                         self._db.update(card_id, **fields)
                 return c
         return None
-
-    def update_from_tool_results(self, task, results: list):
-        for name, result_str in results:
-            success = "error" not in str(result_str).lower()
-            for card in self.get_active_cards(task.domain, "", top_k=5):
-                card.last_used = _now()
-                card.updated_at = _now()
-                if success:
-                    card.usefulness += 1
-                else:
-                    card.misleading += 1
-
-    def apply_updates(self, updates: list, domain):
-        for update in updates:
-            self.add_card(
-                content=update.get("content", ""),
-                domain=domain,
-                source=update.get("source", "reflection"),
-            )
-
-    def add_failed_proposal_record(self, proposal):
-        self.add_card(
-            content=f"L1 proposal rejected: {getattr(proposal, 'content', str(proposal))[:80]}",
-            domain=getattr(proposal, 'domain', 'general'),
-            source="reflection_rejected",
-        )
-
-    def run_decay_cycle(self):
-        # No-op: confidence/activation/decay fields removed.
-        # Quality tracking is now handled by usefulness/misleading via modify tools.
-        pass
 
     def domain_stats(self, domain) -> dict:
         cards = [c for c in self.cards
@@ -328,8 +221,8 @@ class FlexibleKnowledge:
         if self.index_path.exists():
             try:
                 old_index = json.loads(self.index_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load index from %s: %s", self.index_path, e)
 
         old_relations = old_index.get("relations", [])
         new_relations = [r for r in old_relations
@@ -348,13 +241,3 @@ class FlexibleKnowledge:
             Path(tmp).replace(self.index_path)
         finally:
             Path(tmp).unlink(missing_ok=True)
-
-    def _load_index(self):
-        if self.index_path.exists():
-            try:
-                index = json.loads(self.index_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                index = {"version": 1, "chapters": [], "relations": []}
-        else:
-            index = {"version": 1, "chapters": [], "relations": []}
-        self.graph = KnowledgeGraph(index)

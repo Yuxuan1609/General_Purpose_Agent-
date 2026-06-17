@@ -3,15 +3,15 @@ from pathlib import Path
 
 
 def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
-                        seed: bool = True):
+                        seed: bool = True, env=None):
     """Build L(0.5+1)→L2→L3 chain with default knowledge stores.
 
     Args:
         data_root: Project root (auto-detected if None).
         auxiliary_llm: Optional LLM client for layer agents.
         seed: If True, call seed_knowledge() to populate initial cards/skills.
+        env: Optional Environment for per-env tool filtering (tool_policy).
     """
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
@@ -29,8 +29,8 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     reg = init_registry(data_root / "data" / "layers" / "domain_registry.json",
                         db_path=data_path / "domain.db")
 
-    meta = MetaDriver(DEFAULT_VALIDATORS.copy())
-    phil = Philosophy(data_root / "data" / "layers" / "l1_rules.json")
+    phil = Philosophy(data_root / "data" / "layers" / "l1_rules.json",
+                       db_path=data_path / "l1.db")
     fk = FlexibleKnowledge(
         data_root / "data" / "layers" / "knowledge",
         data_root / "data" / "layers" / "knowledge" / "l2_index.json",
@@ -46,7 +46,7 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         seed_knowledge(fk, phil, sl, domain_registry=reg)
 
     knowledge_stores = {"l2": fk, "l3": sl}
-    chain = _build(meta, phil, fk, sl, auxiliary_llm=auxiliary_llm,
+    chain = _build(phil, fk, sl, auxiliary_llm=auxiliary_llm,
                     domain_registry=reg, knowledge_stores=knowledge_stores)
     _mount_tools(chain, data_root)
 
@@ -54,11 +54,14 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     set_consolidation_stores(phil, fk, sl, reg)
     set_learning_context(knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
 
-    from core.agent_context import AgentContext
-    normal_ctx = AgentContext()
-    for layer in _iter_layers(chain):
-        if layer._agent:
-            layer._agent.set_context(normal_ctx)
+    if env is not None:
+        from core.agent_context import AgentContext
+        policy = getattr(env, "tool_policy", None)
+        ctx = AgentContext.from_policy(policy)
+        if ctx is not None:
+            for layer in _iter_layers(chain):
+                if layer._agent:
+                    layer._agent.set_context(ctx)
 
     return chain
 
@@ -91,17 +94,6 @@ def _mount_tools(chain, data_root: Path):
             logging.getLogger("chain_factory").info(
                 "[%s] tools: %s", layer.name, ", ".join(tool_names) if tool_names else "(none)"
             )
-
-
-def _make_content_getter(fk, sl):
-    def getter(layer: str, domain: str) -> list[str]:
-        if layer == "l2":
-            return [c.content for c in fk.cards if domain in c.available_domains]
-        elif layer == "l3":
-            return [m.description for n, m in sl._skills.items()
-                    if domain in m.available_domains]
-        return []
-    return getter
 
 
 def _iter_layers(root):

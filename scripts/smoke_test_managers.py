@@ -40,13 +40,11 @@ L2_INDEX.parent.mkdir(exist_ok=True)
 L2_INDEX.write_text(json.dumps({"version": 1, "chapters": [], "relations": []}))
 
 # ── Build chain ──
-from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
 from core.philosophy import Philosophy
 from core.flexible_knowledge import FlexibleKnowledge
 from core.skill_layer import SkillLayer
 from core.layers import build_chain
 
-meta = MetaDriver(DEFAULT_VALIDATORS.copy())
 phil = Philosophy(RULES_PATH)
 fk = FlexibleKnowledge(LAYERS_DATA / "knowledge", L2_INDEX)
 sl = SkillLayer(LAYERS_DATA / "skills")
@@ -61,7 +59,7 @@ card2 = fk.add_card(content="card two: fold weak hands", domain=leduc, source="s
 sl.create_skill(name="test-skill-a", content="---\nname: test-skill-a\ndescription: A\n---\n# A", domain=leduc)
 sl.create_skill(name="test-skill-b", content="---\nname: test-skill-b\ndescription: B\n---\n# B", domain=leduc)
 
-chain = build_chain(meta, phil, fk, sl, auxiliary_llm=None)
+chain = build_chain(phil, fk, sl, auxiliary_llm=None)
 l1_mgr = chain
 l2_mgr = chain._downstream
 l3_mgr = l2_mgr._downstream if l2_mgr else None

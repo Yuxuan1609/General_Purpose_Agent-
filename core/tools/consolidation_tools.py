@@ -382,8 +382,8 @@ def _h_query_domain(args=None, **kwargs):
     domain = args.get("domain", "")
     if _registry is None:
         return json.dumps({"error": "DomainRegistry not connected"})
-    l2_ids = set(_registry._reverse_index.get("l2", {}).get(domain, []))
-    l3_ids = set(_registry._reverse_index.get("l3", {}).get(domain, []))
+    l2_ids = set(_registry.get_primary_items("l2", domain))
+    l3_ids = set(_registry.get_primary_items("l3", domain))
     cards = []
     if _knowledge:
         for c in _knowledge.cards:

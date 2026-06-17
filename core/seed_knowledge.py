@@ -51,7 +51,17 @@ def _seed_domain_nodes() -> "DomainRegistry":
 
 
 def seed_knowledge(fk, phil, sl=None, domain_registry=None):
-    """Seed L2 knowledge cards + L3 skills. L1 rules are managed via l1_rules.json."""
+    """Seed L2 knowledge cards + L3 skills + L1 rules from config.yaml."""
+
+    # L1 rules — from config seed_rules
+    if len(phil.all_rules()) == 0:
+        from core.config_loader import get_section
+        seed_rules = get_section('l1', default={}).get('seed_rules', [])
+        for rule_content in seed_rules:
+            try:
+                phil.add_rule(rule_content, created_by="seed", source="l1")
+            except ValueError:
+                logger.debug("Skipping duplicate seed rule: %s", rule_content[:60])
 
     # L2 knowledge cards — Leduc
     if _count_domain(fk, "game/leduc") == 0:

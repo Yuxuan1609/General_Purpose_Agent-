@@ -1,57 +1,35 @@
 import pytest
-from unittest.mock import MagicMock
-from core.meta_driver import (
-    MetaDriver,
-    DEFAULT_VALIDATORS,
-)
-from core.task import LearningUnit
-from core.philosophy import L1Proposal
+from pathlib import Path
+from core.philosophy import Philosophy, L1Proposal
 
 
 @pytest.fixture
-def mock_llm():
-    llm = MagicMock()
-    llm.chat.return_value.text = '{"completed": true, "efficient": true, "knowledge_to_create": [], "l1_proposals": []}'
-    return llm
+def phil(tmp_path):
+    rules_path = tmp_path / "l1_rules.json"
+    return Philosophy(rules_path, max_rules=3, max_rule_length=100)
 
 
-@pytest.fixture
-def meta(mock_llm):
-    return MetaDriver(DEFAULT_VALIDATORS, auxiliary_llm=mock_llm)
+class TestPhilosophyValidation:
+    def test_add_rule_rejects_duplicate(self, phil):
+        phil.add_rule("be careful", created_by="test", source="l1")
+        with pytest.raises(ValueError, match="not_duplicate"):
+            phil.add_rule("be careful", created_by="test", source="l1")
 
+    def test_add_rule_rejects_over_limit(self, phil):
+        phil.add_rule("rule one", created_by="test", source="l1")
+        phil.add_rule("rule two", created_by="test", source="l1")
+        phil.add_rule("rule three", created_by="test", source="l1")
+        with pytest.raises(ValueError, match="上限"):
+            phil.add_rule("rule four", created_by="test", source="l1")
 
-class TestMetaDriver:
-    def test_validate_l1_change_rejects_duplicate(self):
-        meta = MetaDriver(DEFAULT_VALIDATORS, None)
-        existing = [MagicMock(content="be careful")]
-        proposal = L1Proposal(content="be careful", reason="test")
-        approved, reason = meta.validate_l1_change(proposal, existing)
-        assert approved is False
+    def test_apply_proposal_adds_rule(self, phil):
+        proposal = L1Proposal(content="new rule here", reason="test")
+        rule = phil.apply(proposal)
+        assert rule.content == "new rule here"
+        assert len(phil.all_rules()) == 1
 
-    def test_validate_l1_change_rejects_over_limit(self):
-        meta = MetaDriver(DEFAULT_VALIDATORS, None, max_rules=2)
-        existing = [MagicMock(content="r1"), MagicMock(content="r2")]
-        proposal = L1Proposal(content="r3", reason="test")
-        approved, reason = meta.validate_l1_change(proposal, existing)
-        assert approved is False
-        assert "上限" in reason
-
-    def test_filter_dangerous_removes_blocked(self, meta):
-        tc1 = MagicMock()
-        tc1.function.name = "safe_tool"
-        tc2 = MagicMock()
-        tc2.function.name = "unsafe_delete_all"
-        meta.dangerous_tool_patterns = ["delete_all"]
-        filtered = meta.filter_dangerous([tc1, tc2])
-        assert len(filtered) == 1
-        assert filtered[0].function.name == "safe_tool"
-
-    def test_check_completion_done(self, meta):
-        task = LearningUnit("test")
-        messages = [{"role": "assistant", "content": "done"}]
-        assert meta.check_completion(task, messages) == "done"
-
-    def test_check_completion_continue_with_tool_calls(self, meta):
-        task = LearningUnit("test")
-        messages = [{"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]}]
-        assert meta.check_completion(task, messages) == "continue"
+    def test_apply_duplicate_proposal_raises(self, phil):
+        phil.add_rule("duplicate rule", created_by="test", source="l1")
+        proposal = L1Proposal(content="duplicate rule", reason="test")
+        with pytest.raises(ValueError, match="not_duplicate"):
+            phil.apply(proposal)

@@ -144,13 +144,17 @@ def main():
             print(f"Error: {e}")
             continue
 
-        reply = result.get("action_text", "").strip()
+        reply = (result.get("action_text") or "").strip()
         env.step(reply)
 
         if args.debug:
             _show_notifies(result.get("notify_layers", {}))
 
-        print(f"Agent: {reply}")
+        print(f"\nYou: {user_input}")
+        if reply:
+            print(f"Agent: {reply}\n")
+        else:
+            print("Agent: (no output)\n")
 
 
 if __name__ == "__main__":

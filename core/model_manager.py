@@ -7,6 +7,7 @@ from __future__ import annotations
 
 _embedding_model = None
 _model_path: str | None = None
+_models_cache: dict | None = None
 
 
 def set_model_path(path: str) -> None:
@@ -19,6 +20,14 @@ def get_model_path() -> str:
     return _model_path or str(Path(__file__).resolve().parent.parent / "embeddinggemma")
 
 
+def get_models_cache() -> dict:
+    """Return shared models cache so multiple Embeddings instances share the loaded model."""
+    global _models_cache
+    if _models_cache is None:
+        _models_cache = {}
+    return _models_cache
+
+
 def get_embedding_model():
     """Return the shared Embeddings instance (lazy-load on first call)."""
     global _embedding_model
@@ -29,5 +38,5 @@ def get_embedding_model():
         "path": get_model_path(),
         "content": "memory",
         "trust_remote_code": True,
-    })
+    }, models=get_models_cache())
     return _embedding_model

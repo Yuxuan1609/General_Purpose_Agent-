@@ -22,18 +22,12 @@ class LayerAgent(ABC):
     Output is always a parsed JSON dict.
     """
 
-    MAX_TOOL_TURNS = 5  # safety limit per _call_llm invocation
-
     def __init__(self, llm_client, log: logging.Logger):
         self._llm = llm_client
         self._log = log
         self._injector = None  # set externally after construction
-        self._pending_mods: list[dict] = []
-
-    def get_pending_mods(self) -> list[dict]:
-        mods = self._pending_mods.copy()
-        self._pending_mods.clear()
-        return mods
+        from core.config_loader import get_section
+        self._max_tool_turns = get_section('runtime', default={}).get('max_tool_turns', 5)
 
     def set_injector(self, injector):
         """Attach a LayerInjector for tool calling capability."""
@@ -43,17 +37,19 @@ class LayerAgent(ABC):
         self._context = ctx
 
     def _get_tools(self, layer: str) -> list[dict] | None:
-        """Return tools from injector for the given layer, if available."""
+        """Return tools for the given layer, filtered by per-layer allowlist
+        (tools.yaml → injector) then per-env policy (ctx → AgentContext)."""
         if self._injector is None:
             return None
-        ctx = getattr(self, '_context', None)
-        if ctx is not None:
-            from core.tools.registry import ToolRegistry
-            return ctx.resolve(ToolRegistry())
         getter = getattr(self._injector, "get_tools_for_layer", None)
         if getter is None:
             return None
         tools = getter(layer)
+        if not tools:
+            return None
+        ctx = getattr(self, '_context', None)
+        if ctx is not None:
+            tools = ctx.resolve(tools)
         return tools if tools else None
 
     def _call_llm(self, system: str, user: str,
@@ -98,8 +94,8 @@ class LayerAgent(ABC):
         # json_mode only when no tools (DeepSeek incompatibility) and no capture_tools
         use_json_mode = bool(schema) and not tools and not capture_tools
 
-        for turn in range(1, self.MAX_TOOL_TURNS + 1):
-            self._log.debug("  ── turn %d/%d (messages=%d) ──", turn, self.MAX_TOOL_TURNS, len(messages))
+        for turn in range(1, self._max_tool_turns + 1):
+            self._log.debug("  ── turn %d/%d (messages=%d) ──", turn, self._max_tool_turns, len(messages))
             resp = self._llm.chat(
                 messages=messages,
                 json_mode=use_json_mode,
@@ -248,7 +244,7 @@ class LayerAgent(ABC):
                            turn, len(messages), _indent(text[:500], 4))
 
             if capture_tools or schema is None:
-                return {"reply": text, "reasoning": ""}
+                return {"done": True, "reply": text, "result": text, "reasoning": "", "_raw": text}
             try:
                 parsed = json.loads(text)
                 if not isinstance(parsed, dict):
@@ -266,7 +262,7 @@ class LayerAgent(ABC):
 
         # Max turns exceeded — give LLM one final chance to summarize from accumulated tool results
         self._log.warning("Max tool call turns (%d) exceeded, messages=%d — asking for summary",
-                         self.MAX_TOOL_TURNS, len(messages))
+                         self._max_tool_turns, len(messages))
         try:
             messages.append({"role": "user", "content": "[系统] 你已达到工具调用次数上限，不可以再调用工具。请基于对话中已获取的信息，直接以纯文本形式给出最终答案。"})
             resp = self._llm.chat(messages=messages, json_mode=False, tools=None)
@@ -274,7 +270,7 @@ class LayerAgent(ABC):
             self._log.debug("  ── forced summary (messages=%d) ──\n%s",
                            len(messages), _indent(text[:800], 4))
             if capture_tools:
-                return {"done": True, "reply": text, "reasoning": ""}
+                return {"done": True, "reply": text, "result": text, "reasoning": ""}
             if schema is None:
                 return {"reply": text, "reasoning": ""}
             try:
@@ -288,9 +284,9 @@ class LayerAgent(ABC):
                 if repaired:
                     return repaired
                 return {"_raw": text}
-        except Exception:
-            self._log.warning("Final summary call also failed")
-            return {"_raw": "max_tool_turns", "_error": "tool call loop exceeded"}
+        except Exception as e:
+            self._log.warning("Final summary call also failed: %s", e)
+            return {"_raw": "max_tool_turns", "_error": f"tool call loop exceeded: {e}"}
 
 
     @staticmethod

@@ -215,6 +215,8 @@ python scripts/test_kb_io.py
 | `grep` | 正则搜索文件内容 | `capability/example_tools.py` |
 | `knowledge_query` | 静态知识库语义搜索 | `capability/knowledge_capability.py` |
 | `skills_list/view/manage` | 技能管理 | `core/skill_layer.py` |
+| `record_learning` | Agent 主动提案学习内容 | `core/tools/record_learning_tool.py` |
+| `consolidation_tools` (10) | L1/L2/L3 知识整理 CRUD + domain 管理 | `core/tools/consolidation_tools.py` |
 
 **层可见性（ToolPolicy）**：
 
@@ -281,18 +283,21 @@ cognitive-agent/
     llm_client.py        # LLMResponse + LLMClient
     layer_message.py     # LayerMessage 信封 + MessageType 枚举
     task.py              # Domain, LearningUnit
-    meta_driver.py       # L0.5 验证器 + 安全过滤
-    philosophy.py        # L1 规则 CRUD
-    flexible_knowledge.py# L2 知识卡片 + KnowledgeGraph
-    skill_layer.py       # L3 技能 + L2→L3 编译
-    env/                 # 环境抽象 (base.py, learning_env.py, threshold_scorer.py)
+    philosophy.py        # L1 规则 CRUD（内置校验）
+    flexible_knowledge.py# L2 知识卡片管理
+    skill_layer.py       # L3 技能管理
+    agent_context.py     # AgentContext — per-env 工具过滤
+    chain_factory.py     # 统一构建三层链
+    domain_registry.py   # DomainNode + DomainRegistry（反向索引+embedding）
+    env/                 # 环境抽象 (base.py, learning_env.py, interaction_env.py, threshold_scorer.py)
     layers/              # 三层链式 Manager + Comm Agent
       base.py            # LayerManager ABC + LayerAgent ABC
       comm.py            # UpwardComm/DownwardComm + AgentPacket
       l0_5_1/            # L(0.5+1)Manager + L1Agent
       l2/                # L2Manager + L2Agent
       l3/                # L3Manager + L3Agent
-    tools/               # ToolRegistry + 工具实现
+    tools/               # ToolRegistry + 工具实现 (含 consolidation_tools, record_learning_tool)
+    storage/             # SQLite 存储后端 (l1_store, l2_store, l3_store, domain_store, kb_store)
   scripts/               # 运行脚本
     run_leduc_cognitive.py    # Leduc 对局 — seed + chain 日志
     run_douzero_llm.py        # DouZero 对局 (--mode direct|cognitive)
@@ -303,7 +308,7 @@ cognitive-agent/
     smoke_test_consolidation.py# Consolidation 烟雾测试
     integration_test_capability.py  # Capability 集成测试
   data/                  # 运行时数据
-  tests/                 # pytest (159 tests, 16 files)
+  tests/                 # pytest (207 tests, 28 files)
     fixtures/              #   Consolidation 测试数据
   docs/                  # 设计文档
 ```

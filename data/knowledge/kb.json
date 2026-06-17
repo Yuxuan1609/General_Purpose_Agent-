@@ -11,17 +11,17 @@
         "type": "reference",
         "level": "advanced",
         "tags": [
-          "capability-system",
-          "architecture",
+          "capability",
           "system-design",
-          "capability"
+          "architecture",
+          "capability-system"
         ],
         "related": [],
         "parent": [],
         "children": []
       },
       "created_at": "2026-06-15T08:28:23.396969+00:00",
-      "updated_at": "2026-06-16T07:32:08.713291+00:00",
+      "updated_at": "2026-06-17T08:14:10.846238+00:00",
       "last_used": "2026-06-15T08:28:23.396980+00:00"
     }
   },

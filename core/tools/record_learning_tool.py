@@ -35,7 +35,7 @@ def register_record_learning(registry, pending_dir: str = "data/learning/pending
     }, _record_learning_handler, toolset="core", sync=False)
 
 
-def _record_learning_handler(args=None):
+def _record_learning_handler(args=None, **kwargs):
     d = args or {}
     domain = d.get("domain", "")
     target = d.get("learning_target", "")
@@ -125,8 +125,8 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
     for fp in json_files:
         try:
             shutil.move(str(fp), str(archive_dir / fp.name))
-        except OSError:
-            pass
+        except OSError as e:
+            _log.warning("Failed to archive %s: %s", fp.name, e)
     _log.info("Auto-learning: archived %d files → %s", len(json_files), archive_dir)
 
     # 3. Get learning context
@@ -155,7 +155,7 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
         step = lenv.step(_json.dumps(notify, ensure_ascii=False, default=str))
         _log.info("Auto-learning done: %s", step.state.observation)
     except Exception as e:
-        _log.warning("Auto-learning execute failed: %s", e)
+        _log.error("Auto-learning execute failed: %s", e)
 
 
 SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target 扫描决策树，
@@ -257,5 +257,6 @@ def _fill_observations_llm(record: dict, tree_nodes: list, target: str):
 
         record["l2_observations"] = filled.get("l2_observations", [])
         record["l3_observations"] = filled.get("l3_observations", [])
-    except Exception:
-        pass  # LLM unavailable → observations stay empty
+    except Exception as e:
+        _log.warning("LLM unavailable for observation fill: %s", e)
+        record["_error"] = f"observation fill failed: {e}"

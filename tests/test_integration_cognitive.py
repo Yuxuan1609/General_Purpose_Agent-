@@ -19,7 +19,6 @@ def mock_llm_with_action():
 
 @pytest.fixture
 def full_chain(tmp_path):
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
@@ -35,12 +34,11 @@ def full_chain(tmp_path):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
 
-    meta = MetaDriver(DEFAULT_VALIDATORS.copy())
     phil = Philosophy(rules_path)
     fk = FlexibleKnowledge(knowledge_dir, index_path)
     sl = SkillLayer(skills_dir)
 
-    return build_chain(meta, phil, fk, sl)
+    return build_chain(phil, fk, sl)
 
 
 class TestEndToEnd:

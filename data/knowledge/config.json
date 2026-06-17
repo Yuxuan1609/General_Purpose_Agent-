@@ -1,5 +1,5 @@
 {
-  "path": "C:/Users/micha/PycharmProjects/cognitive-agent/embeddinggemma",
+  "path": "C:\\Users\\micha\\PycharmProjects\\cognitive-agent\\embeddinggemma",
   "trust_remote_code": true,
   "content": "sqlite",
   "keyword": "bm25",
@@ -10,9 +10,9 @@
   },
   "dimensions": 768,
   "backend": "numpy",
-  "offset": 2,
+  "offset": 3,
   "build": {
-    "create": "2026-06-16T07:31:41Z",
+    "create": "2026-06-17T08:13:37Z",
     "python": "3.13.14",
     "settings": {
       "numpy": "2.2.4"
@@ -20,6 +20,6 @@
     "system": "Windows (AMD64)",
     "txtai": "8.0.0-fork"
   },
-  "update": "2026-06-16T07:32:10Z",
+  "update": "2026-06-17T08:14:12Z",
   "autoid": 1
 }

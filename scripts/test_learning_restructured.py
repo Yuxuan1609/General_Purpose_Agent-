@@ -230,14 +230,12 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     # 6. Execute through full layer chain
     # ═══════════════════════════════════════════════════════════════
-    from core.meta_driver import MetaDriver, DEFAULT_VALIDATORS
     from core.layers import build_chain as _build_chain
     from core.layers.logging_setup import setup_layer_logging
     from core.executor import Executor
 
     setup_layer_logging(log_dir)
-    meta_driver = MetaDriver(DEFAULT_VALIDATORS.copy())
-    chain = _build_chain(meta_driver, phil, fk, sl, auxiliary_llm=llm,
+    chain = _build_chain(phil, fk, sl, auxiliary_llm=llm,
                          domain_registry=reg)
     executor = Executor(layer_root=chain, llm_client=llm,
                         learning_dir=PROJECT_ROOT / "data" / "learning")

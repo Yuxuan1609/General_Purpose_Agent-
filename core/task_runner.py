@@ -19,7 +19,10 @@ class TaskState:
 
 
 class TaskRunner:
-    def __init__(self, max_workers: int = 8):
+    def __init__(self, max_workers: int | None = None):
+        if max_workers is None:
+            from core.config_loader import get_section
+            max_workers = get_section('runtime', default={}).get('task_runner_workers', 8)
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
         self._lock = threading.Lock()
         self._tasks: dict[str, TaskState] = {}
