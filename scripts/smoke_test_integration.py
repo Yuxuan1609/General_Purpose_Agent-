@@ -79,8 +79,7 @@ def main():
         print(f"[pending] Created 3 episodes, 9 steps total")
 
         # ── Learning cycle: reset ───────────────────────────────────
-        stats = tmp / "learning_stats.json"
-        lenv = LearningEnv(pending, knowledge, stats_file=stats)
+        lenv = LearningEnv(pending, knowledge)
 
         state = lenv.reset("learn from recent leduc games")
         print(f"[reset] observation: {len(state.observation)} chars")

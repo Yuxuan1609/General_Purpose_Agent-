@@ -18,11 +18,6 @@ def pending_dir(tmp_path):
 
 
 @pytest.fixture
-def stats_file(tmp_path):
-    return tmp_path / "learning_stats.json"
-
-
-@pytest.fixture
 def mock_l1():
     store = MagicMock()
     store.add_rule.return_value = MagicMock(id="l1_new")
@@ -55,8 +50,8 @@ def knowledge_stores(mock_l1, mock_l2, mock_l3):
 
 
 @pytest.fixture
-def learning_env(pending_dir, knowledge_stores, stats_file):
-    return LearningEnv(pending_dir, knowledge_stores, stats_file=stats_file)
+def learning_env(pending_dir, knowledge_stores):
+    return LearningEnv(pending_dir, knowledge_stores)
 
 
 @pytest.fixture
@@ -249,54 +244,6 @@ class TestLearningEnvStep:
         }])
         step = learning_env.step(action)
         assert "Errors" in step.state.observation
-
-
-# ── tests: usage stats ──────────────────────────────────────────────────
-
-class TestUsageStats:
-    def test_updates_l2_stats_from_notify(self, learning_env,
-                                          sample_pending_records, stats_file):
-        learning_env.reset("learn from leduc games")
-        notify = {
-            "l0_5_1": {"result": "ok", "l1_modifications": []},
-            "l2": {
-                "reply": "ok",
-                "l2_modifications": [],
-                "cards_used": ["card_a", "card_b"],
-            },
-        }
-        learning_env.step(json.dumps(notify))
-        assert stats_file.exists()
-        stats = json.loads(stats_file.read_text())
-        assert stats["l2"]["card_a"]["use_count"] == 1
-        assert stats["l2"]["card_b"]["use_count"] == 1
-
-    def test_updates_l3_stats_from_notify(self, learning_env,
-                                          sample_pending_records, stats_file):
-        learning_env.reset("learn from leduc games")
-        notify = {
-            "l0_5_1": {"result": "ok", "l1_modifications": []},
-            "l2": {"reply": "ok", "l2_modifications": [], "cards_used": []},
-            "l3": {
-                "skills_matched": 2,
-                "skills_used": [{"name": "skill_x"}, {"name": "skill_y"}],
-                "l3_modifications": [],
-            },
-        }
-        learning_env.step(json.dumps(notify))
-        stats = json.loads(stats_file.read_text(encoding="utf-8"))
-        assert stats["l3"]["skill_x"]["use_count"] == 1
-
-    def test_does_not_track_l1(self, learning_env,
-                               sample_pending_records, stats_file):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/r1", "type": "update",
-            "payload": {"content": "x"},
-        }])
-        learning_env.step(action)
-        stats = json.loads(stats_file.read_text())
-        assert "l1" not in stats or stats.get("l1", {}) == {}
 
 
 # ── tests: build_task_observation ───────────────────────────────────────

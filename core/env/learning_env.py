@@ -183,7 +183,7 @@ class LearningEnv(Environment):
     """
 
     def __init__(self, pending_dir: Path, knowledge_stores: dict,
-                 preprocessing_llm=None, stats_file: Path | None = None,
+                 preprocessing_llm=None,
                  l2_card_limit: int | None = None,
                  l3_skill_limit: int | None = None,
                  dry_run: bool = False,
@@ -194,8 +194,6 @@ class LearningEnv(Environment):
         self._registry = domain_registry
         self._pre_llm = preprocessing_llm
         self._scorer = ThresholdScorer(pending_dir)
-        self._stats_file = Path(stats_file) if stats_file else (
-            self._pending_dir.parent / "learning_stats.json")
         from core.config_loader import get_section
         learn_cfg = get_section('learning', default={})
         self._l2_limit = l2_card_limit if l2_card_limit is not None else learn_cfg.get('l2_card_limit', 30)
@@ -211,7 +209,6 @@ class LearningEnv(Environment):
         self._done: bool = False
         self._current_observation: str = ""
         self._base_domain: str = "general"
-        self._stats: dict = self._load_stats()
 
         # Per-layer reverse-notify feedback — populated by step(),
         # consumed by build_task_observation() / build_consolidation_task().
@@ -263,9 +260,6 @@ class LearningEnv(Environment):
 
     def _apply_parsed_mods(self, parsed: dict) -> EnvStep:
 
-        if not self._dry_run:
-            self._update_usage_stats(parsed)
-
         summary = {"l1": [], "l2": [], "l3": [], "errors": []}
         feedback: dict[str, list[str]] = {"l1": [], "l2": [], "l3": []}
         for layer_key in ("l1", "l2", "l3"):
@@ -298,7 +292,6 @@ class LearningEnv(Environment):
         )
 
         if not self._dry_run:
-            self._save_stats()
             # Auto-refresh domain embeddings + correlations after learning round
             if self._registry:
                 affected: set[str] = set()
@@ -368,8 +361,7 @@ class LearningEnv(Environment):
         l3 = self._knowledge.get("l3")
         l1_rules = self._knowledge.get("l1")
 
-        # ── Build triggered domain lists (DD1: dual trigger) ──
-        cons_state = self._stats.get("_consolidation", {})
+        # ── Build triggered domain lists (DD1: capacity trigger) ──
         spec = self._consolidation_spec
 
         l2_triggers: dict[str, str] = {}
@@ -385,23 +377,17 @@ class LearningEnv(Environment):
                 domain_counts[c.domain.path] += 1
                 all_domains.add(c.domain.path)
             for domain, count in domain_counts.items():
-                mods = cons_state.get(domain, {}).get("mod_count", 0)
                 if count > self._l2_limit:
                     l2_triggers[domain] = "capacity"
-                elif mods >= 5:
-                    l2_triggers[domain] = "maintenance"
 
-        # L3: capacity check (only when over limit) + maintenance check (always)
+        # L3: capacity check
         if l3:
             for s in l3.list_all():
                 skill_domain_counts[s.domain.path] += 1
                 all_domains.add(s.domain.path)
             for domain, count in skill_domain_counts.items():
-                mods = cons_state.get(domain, {}).get("mod_count", 0)
                 if count > self._l3_limit:
                     l3_triggers[domain] = "capacity"
-                elif mods >= 5:
-                    l3_triggers[domain] = "maintenance"
 
         if not l2_triggers and not l3_triggers:
             return None
@@ -447,43 +433,25 @@ class LearningEnv(Environment):
         if l2_triggers:
             meta_lines.append("")
             meta_lines.append("### L2 Cards — triggered domains")
-        if l2_triggers:
-            meta_lines.append("### L2 Cards — triggered domains")
             for domain, count in sorted(domain_counts.items()):
                 if domain not in l2_triggers:
                     continue
-                reason = l2_triggers[domain]
-                mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
-                if reason == "capacity":
-                    over = count - self._l2_limit
-                    meta_lines.append(
-                        f"- **{domain}**: {count} cards (capacity overflow — {over} over limit {self._l2_limit}). "
-                        f"Reduce to below {self._l2_limit} via merge/deprecate."
-                    )
-                elif reason == "maintenance":
-                    meta_lines.append(
-                        f"- **{domain}**: {count} cards (routine maintenance — {mods} modifications since last consolidate). "
-                        f"Review for quality, merge similar, deprecate unused."
-                    )
+                over = count - self._l2_limit
+                meta_lines.append(
+                    f"- **{domain}**: {count} cards (overflow — {over} over limit {self._l2_limit}). "
+                    f"Reduce to below {self._l2_limit} via merge/deprecate."
+                )
             meta_lines.append("")
         if l3_triggers:
             meta_lines.append("### L3 Skills — triggered domains")
             for domain, count in sorted(skill_domain_counts.items()):
                 if domain not in l3_triggers:
                     continue
-                reason = l3_triggers[domain]
-                mods = cons_state.get(domain, {}).get("mod_count", 0) if reason == "maintenance" else 0
-                if reason == "capacity":
-                    over = count - self._l3_limit
-                    meta_lines.append(
-                        f"- **{domain}**: {count} skills (capacity overflow — {over} over limit {self._l3_limit}). "
-                        f"Reduce to below {self._l3_limit} via deprecate/compile."
-                    )
-                elif reason == "maintenance":
-                    meta_lines.append(
-                        f"- **{domain}**: {count} skills (routine maintenance — {mods} modifications since last consolidate). "
-                        f"Review quality, deprecate unused, compile redundant."
-                    )
+                over = count - self._l3_limit
+                meta_lines.append(
+                    f"- **{domain}**: {count} skills (overflow — {over} over limit {self._l3_limit}). "
+                    f"Reduce to below {self._l3_limit} via deprecate/compile."
+                )
             meta_lines.append("")
         meta = "\n".join(meta_lines)
 
@@ -855,47 +823,6 @@ class LearningEnv(Environment):
                             self._registry.update_item_domains("l3", skill_name, [new_domain])
         elif mod_type == "deprecate":
             store.delete_skill(skill_name)
-
-    # ── usage stats ──────────────────────────────────────────────────────
-
-    def _update_usage_stats(self, parsed: dict) -> None:
-        now = _now_iso()
-        cards_used = parsed.get("_l2_cards_used", [])
-        if isinstance(cards_used, list):
-            for entry in cards_used:
-                card_id = entry if isinstance(entry, str) else entry.get("id", "")
-                if card_id:
-                    self._inc_stat("l2", card_id, now)
-        skills_used = parsed.get("_l3_skills_used", [])
-        for entry in skills_used:
-            skill_name = entry.get("name", "") if isinstance(entry, dict) else str(entry)
-            if skill_name:
-                self._inc_stat("l3", skill_name, now)
-
-    def _inc_stat(self, layer: str, key: str, timestamp: str) -> None:
-        layer_stats = self._stats.setdefault(layer, {})
-        entry = layer_stats.setdefault(key, {"use_count": 0, "last_used": ""})
-        entry["use_count"] += 1
-        entry["last_used"] = timestamp
-
-    def _load_stats(self) -> dict:
-        if self._stats_file.exists():
-            try:
-                return json.loads(self._stats_file.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as e:
-                logger.error("Failed to load learning stats from %s: %s", self._stats_file, e)
-        return {}
-
-    def _save_stats(self) -> None:
-        self._stats_file.parent.mkdir(parents=True, exist_ok=True)
-        import tempfile
-        fd, tmp = tempfile.mkstemp(dir=self._stats_file.parent, suffix=".json")
-        try:
-            with open(fd, "w", encoding="utf-8") as f:
-                json.dump(self._stats, f, ensure_ascii=False, indent=2)
-            Path(tmp).replace(self._stats_file)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
 
     # ── observation building ────────────────────────────────────────────
 
