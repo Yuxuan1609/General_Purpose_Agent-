@@ -257,21 +257,10 @@ class L3Manager(LayerManager):
         return {"status": "ok", "layer": self.name}
 
     def query(self, msg: LayerMessage | Any, trace_id: str = "") -> None:
-        if isinstance(msg, LayerMessage):
-            data = self._upward.receive(msg)
-            if not trace_id:
-                trace_id = msg.trace_id
-        else:
-            data = msg
+        obs, trace_id = self._unwrap_obs(msg, upward=self._upward, trace_id=trace_id)
 
-        if isinstance(data, dict):
-            obs = data.get("obs")
-            l3_task = data.get("l3_task", "")
-            selected_nodes = data.get("selected_nodes", [])
-        else:
-            obs = data
-            l3_task = ""
-            selected_nodes = []
+        l3_task = obs.state.get("l3_task", "") if obs.state else ""
+        selected_nodes = obs.state.get("selected_nodes", []) if obs.state else []
         session = obs.session if obs else {}
         domain_path = session.get("domain", "general")
 

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from core.types import TaskObservation, ExecutionRecord
-from core.layer_message import LayerMessage, MessageType
 from core.layers.base import _indent
 
 logger = logging.getLogger(__name__)
@@ -48,12 +47,7 @@ class Executor:
         domain = session.get("domain", "")
         logger.debug("══════ Step %d  [%s] ══════", step, domain)
         trace_id = uuid.uuid4().hex[:12]
-        msg = LayerMessage(
-            source="executor", target=self._root.name,
-            type=MessageType.QUERY,
-            payload=obs, trace_id=trace_id,
-        )
-        self._root.query(msg, trace_id)
+        self._root.query(obs, trace_id=trace_id)
         notify_layers = self._root.collect_notify()
 
         # Use L1's result as the final action.

@@ -291,14 +291,7 @@ class L0_5_1Manager(LayerManager):
         return {"status": "ok", "layer": self.name}
 
     def query(self, msg: LayerMessage | Any, trace_id: str = "") -> None:
-        if isinstance(msg, LayerMessage):
-            data = self._upward.receive(msg)
-            if not trace_id:
-                trace_id = msg.trace_id
-        else:
-            data = msg
-
-        obs: TaskObservation = data if isinstance(data, TaskObservation) else TaskObservation(**data)
+        obs, trace_id = self._unwrap_obs(msg, upward=self._upward, trace_id=trace_id)
         meta = obs.meta
 
         if self._agent is None:

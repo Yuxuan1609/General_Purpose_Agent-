@@ -417,28 +417,13 @@ class L2Manager(LayerManager):
         return {"status": "ok", "layer": self.name}
 
     def query(self, msg: LayerMessage | Any, trace_id: str = "") -> None:
-        if isinstance(msg, LayerMessage):
-            data = self._upward.receive(msg)
-            if not trace_id:
-                trace_id = msg.trace_id
-        else:
-            data = msg
+        obs, trace_id = self._unwrap_obs(msg, upward=self._upward, trace_id=trace_id)
 
-        if isinstance(data, dict):
-            obs = data.get("obs")
-            query: str = data.get("query", "")
-            selected_nodes: list[dict] = data.get("selected_nodes", [])
-        else:
-            obs = data
-            query = obs.meta if obs else ""
-            selected_nodes = []
-        meta = obs.meta if obs else ""
+        query: str = obs.meta
+        selected_nodes: list[dict] = obs.state.get("selected_nodes", []) if obs.state else []
 
         if not selected_nodes:
-            state_src = data.get("state", {}) if isinstance(data, dict) else {}
-            domains_hint = state_src.get("domains_hint", [])
-            if not domains_hint and obs and obs.state:
-                domains_hint = obs.state.get("domains_hint", [])
+            domains_hint = obs.state.get("domains_hint", []) if obs.state else []
             if domains_hint:
                 selected_nodes = [{"name": d, "score": 1.0} for d in domains_hint]
 
@@ -526,13 +511,15 @@ class L2Manager(LayerManager):
     def _propagate(self, obs, trace_id: str, l3_task: str = "",
                    selected_nodes: list[dict] | None = None) -> None:
         if self._downstream:
-            q_msg = self._downward.wrap_query(
-                payload={"obs": obs, "l3_task": l3_task,
-                         "selected_nodes": selected_nodes or []},
-                source=self.name,
-                target=self._downstream.name, trace_id=trace_id,
+            enriched_state = dict(obs.state) if obs.state else {}
+            if l3_task:
+                enriched_state["l3_task"] = l3_task
+            if selected_nodes:
+                enriched_state["selected_nodes"] = selected_nodes
+            enriched_obs = TaskObservation(
+                meta=obs.meta, state=enriched_state, session=obs.session,
             )
-            self._downstream.query(q_msg, trace_id)
+            self._downstream.query(enriched_obs, trace_id=trace_id)
 
     def _build_cards(self, selected_nodes: list[dict]) -> list[dict]:
         """E3: build cards list locally, return value — no obs.state mutation."""

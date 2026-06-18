@@ -374,6 +374,24 @@ class LayerManager(ABC):
             )
             self._downstream.query(q_msg, trace_id)
 
+    @staticmethod
+    def _unwrap_obs(msg: LayerMessage | Any, upward=None, trace_id: str = "") -> tuple:
+        """Unwrap a query message to (TaskObservation, trace_id).
+
+        Handles both LayerMessage (via UpwardComm.receive) and direct TaskObservation.
+        Returns (TaskObservation, trace_id). If msg is a dict, converts to TaskObservation.
+        """
+        from core.types import TaskObservation
+        if isinstance(msg, LayerMessage):
+            data = upward.receive(msg) if upward else msg.payload
+            if not trace_id:
+                trace_id = msg.trace_id
+        else:
+            data = msg
+        if isinstance(data, dict):
+            data = TaskObservation(**data)
+        return data, trace_id
+
     def collect_notify(self) -> dict:
         """Collect NOTIFY payloads from this layer and all downstream.
 

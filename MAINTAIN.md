@@ -198,7 +198,8 @@
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
-| `LayerManager.query` | `(msg:LayerMessage\|Any, trace_id) → None` | QUERY 入口：通过 UpwardComm 解包 → process → DownwardComm 包装 → 下游 | Executor / 上层 | process(), downstream.query() |
+| `LayerManager.query` | `(msg:LayerMessage\|Any, trace_id) → None` | QUERY 入口：通过 _unwrap_obs() 解包为 TaskObservation → process → propagate | Executor / 上层 | process(), downstream.query() |
+| `LayerManager._unwrap_obs` | `(msg, upward=None, trace_id="") → (TaskObservation, trace_id)` | 静态辅助：LayerMessage 解包或直接 TaskObservation 透传，统一返回 TaskObservation | 各层 Manager.query() | — |
 | `LayerManager.collect_notify` | `() → dict{layer_name: payload}` | 收集本层+所有下游的 NOTIFY | Executor.execute() | notify(), 下游.collect_notify() |
 
 ## core/layers/l3/manager.py (Phase 1 + Phase 2a)
