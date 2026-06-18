@@ -54,6 +54,8 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
     def _wrap(fn):
         return lambda args=None, **kw: fn(args, _ctx, **kw)
 
+    _specs = {s.tool_name: s for s in _MOD_SPECS}
+
     tool_registry.register("deprecate_l1_rule", {
         "type": "function", "function": {
             "name": "deprecate_l1_rule",
@@ -63,7 +65,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "reason": {"type": "string", "description": "删除理由，如'与另一条重复'或'内容模糊'"},
             }, "required": ["rule_id", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_deprecate_l1_rule), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["deprecate_l1_rule"])), toolset="consolidation", sync=True)
 
     tool_registry.register("create_l1_rule", {
         "type": "function", "function": {
@@ -74,7 +76,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "reason": {"type": "string", "description": "创建理由，如'合并了3条概率决策规则'"},
             }, "required": ["content", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_create_l1_rule), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["create_l1_rule"])), toolset="consolidation", sync=True)
 
     tool_registry.register("modify_l1_rule", {
         "type": "function", "function": {
@@ -89,7 +91,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["rule_id", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_modify_l1_rule), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["modify_l1_rule"])), toolset="consolidation", sync=True)
 
     tool_registry.register("deprecate_l2_card", {
         "type": "function", "function": {
@@ -100,7 +102,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "reason": {"type": "string", "description": "删除理由，如'合并到 leduc_K_preflop'或'低置信度从未使用'"},
             }, "required": ["card_id", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_deprecate_l2_card), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["deprecate_l2_card"])), toolset="consolidation", sync=True)
 
     tool_registry.register("create_l2_card", {
         "type": "function", "function": {
@@ -112,7 +114,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "reason": {"type": "string", "description": "创建理由，如'合并了3张K翻牌前加注策略卡片'"},
             }, "required": ["content", "domain", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_create_l2_card), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["create_l2_card"])), toolset="consolidation", sync=True)
 
     tool_registry.register("modify_l2_card", {
         "type": "function", "function": {
@@ -128,7 +130,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["card_id", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_modify_l2_card), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["modify_l2_card"])), toolset="consolidation", sync=True)
 
     tool_registry.register("deprecate_l3_skill", {
         "type": "function", "function": {
@@ -139,7 +141,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "reason": {"type": "string", "description": "删除理由，如'低质量从未被匹配'或'与另一技能功能重叠'"},
             }, "required": ["skill_name", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_deprecate_l3_skill), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["deprecate_l3_skill"])), toolset="consolidation", sync=True)
 
     tool_registry.register("create_l3_skill", {
         "type": "function", "function": {
@@ -152,7 +154,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "reason": {"type": "string", "description": "创建理由，如'编译自3张高激活配对加注卡片'"},
             }, "required": ["name", "content", "domain", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_create_l3_skill), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["create_l3_skill"])), toolset="consolidation", sync=True)
 
     tool_registry.register("modify_l3_skill", {
         "type": "function", "function": {
@@ -168,7 +170,7 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["skill_name", "reason"], "additionalProperties": False},
         },
-    }, _wrap(_h_modify_l3_skill), toolset="consolidation", sync=True)
+    }, _wrap(_make_handler(_specs["modify_l3_skill"])), toolset="consolidation", sync=True)
 
     tool_registry.register("query_domain", {
         "type": "function", "function": {
@@ -234,125 +236,63 @@ def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None
     }, _wrap(_h_create_domain), toolset="consolidation", sync=True, override=True)
 
 
-# ── L1 Rule Handlers ──
+# ── Handler factory for declarative CRUD tools ──
 
-def _h_deprecate_l1_rule(args=None, ctx=None, **kwargs):
-    args = args or {}
-    ctx.record_mod({
-        "type": "deprecate", "target": args.get("rule_id", ""),
-        "reason": args.get("reason", ""), "layer": "l1",
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 删除 {args.get('rule_id', '')}"})
-
-
-def _h_create_l1_rule(args=None, ctx=None, **kwargs):
-    args = args or {}
-    ctx.record_mod({
-        "type": "create", "target": "", "layer": "l1",
-        "reason": args.get("reason", ""),
-        "payload": {"content": args.get("content", "")},
-    })
-    return json.dumps({"recorded": True, "message": "已记录: 创建新规则"})
+@dataclass
+class _ModSpec:
+    """Declarative spec for a consolidation CRUD handler."""
+    tool_name: str
+    mod_type: str
+    layer: str
+    target_arg: str
+    payload_args: list[str] = field(default_factory=list)
+    message_template: str = ""
 
 
-def _h_modify_l1_rule(args=None, ctx=None, **kwargs):
-    args = args or {}
-    payload = {"content": args.get("content", "")}
-    if "usefulness" in args:
-        payload["usefulness"] = args["usefulness"]
-    if "misleading" in args:
-        payload["misleading"] = args["misleading"]
-    if "comment" in args:
-        payload["comment"] = args["comment"]
-    ctx.record_mod({
-        "type": "update", "target": args.get("rule_id", ""), "layer": "l1",
-        "reason": args.get("reason", ""), "payload": payload,
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 修改 {args.get('rule_id', '')}"})
+_MOD_SPECS: list[_ModSpec] = [
+    _ModSpec("deprecate_l1_rule", "deprecate", "l1", "rule_id",
+             message_template="已记录: 删除 {target}"),
+    _ModSpec("create_l1_rule", "create", "l1", "",
+             payload_args=["content"], message_template="已记录: 创建新规则"),
+    _ModSpec("modify_l1_rule", "update", "l1", "rule_id",
+             payload_args=["content", "usefulness", "misleading", "comment"],
+             message_template="已记录: 修改 {target}"),
+    _ModSpec("deprecate_l2_card", "deprecate", "l2", "card_id",
+             message_template="已记录: 删除 {target}"),
+    _ModSpec("create_l2_card", "create", "l2", "",
+             payload_args=["content", "domain"], message_template="已记录: 创建新卡片"),
+    _ModSpec("modify_l2_card", "update", "l2", "card_id",
+             payload_args=["content", "domain", "usefulness", "misleading", "comment"],
+             message_template="已记录: 修改 {target}"),
+    _ModSpec("deprecate_l3_skill", "deprecate", "l3", "skill_name",
+             message_template="已记录: 删除 {target}"),
+    _ModSpec("create_l3_skill", "create", "l3", "name",
+             payload_args=["content", "domain"], message_template="已记录: 创建 {target}"),
+    _ModSpec("modify_l3_skill", "update", "l3", "skill_name",
+             payload_args=["content", "domain", "usefulness", "misleading", "comment"],
+             message_template="已记录: 修改 {target}"),
+]
 
-
-# ── L2 Card Handlers ──
-
-def _h_deprecate_l2_card(args=None, ctx=None, **kwargs):
-    args = args or {}
-    ctx.record_mod({
-        "type": "deprecate", "target": args.get("card_id", ""),
-        "reason": args.get("reason", ""), "layer": "l2",
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 删除 {args.get('card_id', '')}"})
-
-
-def _h_create_l2_card(args=None, ctx=None, **kwargs):
-    args = args or {}
-    ctx.record_mod({
-        "type": "create", "target": "", "layer": "l2",
-        "reason": args.get("reason", ""),
-        "payload": {
-            "content": args.get("content", ""),
-            "domain": args.get("domain", "general"),
-        },
-    })
-    return json.dumps({"recorded": True, "message": "已记录: 创建新卡片"})
-
-
-def _h_modify_l2_card(args=None, ctx=None, **kwargs):
-    args = args or {}
-    payload = {"content": args.get("content", "")}
-    if "domain" in args and args["domain"]:
-        payload["domain"] = args["domain"]
-    if "usefulness" in args:
-        payload["usefulness"] = args["usefulness"]
-    if "misleading" in args:
-        payload["misleading"] = args["misleading"]
-    if "comment" in args:
-        payload["comment"] = args["comment"]
-    ctx.record_mod({
-        "type": "update", "target": args.get("card_id", ""), "layer": "l2",
-        "reason": args.get("reason", ""), "payload": payload,
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 修改 {args.get('card_id', '')}"})
-
-
-# ── L3 Skill Handlers ──
-
-def _h_deprecate_l3_skill(args=None, ctx=None, **kwargs):
-    args = args or {}
-    ctx.record_mod({
-        "type": "deprecate", "target": args.get("skill_name", ""),
-        "reason": args.get("reason", ""), "layer": "l3",
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 删除 {args.get('skill_name', '')}"})
-
-
-def _h_create_l3_skill(args=None, ctx=None, **kwargs):
-    args = args or {}
-    ctx.record_mod({
-        "type": "create", "target": args.get("name", ""), "layer": "l3",
-        "reason": args.get("reason", ""),
-        "payload": {
-            "content": args.get("content", ""),
-            "domain": args.get("domain", "general"),
-        },
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 创建 {args.get('name', '')}"})
-
-
-def _h_modify_l3_skill(args=None, ctx=None, **kwargs):
-    args = args or {}
-    payload = {"content": args.get("content", "")}
-    if "domain" in args and args["domain"]:
-        payload["domain"] = args["domain"]
-    if "usefulness" in args:
-        payload["usefulness"] = args["usefulness"]
-    if "misleading" in args:
-        payload["misleading"] = args["misleading"]
-    if "comment" in args:
-        payload["comment"] = args["comment"]
-    ctx.record_mod({
-        "type": "update", "target": args.get("skill_name", ""), "layer": "l3",
-        "reason": args.get("reason", ""), "payload": payload,
-    })
-    return json.dumps({"recorded": True, "message": f"已记录: 修改 {args.get('skill_name', '')}"})
+def _make_handler(spec: _ModSpec):
+    """Generate a consolidation handler from declarative spec."""
+    def handler(args=None, ctx=None, **kwargs):
+        args = args or {}
+        target = args.get(spec.target_arg, "") if spec.target_arg else ""
+        payload = {}
+        for key in spec.payload_args:
+            val = args.get(key)
+            if val is not None and val != "":
+                payload[key] = val
+        ctx.record_mod({
+            "type": spec.mod_type,
+            "target": target,
+            "layer": spec.layer,
+            "reason": args.get("reason", ""),
+            "payload": payload,
+        })
+        msg = spec.message_template.format(target=target)
+        return json.dumps({"recorded": True, "message": msg})
+    return handler
 
 
 # ── Domain Handlers ──
