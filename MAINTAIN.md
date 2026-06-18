@@ -189,10 +189,13 @@
 |----------|------|------|-----------|---------|
 | `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。含 `_injector` 属性。 | L1Agent, L2Agent | — |
 | `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch() |
-| `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义，供 capture_tools 使用。 | L1/L2/L3 decide() | — |
+| `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义（已少用，CaptureToolDef.to_openai_tool() 替代） | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
 | `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
-| `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | _call_llm(), _schema_to_tool() |
+| `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | _call_llm(), CaptureToolDef.to_openai_tool() |
+| `CaptureToolDef` | `@dataclass(name, description, done, schema)` | 声明式 capture tool 定义。`to_openai_tool()` 转为 OpenAI 格式。 | L1/L2/L3 decide() (模块常量) | — |
+| `ConsolidationStrategy` | `__init__(consolidation_tool_names, allowed_base_tools, report_tool)` | 封装 consolidation 模式 tool 构建。`build_tools(agent, layer)` 返回 (all_tools, capture_set)。 | L1/L2/L3 decide() (模块常量) | ToolRegistry.get_definitions() |
+| `_TOOL_RULES` | `str` (模块常量) | 工具调用规则提示文本，三层共享 | L1/L2/L3 _build_system_prompt() | — |
 | `LayerManager` | `__init__(name, downstream, upward, downward)` | ABC，所有层 Manager 的基类。upward/downward 为 Comm Agent | build_chain() | 子类 |
 | `LayerManager.process` | `(data:Any) → dict` (abstract) | 本层业务逻辑：富化 data 并返回状态 | query() | — |
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |

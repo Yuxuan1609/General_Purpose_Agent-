@@ -50,7 +50,7 @@ Executor → QUERY 下发 → L(0.5+1)→L2→L3
   Agent 通过 record_learning 工具自行提案学习内容
 ```
 
-- Comm Agent（UpwardComm/DownwardComm）：确定性协议处理
+- Comm Agent（UpwardComm/DownwardComm）：确定性协议处理（基类直接实例化，无 per-layer 子类）
 - Manager：各层业务逻辑，只消费业务 dict
 - Executor：独立决策者，只收不发
 
@@ -248,10 +248,23 @@ Agent 通过 record_learning 工具主动提案学习内容：
 
 ## 工具系统架构
 
-所有工具通过 ToolRegistry 统一注册，AgentContext 按上下文过滤：
+所有工具通过 ToolRegistry 统一注册，ConsolidationContext 注入式管理 store 引用：
 - Normal mode: tools.yaml allowlist → LayerInjector → Agent
-- Consolidation mode: AgentContext.allowed_tools → ToolRegistry → Agent
+- Consolidation mode: ConsolidationStrategy.build_tools() → ToolRegistry → Agent
 - DictInjector 已废弃（consolidation tools 迁入 ToolRegistry）
+- 全局 `set_consolidation_stores`/`set_learning_context` 已删除 → ConsolidationContext DI
+
+## 捕获工具 (Capture Tools)
+
+每层 Agent.decide() 通过 CaptureToolDef 声明式定义结构化输出工具：
+- L1: `l1_query`(done=false) / `l1_report`(done=true)
+- L2: `l2_query`(done=false) / `l2_report`(done=true)  
+- L3: `l3_continue`(done=false) / `l3_report`(done=true)
+统一 `_TOOL_RULES` 常量消除三层重复提示文本。
+
+## ConsolidationStrategy
+
+消除三层 decide() 的 `if lX_output_format` 分支：`ConsolidationStrategy.build_tools(agent, layer)` 一次封装 `allowed_base_tools` 过滤 + `consol_schemas` 查询 + `report_tool` 组装。
 
 ## SQLite 存储
 
@@ -268,15 +281,15 @@ Agent 通过 record_learning 工具主动提案学习内容：
 ```
 cognitive-agent/
   _archive/              # 已归档旧架构代码
-  config.yaml            # 用户配置
+  config.yaml            # 用户配置（唯一入口，config/layers/*.yaml 已删除）
   pyproject.toml         # 项目元数据与依赖
-  config/layers/         # 分层配置 (l1.yaml, l2.yaml, l3.yaml, consolidation.yaml)
+  config/                # 分层工具配置
+    tools.yaml           # per-layer tool allowlist + timeout/fallback
   capability/            # Phase 3 能力系统
     __init__.py          # Capability ABC + CapabilityRegistry
     tool_capability.py   # ToolCapability（层可见 allowlist）
     knowledge_capability.py  # KnowledgeCapability + InMemoryKnowledgeStore
     layer_injector.py    # LayerInjector（schema 注入 + 多轮 tool loop）
-    example_tools.py     # read_file / grep 示例工具
   core/                  # 核心源代码
     types.py             # TaskObservation, ExecutionRecord
     executor.py          # Executor — 独立决策者
@@ -287,28 +300,43 @@ cognitive-agent/
     flexible_knowledge.py# L2 知识卡片管理
     skill_layer.py       # L3 技能管理
     agent_context.py     # AgentContext — per-env 工具过滤
+    config_loader.py     # 统一配置加载 (config.yaml)
+    model_manager.py     # embedding 模型单例 + 共享 models_cache
     chain_factory.py     # 统一构建三层链
     domain_registry.py   # DomainNode + DomainRegistry（反向索引+embedding）
+    task_runner.py       # 异步任务调度（ThreadPool + stats）
     env/                 # 环境抽象 (base.py, learning_env.py, interaction_env.py, threshold_scorer.py)
-    layers/              # 三层链式 Manager + Comm Agent
-      base.py            # LayerManager ABC + LayerAgent ABC
-      comm.py            # UpwardComm/DownwardComm + AgentPacket
+    knowledge/           # KnowledgeBase — SQLite 向量知识库
+    layers/              # 三层链式 Manager
+      base.py            # LayerManager ABC + LayerAgent ABC + CaptureToolDef + ConsolidationStrategy
+      comm.py            # UpwardComm/DownwardComm + AgentPacket（基类直接实例化）
+      logging_setup.py   # 按 session 分目录的 per-layer 日志
       l0_5_1/            # L(0.5+1)Manager + L1Agent
       l2/                # L2Manager + L2Agent
       l3/                # L3Manager + L3Agent
-    tools/               # ToolRegistry + 工具实现 (含 consolidation_tools, record_learning_tool)
+    tools/               # ToolRegistry + 工具实现
+      registry.py        # 注册中心
+      terminal_tool.py   # 终端执行（优先 pwsh）
+      web_search_tool.py # web_search + tavily_search
+      file_tools.py      # read_file + grep
+      kb_tools.py        # kb_query / ask_user / kb_delete / kb_fill_gap
+      async_tools.py     # check_task / collect_tasks
+      domain_tool.py     # L1 create_domain
+      tool_proposal.py   # Agent 提案新工具
+      sysinfo_tool.py    # 系统信息查询（os/hardware/env/network）
+      consolidation_tools.py # 整理工具（9 CRUD handler 工厂化 + ConsolidationContext）
+      record_learning_tool.py # record_learning + auto-learning dispatch
     storage/             # SQLite 存储后端 (l1_store, l2_store, l3_store, domain_store, kb_store)
   scripts/               # 运行脚本
-    run_leduc_cognitive.py    # Leduc 对局 — seed + chain 日志
-    run_douzero_llm.py        # DouZero 对局 (--mode direct|cognitive)
-    run_learning_dryrun.py    # 学习 dry-run (--mock|--real)
-    run_parallel_test.py      # 并行 Leduc 测试
-    test_consolidation_real.py# 知识整理 — Executor+Chain 真实 LLM 测试
-    smoke_test_injector.py    # Injector 烟雾测试
-    smoke_test_consolidation.py# Consolidation 烟雾测试
-    integration_test_capability.py  # Capability 集成测试
+    interactive_agent.py      # 交互式 CLI Agent
+    run_leduc_cognitive.py    # Leduc 对局
+    run_douzero_llm.py        # DouZero 对局
+    run_learning_dryrun.py    # 学习 dry-run
+    test_e2e_full.py          # E2E 全量测试（async dispatch + KB + learning）
+    test_auto_learning.py     # auto-learning 管线测试
+    test_consolidation_real.py# 真实 LLM consolidation 测试
   data/                  # 运行时数据
-  tests/                 # pytest (207 tests, 28 files)
+  tests/                 # pytest (206 tests, 27 files)
     fixtures/              #   Consolidation 测试数据
   docs/                  # 设计文档
 ```
@@ -358,14 +386,12 @@ per-layer modifications (create/update/deprecate)
 | 1 | 超软上限 ≤5 条 | 例行归并（合并相似、标记 deprecated，可回滚）|
 | 2 | 超软上限 >5 条 | 深度压缩（跨域抽象、L2→L3 编译、归档过时，需审核）|
 
-配置规格见 `config/layers/consolidation.yaml`。测试脚本：`python scripts/test_consolidation_real.py`。
+配置规格见 `config.yaml` 的 `consolidation:` 段。测试脚本：`python scripts/test_consolidation_real.py`。
 
 ## 文档
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — 完整架构设计：A1-A4 设计原则、E1-E8 工程原则、通信协议、各层详解、评估策略
 - **[IDENTITY.md](IDENTITY.md)** — 每层 Agent 术语与概念：L1 行为准则 Agent、L2 知识卡片 Agent、L3 技能执行 Agent 的完整定义与领域边界
-- **[UPGRADE_ROADMAP.md](UPGRADE_ROADMAP.md)** — Phase 3+ 升级路线图：Tool Use 挂载、并行 Agent、Hermes 循环编排、整理模式
-- **[config/layers/consolidation.yaml](config/layers/consolidation.yaml)** — 各层内容规格与整理策略：条目格式、容量限制、anti-patterns、三级整理策略
 - **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表
 - **[MAINTAIN.md](MAINTAIN.md)** — 函数级维护文档
 - **[LEARNING_JOURNAL.md](LEARNING_JOURNAL.md)** — 可迁移工程技巧记录
