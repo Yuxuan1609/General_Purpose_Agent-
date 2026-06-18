@@ -26,7 +26,7 @@ def _strip_frontmatter(content: str) -> str:
 #       additional reference lookup. Reserved for later phases.
 
 
-from core.layers.base import CaptureToolDef
+from core.layers.base import CaptureToolDef, ConsolidationStrategy
 
 L3_CONTINUE_TOOL = CaptureToolDef(
     name="l3_continue",
@@ -59,6 +59,14 @@ L3_REPORT_TOOL = CaptureToolDef(
         },
         "required": ["done", "result", "reasoning"],
     },
+)
+
+
+from core.tools.consolidation_tools import L3_CONSOLIDATION_TOOL_NAMES
+L3_CONSOLIDATION_STRATEGY = ConsolidationStrategy(
+    consolidation_tool_names=L3_CONSOLIDATION_TOOL_NAMES,
+    allowed_base_tools={"kb_query", "read_file", "grep"},
+    report_tool=L3_REPORT_TOOL,
 )
 
 
@@ -183,27 +191,16 @@ class L3Agent(LayerAgent):
         )
 
         if l3_fmt:
-            from core.tools.registry import ToolRegistry
-            from core.tools.consolidation_tools import L3_CONSOLIDATION_TOOL_NAMES
-            _allowed = {"kb_query", "read_file", "grep"}
-            base_tools = [t for t in (self._get_tools(layer) or [])
-                          if t["function"]["name"] in _allowed]
-            consol_schemas = ToolRegistry().get_definitions(L3_CONSOLIDATION_TOOL_NAMES)
-            report_tool = L3_REPORT_TOOL.to_openai_tool()
-            report_tool["function"]["description"] = (
-                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。"
-            )
-            all_tools = base_tools + consol_schemas + [report_tool]
+            all_tools, capture_set = L3_CONSOLIDATION_STRATEGY.build_tools(self, layer)
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                    capture_tools={"l3_report"})
-            result = {
+                                    capture_tools=capture_set)
+            return {
                 "done": True,
                 "result": result.get("result", ""),
                 "skills_used": result.get("skills_used", []),
                 "reasoning": result.get("reasoning", ""),
             }
-            return result
 
         # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []

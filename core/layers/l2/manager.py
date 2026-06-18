@@ -29,7 +29,7 @@ def cascade_consolidation_to_l3(downstream, meta, state, trace_id):
     return downstream.collect_notify()
 
 
-from core.layers.base import CaptureToolDef
+from core.layers.base import CaptureToolDef, ConsolidationStrategy
 
 L2_QUERY_TOOL = CaptureToolDef(
     name="l2_query",
@@ -77,6 +77,14 @@ L2_REPORT_TOOL = CaptureToolDef(
         },
         "required": ["done", "reply", "reasoning"],
     },
+)
+
+
+from core.tools.consolidation_tools import L2_CONSOLIDATION_TOOL_NAMES
+L2_CONSOLIDATION_STRATEGY = ConsolidationStrategy(
+    consolidation_tool_names=L2_CONSOLIDATION_TOOL_NAMES,
+    allowed_base_tools={"kb_query", "read_file", "grep"},
+    report_tool=L2_REPORT_TOOL,
 )
 
 
@@ -298,21 +306,11 @@ class L2Agent(LayerAgent):
         )
 
         if l2_fmt:
-            from core.tools.registry import ToolRegistry
-            from core.tools.consolidation_tools import L2_CONSOLIDATION_TOOL_NAMES
-            _allowed = {"kb_query", "read_file", "grep"}
-            base_tools = [t for t in (self._get_tools(layer) or [])
-                          if t["function"]["name"] in _allowed]
-            consol_schemas = ToolRegistry().get_definitions(L2_CONSOLIDATION_TOOL_NAMES)
-            report_tool = L2_REPORT_TOOL.to_openai_tool()
-            report_tool["function"]["description"] = (
-                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。"
-            )
-            all_tools = base_tools + consol_schemas + [report_tool]
+            all_tools, capture_set = L2_CONSOLIDATION_STRATEGY.build_tools(self, layer)
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
             result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                    capture_tools={"l2_report"})
-            result = {
+                                    capture_tools=capture_set)
+            return {
                 "done": True,
                 "reply": result.get("reply", ""),
                 "selected_nodes": [],
@@ -320,7 +318,6 @@ class L2Agent(LayerAgent):
                 "queries_to_L3": [],
                 "reasoning": result.get("reasoning", ""),
             }
-            return result
 
         # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []

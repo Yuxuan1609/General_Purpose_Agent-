@@ -43,6 +43,34 @@ class CaptureToolDef:
         }
 
 
+class ConsolidationStrategy:
+    """Determines how an Agent builds tools in consolidation mode.
+
+    Decouples consolidation tool-building from Agent.decide(),
+    eliminating if-branching on lX_output_format state keys.
+    """
+    def __init__(self, consolidation_tool_names: set[str],
+                 allowed_base_tools: set[str],
+                 report_tool: CaptureToolDef):
+        self.consolidation_tool_names = consolidation_tool_names
+        self.allowed_base_tools = allowed_base_tools
+        self.report_tool = report_tool
+
+    def build_tools(self, agent, layer: str) -> tuple[list[dict], set[str]]:
+        """Return (all_tools, capture_tools_set) for consolidation mode."""
+        from core.tools.registry import ToolRegistry
+        base_tools = [t for t in (agent._get_tools(layer) or [])
+                      if t["function"]["name"] in self.allowed_base_tools]
+        consol_schemas = ToolRegistry().get_definitions(self.consolidation_tool_names)
+        report = self.report_tool.to_openai_tool()
+        report["function"]["description"] = (
+            "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。"
+            "禁止以文本方式直接回复。"
+        )
+        all_tools = base_tools + consol_schemas + [report]
+        return all_tools, {self.report_tool.name}
+
+
 class LayerAgent(ABC):
     """Common base for all layer LLM agents.
 

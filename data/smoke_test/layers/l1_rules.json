@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "constitution_1",
+      "content": "安全第一",
+      "created_by": "seed",
+      "source": "l0_5",
+      "added_at": "",
+      "version": 1,
+      "last_modified": ""
+    },
+    {
+      "id": "l1_existing",
+      "content": "existing rule",
+      "created_by": "seed",
+      "source": "l1",
+      "added_at": "",
+      "version": 1,
+      "last_modified": ""
+    }
+  ]
+}
