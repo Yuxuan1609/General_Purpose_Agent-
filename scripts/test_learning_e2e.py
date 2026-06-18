@@ -184,7 +184,7 @@ def main():
             llm_client=llm,
             learning_dir=PROJECT_ROOT / "data" / "learning",
         )
-        from core.tools.consolidation_tools import set_learning_context; set_learning_context(executor=executor)
+        chain._consol_ctx.executor = executor
 
         task = lenv.build_task_observation()
         if task is None:

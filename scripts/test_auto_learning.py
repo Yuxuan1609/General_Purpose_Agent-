@@ -157,40 +157,39 @@ def test_process_in_memory_empty():
 # ═══════════════════════════════════════════════════════════════════
 
 def test_learning_context_roundtrip():
-    """set_learning_context → get_learning_context returns same references."""
-    from core.tools.consolidation_tools import set_learning_context, get_learning_context
+    """ConsolidationContext stores and returns same references."""
+    from core.tools.consolidation_tools import ConsolidationContext
 
     tmp = _tmp()
     phil, fk, sl = _make_knowledge_stores(tmp)
     mock_exec = MagicMock()
 
-    set_learning_context(executor=mock_exec, knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
-    ctx = get_learning_context()
+    ctx = ConsolidationContext(philosophy=phil, knowledge=fk, skill_layer=sl,
+                               executor=mock_exec)
 
-    assert ctx["executor"] is mock_exec
-    assert ctx["philosophy"] is phil
-    assert ctx["knowledge"] is fk
-    assert ctx["skill_layer"] is sl
+    assert ctx.executor is mock_exec
+    assert ctx.philosophy is phil
+    assert ctx.knowledge is fk
+    assert ctx.skill_layer is sl
 
-    print("  PASS: set/get_learning_context — roundtrip OK")
+    print("  PASS: ConsolidationContext — roundtrip OK")
 
 
 def test_learning_context_partial_update():
-    """set_learning_context(executor=...) does not wipe knowledge_stores."""
-    from core.tools.consolidation_tools import set_learning_context, get_learning_context
-
+    """ConsolidationContext.executor can be set after construction."""
     tmp = _tmp()
     phil, fk, sl = _make_knowledge_stores(tmp)
-    set_learning_context(knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
+
+    from core.tools.consolidation_tools import ConsolidationContext
+    ctx = ConsolidationContext(philosophy=phil, knowledge=fk, skill_layer=sl)
+    assert ctx.executor is None
 
     mock_exec = MagicMock()
-    set_learning_context(executor=mock_exec)
-    ctx = get_learning_context()
+    ctx.executor = mock_exec
+    assert ctx.executor is mock_exec
+    assert ctx.philosophy is phil, "knowledge_stores should persist"
 
-    assert ctx["executor"] is mock_exec
-    assert ctx["philosophy"] is phil, "knowledge_stores should persist"
-
-    print("  PASS: set_learning_context — partial update preserves stores")
+    print("  PASS: ConsolidationContext — partial update preserves stores")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -241,7 +240,7 @@ def test_build_and_save_below_threshold():
 def test_build_and_save_triggers_auto_learning():
     """Writing ≥5 files triggers archive + dispatch."""
     from core.tools.record_learning_tool import _build_and_save
-    from core.tools.consolidation_tools import set_learning_context
+    from core.tools.consolidation_tools import ConsolidationContext
 
     tmp = _tmp()
     domain = f"{TEST_DOMAIN}_trigger"
@@ -258,7 +257,11 @@ def test_build_and_save_triggers_auto_learning():
             "l3": {"l3_modifications": [], "result": "ok"},
         }
     }
-    set_learning_context(executor=mock_exec, knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
+    ctx = ConsolidationContext(philosophy=phil, knowledge=fk, skill_layer=sl,
+                                executor=mock_exec,
+                                knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
+    import core.tools.record_learning_tool as rlt
+    rlt._consol_ctx = ctx
 
     import core.tools.record_learning_tool as rlt
     orig_path = rlt.Path
@@ -302,7 +305,7 @@ def test_build_and_save_triggers_auto_learning():
 def test_dispatch_learning_skips_without_executor():
     """_dispatch_learning skips when executor is None (graceful degradation)."""
     from core.tools.record_learning_tool import _dispatch_learning
-    from core.tools.consolidation_tools import set_learning_context
+    import core.tools.record_learning_tool as rlt
 
     tmp = _tmp()
     domain = f"{TEST_DOMAIN}_noexec"
@@ -318,7 +321,7 @@ def test_dispatch_learning_skips_without_executor():
         json_files.append(fp)
 
     # Clear executor
-    set_learning_context(executor=None)
+    rlt._consol_ctx = None
 
     import core.tools.record_learning_tool as rlt
     orig_path = rlt.Path
@@ -435,7 +438,7 @@ def main():
     test_process_in_memory_structure()
     test_process_in_memory_empty()
 
-    print("\n=== set/get_learning_context ===")
+    print("\n=== ConsolidationContext ===")
     test_learning_context_roundtrip()
     test_learning_context_partial_update()
 

@@ -223,7 +223,7 @@ def main():
                          domain_registry=reg)
     executor = Executor(layer_root=chain, llm_client=llm,
                         learning_dir=PROJECT_ROOT / "data" / "learning")
-    from core.tools.consolidation_tools import set_learning_context; set_learning_context(executor=executor)
+    chain._consol_ctx.executor = executor
 
     _write_log(env_log, "Dispatching to Agent (Executor + Layers)", "...")
     result = executor.execute(task)

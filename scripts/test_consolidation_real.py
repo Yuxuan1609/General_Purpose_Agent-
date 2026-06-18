@@ -222,7 +222,7 @@ def main():
     from core.executor import Executor
     executor = Executor(layer_root=chain, llm_client=llm,
                         learning_dir=PROJECT_ROOT / "data" / "learning")
-    from core.tools.consolidation_tools import set_learning_context; set_learning_context(executor=executor)
+    chain._consol_ctx.executor = executor
 
     # ── LearningEnv with spec ──
     spec = load_consolidation_spec()
