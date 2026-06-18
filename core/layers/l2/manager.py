@@ -29,6 +29,57 @@ def cascade_consolidation_to_l3(downstream, meta, state, trace_id):
     return downstream.collect_notify()
 
 
+from core.layers.base import CaptureToolDef
+
+L2_QUERY_TOOL = CaptureToolDef(
+    name="l2_query",
+    description="【特殊工具：向下调度】当需要下层L3执行具体技能任务时使用。"
+    "通过 selected_nodes 选择相关领域，通过 queries_to_L3 下发任务。禁止以文本方式直接回复！",
+    done=False,
+    schema={
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean", "const": False},
+            "selected_nodes": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "path": {"type": "string"}, "score": {"type": "number"},
+                },
+            }},
+            "queries_to_L3": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "domain": {"type": "string", "description": "目标领域"},
+                    "task": {"type": "string", "description": "委托 L3 执行的技能任务"},
+                },
+            }},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "reasoning"],
+    },
+)
+
+L2_REPORT_TOOL = CaptureToolDef(
+    name="l2_report",
+    description="【特殊工具：向上回复】当你有了足够信息可以回复上层查询时使用。"
+    "给出明确的结论和推理过程。禁止以文本方式直接回复！",
+    done=True,
+    schema={
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean", "const": True},
+            "reply": {"type": "string", "description": "回复上层查询的结论"},
+            "selected_cards": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "card_id": {"type": "string"}, "domain": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+            }},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "reply", "reasoning"],
+    },
+)
+
+
 class L2Agent(LayerAgent):
     """L2 LLM Agent — while-loop decision via capture_tool mode.
 
@@ -95,14 +146,8 @@ class L2Agent(LayerAgent):
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
         extra = f"\n{static_context}\n" if static_context else ""
-        tool_rules = (
-            "## 工具调用规则\n"
-            "- 所有工具都有 sync 参数。sync=true(默认)阻塞等结果，sync=false 返回 task_id\n"
-            "- sync=false 的任务用 collect_tasks(task_ids) 收割结果\n"
-            "- check_task(task_id) 可查单个任务状态\n"
-            "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
-            "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
-        )
+        from core.layers.base import _TOOL_RULES
+        tool_rules = _TOOL_RULES
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
@@ -259,18 +304,9 @@ class L2Agent(LayerAgent):
             base_tools = [t for t in (self._get_tools(layer) or [])
                           if t["function"]["name"] in _allowed]
             consol_schemas = ToolRegistry().get_definitions(L2_CONSOLIDATION_TOOL_NAMES)
-            report_tool = self._schema_to_tool(
-                "l2_report",
-                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
-                {
-                    "type": "object",
-                    "properties": {
-                        "done": {"type": "boolean", "const": True},
-                        "reply": {"type": "string", "description": "回复上层查询的结论"},
-                        "reasoning": {"type": "string"},
-                    },
-                    "required": ["done", "reply", "reasoning"],
-                },
+            report_tool = L2_REPORT_TOOL.to_openai_tool()
+            report_tool["function"]["description"] = (
+                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。"
             )
             all_tools = base_tools + consol_schemas + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
@@ -288,65 +324,7 @@ class L2Agent(LayerAgent):
 
         # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []
-        query_tool = self._schema_to_tool(
-            "l2_query",
-            "【特殊工具：向下调度】当需要下层L3执行具体技能任务时使用。"
-            "通过 selected_nodes 选择相关领域，通过 queries_to_L3 下发任务。禁止以文本方式直接回复！",
-            {
-                "type": "object",
-                "properties": {
-                    "done": {"type": "boolean", "const": False},
-                    "selected_nodes": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "path": {"type": "string"},
-                                "score": {"type": "number"},
-                            },
-                        },
-                    },
-                    "queries_to_L3": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "domain": {"type": "string", "description": "目标领域"},
-                                "task": {"type": "string", "description": "委托 L3 执行的技能任务"},
-                            },
-                        },
-                    },
-                    "reasoning": {"type": "string"},
-                },
-                "required": ["done", "reasoning"],
-            },
-        )
-        report_tool = self._schema_to_tool(
-            "l2_report",
-            "【特殊工具：向上回复】当你有了足够信息可以回复上层查询时使用。"
-            "给出明确的结论和推理过程。禁止以文本方式直接回复！",
-            {
-                "type": "object",
-                "properties": {
-                    "done": {"type": "boolean", "const": True},
-                    "reply": {"type": "string", "description": "回复上层查询的结论"},
-                    "selected_cards": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "card_id": {"type": "string"},
-                                "domain": {"type": "string"},
-                                "content": {"type": "string"},
-                            },
-                        },
-                    },
-                    "reasoning": {"type": "string"},
-                },
-                "required": ["done", "reply", "reasoning"],
-            },
-        )
-        all_tools = base_tools + [query_tool, report_tool]
+        all_tools = base_tools + [L2_QUERY_TOOL.to_openai_tool(), L2_REPORT_TOOL.to_openai_tool()]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l2_query", "l2_report"})

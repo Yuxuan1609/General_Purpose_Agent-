@@ -8,9 +8,46 @@ from core.layer_message import LayerMessage
 
 logger = logging.getLogger("l0_5_1")
 
-# Tools are mounted on L1Agent via LayerInjector.set_injector() (see chain_factory).
-# L1 does NOT call tools directly — it delegates tool-requiring tasks to L2/L3.
-# Consolidation tools are registered in ToolRegistry (core/tools/consolidation_tools.py).
+from core.layers.base import CaptureToolDef
+
+L1_QUERY_TOOL = CaptureToolDef(
+    name="l1_query",
+    description="【特殊工具：向下查询】当需要下层L2的策略知识辅助决策时使用。"
+    "每次只提交一个问题，收到回复后再决定是否继续查询。禁止以文本方式直接回复！",
+    done=False,
+    schema={
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean", "const": False},
+            "queries": {
+                "type": "array", "maxItems": 1,
+                "items": {"type": "object", "properties": {
+                    "query": {"type": "string", "description": "向下层 L2 查询的问题"},
+                    "domains_hint": {"type": "array", "items": {"type": "string"},
+                                    "description": "建议查询的领域"},
+                }},
+            },
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "queries", "reasoning"],
+    },
+)
+
+L1_REPORT_TOOL = CaptureToolDef(
+    name="l1_report",
+    description="【特殊工具：向上汇报】当你有了足够信息可以做出最终决策时使用。"
+    "给出明确的决策结果和推理过程。禁止以文本方式直接回复！",
+    done=True,
+    schema={
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean", "const": True},
+            "result": {"type": "string", "description": "最终决策文本"},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "result", "reasoning"],
+    },
+)
 
 
 class L1Agent(LayerAgent):
@@ -38,14 +75,8 @@ class L1Agent(LayerAgent):
         rules = self._philosophy.all_rules()
         rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
-        tool_rules = (
-            "## 工具调用规则\n"
-            "- 所有工具都有 sync 参数。sync=true(默认)阻塞等结果，sync=false 返回 task_id\n"
-            "- sync=false 的任务用 collect_tasks(task_ids) 收割结果\n"
-            "- check_task(task_id) 可查单个任务状态\n"
-            "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
-            "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
-        )
+        from core.layers.base import _TOOL_RULES
+        tool_rules = _TOOL_RULES
         learning_guidance = (
             "## 学习记录\n"
             "如果本轮产生了值得固化的知识，调用 record_learning。判断标准:\n"
@@ -180,18 +211,9 @@ class L1Agent(LayerAgent):
             base_tools = [t for t in (self._get_tools(layer) or [])
                           if t["function"]["name"] in _allowed]
             consol_schemas = ToolRegistry().get_definitions(L1_CONSOLIDATION_TOOL_NAMES)
-            report_tool = self._schema_to_tool(
-                "l1_report",
-                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
-                {
-                    "type": "object",
-                    "properties": {
-                        "done": {"type": "boolean", "const": True},
-                        "result": {"type": "string", "description": "最终决策文本"},
-                        "reasoning": {"type": "string"},
-                    },
-                    "required": ["done", "result", "reasoning"],
-                },
+            report_tool = L1_REPORT_TOOL.to_openai_tool()
+            report_tool["function"]["description"] = (
+                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。"
             )
             all_tools = base_tools + consol_schemas + [report_tool]
             self._log.debug("  tools: %s",
@@ -208,48 +230,7 @@ class L1Agent(LayerAgent):
 
         # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []
-        query_tool = self._schema_to_tool(
-            "l1_query",
-            "【特殊工具：向下查询】当需要下层L2的策略知识辅助决策时使用。"
-            "每次只提交一个问题，收到回复后再决定是否继续查询。禁止以文本方式直接回复！",
-            {
-                "type": "object",
-                "properties": {
-                    "done": {"type": "boolean", "const": False},
-                    "queries": {
-                        "type": "array",
-                        "maxItems": 1,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "query": {"type": "string", "description": "向下层 L2 查询的问题"},
-                                "domains_hint": {
-                                    "type": "array", "items": {"type": "string"},
-                                    "description": "建议查询的领域",
-                                },
-                            },
-                        },
-                    },
-                    "reasoning": {"type": "string"},
-                },
-                "required": ["done", "queries", "reasoning"],
-            },
-        )
-        report_tool = self._schema_to_tool(
-            "l1_report",
-            "【特殊工具：向上汇报】当你有了足够信息可以做出最终决策时使用。"
-            "给出明确的决策结果和推理过程。禁止以文本方式直接回复！",
-            {
-                "type": "object",
-                "properties": {
-                    "done": {"type": "boolean", "const": True},
-                    "result": {"type": "string", "description": "最终决策文本"},
-                    "reasoning": {"type": "string"},
-                },
-                "required": ["done", "result", "reasoning"],
-            },
-        )
-        all_tools = base_tools + [query_tool, report_tool]
+        all_tools = base_tools + [L1_QUERY_TOOL.to_openai_tool(), L1_REPORT_TOOL.to_openai_tool()]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l1_query", "l1_report"})

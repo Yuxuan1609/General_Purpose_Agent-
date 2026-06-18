@@ -26,6 +26,42 @@ def _strip_frontmatter(content: str) -> str:
 #       additional reference lookup. Reserved for later phases.
 
 
+from core.layers.base import CaptureToolDef
+
+L3_CONTINUE_TOOL = CaptureToolDef(
+    name="l3_continue",
+    description="【特殊工具：继续思考】当你需要进一步思考或执行工具来完成L2下发的任务时使用。"
+    "调用此工具表示还需要继续工作。禁止以文本方式直接回复！",
+    done=False,
+    schema={
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean", "const": False},
+            "skills_used": {"type": "array", "items": {"type": "string"}},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "reasoning"],
+    },
+)
+
+L3_REPORT_TOOL = CaptureToolDef(
+    name="l3_report",
+    description="【特殊工具：向上汇报】当L2下发的任务执行完成时使用。"
+    "给出明确的执行结果和使用的技能列表。禁止以文本方式直接回复！",
+    done=True,
+    schema={
+        "type": "object",
+        "properties": {
+            "done": {"type": "boolean", "const": True},
+            "result": {"type": "string", "description": "技能执行结果"},
+            "skills_used": {"type": "array", "items": {"type": "string"}},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["done", "result", "reasoning"],
+    },
+)
+
+
 class L3Agent(LayerAgent):
     """L3 LLM Agent — skill-based task execution.
 
@@ -54,14 +90,8 @@ class L3Agent(LayerAgent):
         self._registry = domain_registry
 
     def _build_system_prompt(self, instruction: str, meta: str) -> str:
-        tool_rules = (
-            "## 工具调用规则\n"
-            "- 所有工具都有 sync 参数。sync=true(默认)阻塞等结果，sync=false 返回 task_id\n"
-            "- sync=false 的任务用 collect_tasks(task_ids) 收割结果\n"
-            "- check_task(task_id) 可查单个任务状态\n"
-            "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
-            "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
-        )
+        from core.layers.base import _TOOL_RULES
+        tool_rules = _TOOL_RULES
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
@@ -159,19 +189,9 @@ class L3Agent(LayerAgent):
             base_tools = [t for t in (self._get_tools(layer) or [])
                           if t["function"]["name"] in _allowed]
             consol_schemas = ToolRegistry().get_definitions(L3_CONSOLIDATION_TOOL_NAMES)
-            report_tool = self._schema_to_tool(
-                "l3_report",
-                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。",
-                {
-                    "type": "object",
-                    "properties": {
-                        "done": {"type": "boolean", "const": True},
-                        "result": {"type": "string", "description": "技能执行结果"},
-                        "skills_used": {"type": "array", "items": {"type": "string"}},
-                        "reasoning": {"type": "string"},
-                    },
-                    "required": ["done", "result", "reasoning"],
-                },
+            report_tool = L3_REPORT_TOOL.to_openai_tool()
+            report_tool["function"]["description"] = (
+                "【特殊工具：向上汇报】必须使用！整理完成后调用此工具输出最终结果。禁止以文本方式直接回复。"
             )
             all_tools = base_tools + consol_schemas + [report_tool]
             self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
@@ -187,36 +207,7 @@ class L3Agent(LayerAgent):
 
         # Normal mode: two capture tools
         base_tools = self._get_tools(layer) or []
-        continue_tool = self._schema_to_tool(
-            "l3_continue",
-            "【特殊工具：继续思考】当你需要进一步思考或执行工具来完成L2下发的任务时使用。"
-            "调用此工具表示还需要继续工作。禁止以文本方式直接回复！",
-            {
-                "type": "object",
-                "properties": {
-                    "done": {"type": "boolean", "const": False},
-                    "skills_used": {"type": "array", "items": {"type": "string"}},
-                    "reasoning": {"type": "string"},
-                },
-                "required": ["done", "reasoning"],
-            },
-        )
-        report_tool = self._schema_to_tool(
-            "l3_report",
-            "【特殊工具：向上汇报】当L2下发的任务执行完成时使用。"
-            "给出明确的执行结果和使用的技能列表。禁止以文本方式直接回复！",
-            {
-                "type": "object",
-                "properties": {
-                    "done": {"type": "boolean", "const": True},
-                    "result": {"type": "string", "description": "技能执行结果"},
-                    "skills_used": {"type": "array", "items": {"type": "string"}},
-                    "reasoning": {"type": "string"},
-                },
-                "required": ["done", "result", "reasoning"],
-            },
-        )
-        all_tools = base_tools + [continue_tool, report_tool]
+        all_tools = base_tools + [L3_CONTINUE_TOOL.to_openai_tool(), L3_REPORT_TOOL.to_openai_tool()]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l3_continue", "l3_report"})

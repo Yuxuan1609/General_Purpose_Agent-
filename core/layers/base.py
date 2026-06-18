@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 from core.layer_message import LayerMessage
@@ -11,6 +12,35 @@ from core.layers.comm import UpwardComm, DownwardComm
 def _indent(text: str, spaces: int) -> str:
     prefix = " " * spaces
     return prefix + text.replace("\n", "\n" + prefix)
+
+
+_TOOL_RULES = (
+    "## 工具调用规则\n"
+    "- 所有工具都有 sync 参数。sync=true(默认)阻塞等结果，sync=false 返回 task_id\n"
+    "- sync=false 的任务用 collect_tasks(task_ids) 收割结果\n"
+    "- check_task(task_id) 可查单个任务状态\n"
+    "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
+    "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
+)
+
+
+@dataclass
+class CaptureToolDef:
+    """Declarative definition of a capture tool for Agent decide()."""
+    name: str
+    description: str
+    done: bool
+    schema: dict
+
+    def to_openai_tool(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.schema,
+            },
+        }
 
 
 class LayerAgent(ABC):
