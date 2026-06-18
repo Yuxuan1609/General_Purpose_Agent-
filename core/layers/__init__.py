@@ -16,23 +16,18 @@ def build_chain(philosophy, flexible_knowledge, skill_layer,
     Returns the root (L0.5+1 Manager) which has L2 and L3 wired in.
     """
     from core.config_loader import get_section
-    from core.layers.l3.upward_comm import UpwardComm as L3Upward
-    from core.layers.l3.downward_comm import DownwardComm as L3Downward
-    from core.layers.l2.upward_comm import UpwardComm as L2Upward
-    from core.layers.l2.downward_comm import DownwardComm as L2Downward
-    from core.layers.l0_5_1.upward_comm import UpwardComm as L1Upward
-    from core.layers.l0_5_1.downward_comm import DownwardComm as L1Downward
+    from core.layers.comm import UpwardComm as CommUp, DownwardComm as CommDown
 
     rt = get_section('runtime')
-    l3 = L3Manager(skill_layer, upward=L3Upward(), downward=L3Downward(),
+    l3 = L3Manager(skill_layer, upward=CommUp(), downward=CommDown(),
                    auxiliary_llm=auxiliary_llm, domain_registry=domain_registry,
                    max_rounds=rt.get('max_rounds_l3', 3))
     l2 = L2Manager(flexible_knowledge, downstream=l3,
-                   upward=L2Upward(), downward=L2Downward(),
+                   upward=CommUp(), downward=CommDown(),
                    auxiliary_llm=auxiliary_llm, domain_registry=domain_registry,
                    max_rounds=rt.get('max_rounds_l2', 3))
     l1 = L0_5_1Manager(philosophy, auxiliary_llm=auxiliary_llm,
-                        downstream=l2, upward=L1Upward(), downward=L1Downward(),
+                        downstream=l2, upward=CommUp(), downward=CommDown(),
                         domain_registry=domain_registry,
                         knowledge_stores=knowledge_stores,
                         max_rounds=rt.get('max_rounds_l1', 5))

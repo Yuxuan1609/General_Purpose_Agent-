@@ -182,8 +182,8 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `AgentPacket` | `@dataclass(frozen, source_layer, message_type, content)` | 层内 Agent 通信包，承载在 LayerMessage.payload 中运输 | L1Agent / L2Agent | Comm Agents 包装/解包 |
-| `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | — |
-| `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict | LayerManager.query() | 下层 UpwardComm |
+| `UpwardComm` | `receive(msg)→dict` / `wrap_response(...)→LayerMessage` / `wrap_notify(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict。基类直接实例化使用（无子类）。 | LayerManager.query() / build_chain() | — |
+| `DownwardComm` | `receive(msg)→dict` / `wrap_query(...)→LayerMessage` | 确定性协议处理：LayerMessage ↔ 业务 dict。基类直接实例化使用（无子类）。 | LayerManager.query() / build_chain() | 下层 UpwardComm |
 
 ## core/layers/base.py (Phase 1)
 
@@ -200,27 +200,6 @@
 | `LayerManager.notify` | `() → Any` (abstract) | 返回本层的 NOTIFY payload | collect_notify() | — |
 | `LayerManager.query` | `(msg:LayerMessage\|Any, trace_id) → None` | QUERY 入口：通过 UpwardComm 解包 → process → DownwardComm 包装 → 下游 | Executor / 上层 | process(), downstream.query() |
 | `LayerManager.collect_notify` | `() → dict{layer_name: payload}` | 收集本层+所有下游的 NOTIFY | Executor.execute() | notify(), 下游.collect_notify() |
-
-## core/layers/l0_5_1/upward_comm.py, downward_comm.py (Phase 1.5)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `UpwardComm` | extends `comm.UpwardComm` | L0.5+1→Executor 通信 | Executor | L0_5_1Manager |
-| `DownwardComm` | extends `comm.DownwardComm` | L0.5+1→L2 通信 | L0_5_1Manager | L2 UpwardComm |
-
-## core/layers/l2/upward_comm.py, downward_comm.py (Phase 1.5)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `UpwardComm` | extends `comm.UpwardComm` | L2→L0.5+1 通信 | L0_5_1 DownwardComm | L2Manager |
-| `DownwardComm` | extends `comm.DownwardComm` | L2→L3 通信 | L2Manager | L3 UpwardComm |
-
-## core/layers/l3/upward_comm.py, downward_comm.py (Phase 1.5)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `UpwardComm` | extends `comm.UpwardComm` | L3→L2 通信 | L2 DownwardComm | L3Manager |
-| `DownwardComm` | extends `comm.DownwardComm` | L3→L4 通信（预留） | L3Manager | — |
 
 ## core/layers/l3/manager.py (Phase 1 + Phase 2a)
 
@@ -277,7 +256,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `build_chain` | `(philosophy, flexible_knowledge, skill_layer, auxiliary_llm, domain_registry, knowledge_stores) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1) | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
+| `build_chain` | `(philosophy, flexible_knowledge, skill_layer, auxiliary_llm, domain_registry, knowledge_stores) → L0_5_1Manager` | 自底向上构建三层链：L3 → L2 → L(0.5+1)，Comm 直接使用基类 UpwardComm/DownwardComm（无子类） | AgentRuntime / 脚本 | L3Manager(), L2Manager(), L0_5_1Manager() |
 
 ## core/philosophy.py (已有，层内部使用)
 

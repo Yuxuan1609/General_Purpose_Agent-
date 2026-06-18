@@ -62,7 +62,7 @@
 | README 中的概念 | 代码位置/现状 |
 |---|---|
 | A3: Manager Agent | ✅ `core/layers/l0_5_1/manager.py` → `L0_5_1Manager`, `core/layers/l2/manager.py` → `L2Manager`, `core/layers/l3/manager.py` → `L3Manager` |
-| A3: UpwardComm / DownwardComm Agent | ✅ 已实现。`core/layers/comm.py` 基类 + 每层 `upward_comm.py`/`downward_comm.py`。确定性协议处理，不涉及 LLM |
+| A3: UpwardComm / DownwardComm Agent | ✅ 已实现。`core/layers/comm.py` 基类直接实例化使用（原有的 per-layer 子类文件已删除，属于空壳） |
 | A3: Manager 与 Comm Agent 分离 | ✅ Manager 只处理业务 dict，Comm Agent 处理 LayerMessage 包装/解包 |
 | A3: 确定性 Agent 示例 | `core/flexible_knowledge.py:46-65` → `compute_activation()` 和 `_domain_match_score()`；`core/skill_layer.py:51-65` → `match()` |
 | A3: 信息隔离状态 | ✅ 新架构中每层 Manager 通过 Comm Agent 相邻通信，不跨层访问数据 |
