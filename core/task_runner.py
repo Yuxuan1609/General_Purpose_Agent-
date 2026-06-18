@@ -122,6 +122,31 @@ class TaskRunner:
         with self._lock:
             return dict(self._stats)
 
+    def status(self) -> dict:
+        """Return live status: running/done/error counts + per-tool stats."""
+        with self._lock:
+            running = sum(1 for t in self._tasks.values() if t.status == "running")
+            done = sum(1 for t in self._tasks.values() if t.status == "done")
+            error = sum(1 for t in self._tasks.values() if t.status == "error")
+            return {
+                "running": running,
+                "done": done,
+                "error": error,
+                "total": len(self._tasks),
+                "by_tool": dict(self._stats),
+            }
+
+    def wait_all(self, timeout: float | None = None):
+        """Block until all submitted tasks complete."""
+        deadline = time.time() + timeout if timeout else float("inf")
+        while time.time() < deadline:
+            with self._lock:
+                running = sum(1 for t in self._tasks.values() if t.status == "running")
+            if running == 0:
+                return
+            time.sleep(0.1)
+        raise TimeoutError(f"wait_all timed out after {timeout}s")
+
     def _record_stat(self, tool_name: str, outcome: str, elapsed: float):
         with self._lock:
             s = self._stats.setdefault(tool_name,
@@ -130,8 +155,8 @@ class TaskRunner:
             s[outcome] += 1
             s["total_ms"] += elapsed * 1000
 
-    def shutdown(self):
-        self._pool.shutdown(wait=False)
+    def shutdown(self, wait: bool = True):
+        self._pool.shutdown(wait=wait)
 
 
 # Module-level singleton

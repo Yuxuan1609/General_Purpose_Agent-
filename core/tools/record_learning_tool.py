@@ -156,16 +156,27 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
         _log.warning("Auto-learning: failed to build task observation")
         return
 
-    # 5. Execute through layers → apply
-    try:
-        result = executor.execute(obs)
-        notify = result.get("notify_layers", {})
-        step = lenv.step(_json.dumps(notify, ensure_ascii=False, default=str))
-        _log.info("Auto-learning done: %s", step.state.observation)
-    except Exception as e:
-        _log.error("Auto-learning execute failed: %s", e)
+    # 5. Execute through layers → apply + consolidation check
+    result = executor.execute(obs)
+    notify = result.get("notify_layers", {})
+    step = lenv.step(_json.dumps(notify, ensure_ascii=False, default=str))
+    _log.info("Auto-learning done: %s", step.state.observation)
 
-    # 6. Clean up archive — delete entries older than 30 days
+    # 6. Check if consolidation is needed after learning
+    from core.env.learning_env import LearningEnv
+    if lenv.needs_consolidation():
+        _log.info("Auto-learning: triggering consolidation (capacity overflow)")
+        try:
+            consol_task = lenv.build_consolidation_task()
+            if consol_task:
+                consol_result = executor.execute(consol_task)
+                consol_notify = consol_result.get("notify_layers", {})
+                lenv.step(_json.dumps(consol_notify, ensure_ascii=False, default=str))
+                _log.info("Auto-learning: consolidation complete")
+        except Exception as e:
+            _log.info("Auto-learning: consolidation failed: %s", e)
+
+    # 7. Clean up archive — delete entries older than 30 days
     _clean_old_archives(archive_dir.parent, 30)
 
 
