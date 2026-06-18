@@ -1,52 +1,37 @@
 """Consolidation tools — registered in ToolRegistry, filtered by AgentContext."""
 from __future__ import annotations
+from dataclasses import dataclass, field
 import json
 import logging
 
 logger = logging.getLogger(__name__)
 
-_philosophy = None
-_knowledge = None
-_skill_layer = None
-_registry = None
-_executor = None
 
-_pending_mods: list[dict] = []
+@dataclass
+class ConsolidationContext:
+    """Immutable-ish context for consolidation tools.
 
+    Replaces module-level global variables. Constructed once in chain_factory,
+    injected into Manager constructors. pending_mods is the only mutable field
+    (acts as a per-chain modification collector).
+    """
+    philosophy: object = None
+    knowledge: object = None
+    skill_layer: object = None
+    domain_registry: object = None
+    executor: object = None
+    knowledge_stores: dict | None = None
+    pending_mods: list[dict] = field(default_factory=list)
 
-def set_consolidation_stores(phil, fk, sl, reg):
-    global _philosophy, _knowledge, _skill_layer, _registry
-    _philosophy = phil
-    _knowledge = fk
-    _skill_layer = sl
-    _registry = reg
+    def record_mod(self, mod: dict) -> None:
+        self.pending_mods.append(mod)
 
-
-def set_learning_context(executor=None, knowledge_stores: dict | None = None):
-    global _executor, _philosophy, _knowledge, _skill_layer
-    if executor is not None:
-        _executor = executor
-    if knowledge_stores:
-        _philosophy = knowledge_stores.get("l1", _philosophy)
-        _knowledge = knowledge_stores.get("l2", _knowledge)
-        _skill_layer = knowledge_stores.get("l3", _skill_layer)
-
-
-def get_learning_context():
-    return {
-        "executor": _executor,
-        "philosophy": _philosophy,
-        "knowledge": _knowledge,
-        "skill_layer": _skill_layer,
-        "registry": _registry,
-    }
+    def drain_mods(self) -> list[dict]:
+        mods = list(self.pending_mods)
+        self.pending_mods.clear()
+        return mods
 
 
-def get_pending_mods() -> list[dict]:
-    global _pending_mods
-    mods = list(_pending_mods)
-    _pending_mods.clear()
-    return mods
 
 
 L1_CONSOLIDATION_TOOL_NAMES = {
@@ -63,7 +48,12 @@ L3_CONSOLIDATION_TOOL_NAMES = {
 }
 
 
-def register_consolidation_tools(tool_registry):
+def register_consolidation_tools(tool_registry, ctx: ConsolidationContext | None = None):
+    _ctx = ctx or ConsolidationContext()
+
+    def _wrap(fn):
+        return lambda args=None, **kw: fn(args, _ctx, **kw)
+
     tool_registry.register("deprecate_l1_rule", {
         "type": "function", "function": {
             "name": "deprecate_l1_rule",
@@ -73,7 +63,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "删除理由，如'与另一条重复'或'内容模糊'"},
             }, "required": ["rule_id", "reason"], "additionalProperties": False},
         },
-    }, _h_deprecate_l1_rule, toolset="consolidation", sync=True)
+    }, _wrap(_h_deprecate_l1_rule), toolset="consolidation", sync=True)
 
     tool_registry.register("create_l1_rule", {
         "type": "function", "function": {
@@ -84,7 +74,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "创建理由，如'合并了3条概率决策规则'"},
             }, "required": ["content", "reason"], "additionalProperties": False},
         },
-    }, _h_create_l1_rule, toolset="consolidation", sync=True)
+    }, _wrap(_h_create_l1_rule), toolset="consolidation", sync=True)
 
     tool_registry.register("modify_l1_rule", {
         "type": "function", "function": {
@@ -99,7 +89,7 @@ def register_consolidation_tools(tool_registry):
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["rule_id", "reason"], "additionalProperties": False},
         },
-    }, _h_modify_l1_rule, toolset="consolidation", sync=True)
+    }, _wrap(_h_modify_l1_rule), toolset="consolidation", sync=True)
 
     tool_registry.register("deprecate_l2_card", {
         "type": "function", "function": {
@@ -110,7 +100,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "删除理由，如'合并到 leduc_K_preflop'或'低置信度从未使用'"},
             }, "required": ["card_id", "reason"], "additionalProperties": False},
         },
-    }, _h_deprecate_l2_card, toolset="consolidation", sync=True)
+    }, _wrap(_h_deprecate_l2_card), toolset="consolidation", sync=True)
 
     tool_registry.register("create_l2_card", {
         "type": "function", "function": {
@@ -122,7 +112,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "创建理由，如'合并了3张K翻牌前加注策略卡片'"},
             }, "required": ["content", "domain", "reason"], "additionalProperties": False},
         },
-    }, _h_create_l2_card, toolset="consolidation", sync=True)
+    }, _wrap(_h_create_l2_card), toolset="consolidation", sync=True)
 
     tool_registry.register("modify_l2_card", {
         "type": "function", "function": {
@@ -138,7 +128,7 @@ def register_consolidation_tools(tool_registry):
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["card_id", "reason"], "additionalProperties": False},
         },
-    }, _h_modify_l2_card, toolset="consolidation", sync=True)
+    }, _wrap(_h_modify_l2_card), toolset="consolidation", sync=True)
 
     tool_registry.register("deprecate_l3_skill", {
         "type": "function", "function": {
@@ -149,7 +139,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "删除理由，如'低质量从未被匹配'或'与另一技能功能重叠'"},
             }, "required": ["skill_name", "reason"], "additionalProperties": False},
         },
-    }, _h_deprecate_l3_skill, toolset="consolidation", sync=True)
+    }, _wrap(_h_deprecate_l3_skill), toolset="consolidation", sync=True)
 
     tool_registry.register("create_l3_skill", {
         "type": "function", "function": {
@@ -162,7 +152,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "创建理由，如'编译自3张高激活配对加注卡片'"},
             }, "required": ["name", "content", "domain", "reason"], "additionalProperties": False},
         },
-    }, _h_create_l3_skill, toolset="consolidation", sync=True)
+    }, _wrap(_h_create_l3_skill), toolset="consolidation", sync=True)
 
     tool_registry.register("modify_l3_skill", {
         "type": "function", "function": {
@@ -178,7 +168,7 @@ def register_consolidation_tools(tool_registry):
                 "comment": {"type": "string", "description": "Quality description, max 100 chars."},
             }, "required": ["skill_name", "reason"], "additionalProperties": False},
         },
-    }, _h_modify_l3_skill, toolset="consolidation", sync=True)
+    }, _wrap(_h_modify_l3_skill), toolset="consolidation", sync=True)
 
     tool_registry.register("query_domain", {
         "type": "function", "function": {
@@ -188,7 +178,7 @@ def register_consolidation_tools(tool_registry):
                 "domain": {"type": "string", "description": "Domain path to query, e.g. 'game/doudizhu'"},
             }, "required": ["domain"], "additionalProperties": False},
         },
-    }, _h_query_domain, toolset="consolidation", sync=True)
+    }, _wrap(_h_query_domain), toolset="consolidation", sync=True)
 
     tool_registry.register("deprecate_domain", {
         "type": "function", "function": {
@@ -199,7 +189,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "Why this domain is being removed"},
             }, "required": ["domain", "reason"], "additionalProperties": False},
         },
-    }, _h_deprecate_domain, toolset="consolidation", sync=True)
+    }, _wrap(_h_deprecate_domain), toolset="consolidation", sync=True)
 
     tool_registry.register("merge_domain", {
         "type": "function", "function": {
@@ -211,7 +201,7 @@ def register_consolidation_tools(tool_registry):
                 "reason": {"type": "string", "description": "Why merging"},
             }, "required": ["source", "target", "reason"], "additionalProperties": False},
         },
-    }, _h_merge_domain, toolset="consolidation", sync=True)
+    }, _wrap(_h_merge_domain), toolset="consolidation", sync=True)
 
     tool_registry.register("create_domain", {
         "type": "function", "function": {
@@ -241,23 +231,23 @@ def register_consolidation_tools(tool_registry):
                 },
             }, "required": ["path", "description"], "additionalProperties": False},
         },
-    }, _h_create_domain, toolset="consolidation", sync=True, override=True)
+    }, _wrap(_h_create_domain), toolset="consolidation", sync=True, override=True)
 
 
 # ── L1 Rule Handlers ──
 
-def _h_deprecate_l1_rule(args=None, **kwargs):
+def _h_deprecate_l1_rule(args=None, ctx=None, **kwargs):
     args = args or {}
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "deprecate", "target": args.get("rule_id", ""),
         "reason": args.get("reason", ""), "layer": "l1",
     })
     return json.dumps({"recorded": True, "message": f"已记录: 删除 {args.get('rule_id', '')}"})
 
 
-def _h_create_l1_rule(args=None, **kwargs):
+def _h_create_l1_rule(args=None, ctx=None, **kwargs):
     args = args or {}
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "create", "target": "", "layer": "l1",
         "reason": args.get("reason", ""),
         "payload": {"content": args.get("content", "")},
@@ -265,7 +255,7 @@ def _h_create_l1_rule(args=None, **kwargs):
     return json.dumps({"recorded": True, "message": "已记录: 创建新规则"})
 
 
-def _h_modify_l1_rule(args=None, **kwargs):
+def _h_modify_l1_rule(args=None, ctx=None, **kwargs):
     args = args or {}
     payload = {"content": args.get("content", "")}
     if "usefulness" in args:
@@ -274,7 +264,7 @@ def _h_modify_l1_rule(args=None, **kwargs):
         payload["misleading"] = args["misleading"]
     if "comment" in args:
         payload["comment"] = args["comment"]
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "update", "target": args.get("rule_id", ""), "layer": "l1",
         "reason": args.get("reason", ""), "payload": payload,
     })
@@ -283,18 +273,18 @@ def _h_modify_l1_rule(args=None, **kwargs):
 
 # ── L2 Card Handlers ──
 
-def _h_deprecate_l2_card(args=None, **kwargs):
+def _h_deprecate_l2_card(args=None, ctx=None, **kwargs):
     args = args or {}
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "deprecate", "target": args.get("card_id", ""),
         "reason": args.get("reason", ""), "layer": "l2",
     })
     return json.dumps({"recorded": True, "message": f"已记录: 删除 {args.get('card_id', '')}"})
 
 
-def _h_create_l2_card(args=None, **kwargs):
+def _h_create_l2_card(args=None, ctx=None, **kwargs):
     args = args or {}
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "create", "target": "", "layer": "l2",
         "reason": args.get("reason", ""),
         "payload": {
@@ -305,7 +295,7 @@ def _h_create_l2_card(args=None, **kwargs):
     return json.dumps({"recorded": True, "message": "已记录: 创建新卡片"})
 
 
-def _h_modify_l2_card(args=None, **kwargs):
+def _h_modify_l2_card(args=None, ctx=None, **kwargs):
     args = args or {}
     payload = {"content": args.get("content", "")}
     if "domain" in args and args["domain"]:
@@ -316,7 +306,7 @@ def _h_modify_l2_card(args=None, **kwargs):
         payload["misleading"] = args["misleading"]
     if "comment" in args:
         payload["comment"] = args["comment"]
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "update", "target": args.get("card_id", ""), "layer": "l2",
         "reason": args.get("reason", ""), "payload": payload,
     })
@@ -325,18 +315,18 @@ def _h_modify_l2_card(args=None, **kwargs):
 
 # ── L3 Skill Handlers ──
 
-def _h_deprecate_l3_skill(args=None, **kwargs):
+def _h_deprecate_l3_skill(args=None, ctx=None, **kwargs):
     args = args or {}
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "deprecate", "target": args.get("skill_name", ""),
         "reason": args.get("reason", ""), "layer": "l3",
     })
     return json.dumps({"recorded": True, "message": f"已记录: 删除 {args.get('skill_name', '')}"})
 
 
-def _h_create_l3_skill(args=None, **kwargs):
+def _h_create_l3_skill(args=None, ctx=None, **kwargs):
     args = args or {}
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "create", "target": args.get("name", ""), "layer": "l3",
         "reason": args.get("reason", ""),
         "payload": {
@@ -347,7 +337,7 @@ def _h_create_l3_skill(args=None, **kwargs):
     return json.dumps({"recorded": True, "message": f"已记录: 创建 {args.get('name', '')}"})
 
 
-def _h_modify_l3_skill(args=None, **kwargs):
+def _h_modify_l3_skill(args=None, ctx=None, **kwargs):
     args = args or {}
     payload = {"content": args.get("content", "")}
     if "domain" in args and args["domain"]:
@@ -358,7 +348,7 @@ def _h_modify_l3_skill(args=None, **kwargs):
         payload["misleading"] = args["misleading"]
     if "comment" in args:
         payload["comment"] = args["comment"]
-    _pending_mods.append({
+    ctx.record_mod({
         "type": "update", "target": args.get("skill_name", ""), "layer": "l3",
         "reason": args.get("reason", ""), "payload": payload,
     })
@@ -367,68 +357,72 @@ def _h_modify_l3_skill(args=None, **kwargs):
 
 # ── Domain Handlers ──
 
-def _content_getter(layer, domain):
-    if layer == "l2" and _knowledge:
-        return [c.content for c in _knowledge.cards
+def _content_getter(layer, domain, ctx=None):
+    if layer == "l2" and ctx and ctx.knowledge:
+        return [c.content for c in ctx.knowledge.cards
                 if domain in c.available_domains]
-    if layer == "l3" and _skill_layer:
-        return [m.description for n, m in _skill_layer._skills.items()
+    if layer == "l3" and ctx and ctx.skill_layer:
+        return [m.description for n, m in ctx.skill_layer._skills.items()
                 if domain in m.available_domains]
     return []
 
 
-def _h_query_domain(args=None, **kwargs):
+def _h_query_domain(args=None, ctx=None, **kwargs):
     args = args or {}
     domain = args.get("domain", "")
-    if _registry is None:
+    if ctx is None or ctx.domain_registry is None:
         return json.dumps({"error": "DomainRegistry not connected"})
-    l2_ids = set(_registry.get_primary_items("l2", domain))
-    l3_ids = set(_registry.get_primary_items("l3", domain))
+    registry = ctx.domain_registry
+    knowledge = ctx.knowledge
+    skill_layer = ctx.skill_layer
+    l2_ids = set(registry.get_primary_items("l2", domain))
+    l3_ids = set(registry.get_primary_items("l3", domain))
     cards = []
-    if _knowledge:
-        for c in _knowledge.cards:
+    if knowledge:
+        for c in knowledge.cards:
             if c.id in l2_ids:
                 cards.append({"id": c.id, "content": c.content[:150],
-                              "usefulness": c.usefulness,
-                              "last_used": str(c.last_used.isoformat())[:10]})
+                               "usefulness": c.usefulness,
+                               "last_used": str(c.last_used.isoformat())[:10]})
     skills = []
-    if _skill_layer:
-        for name, m in _skill_layer._skills.items():
+    if skill_layer:
+        for name, m in skill_layer._skills.items():
             if name in l3_ids:
                 skills.append({"name": name, "description": m.description[:150],
-                               "usefulness": m.usefulness,
-                               "last_used": str(m.last_used.isoformat())[:10]})
+                                "usefulness": m.usefulness,
+                                "last_used": str(m.last_used.isoformat())[:10]})
     return json.dumps({"domain": domain, "l2_cards": cards, "l3_skills": skills},
-                      ensure_ascii=False, default=str)
+                       ensure_ascii=False, default=str)
 
 
-def _h_deprecate_domain(args=None, **kwargs):
+def _h_deprecate_domain(args=None, ctx=None, **kwargs):
     args = args or {}
     domain = args.get("domain", "")
-    if _registry is None:
+    if ctx is None or ctx.domain_registry is None:
         return json.dumps({"error": "DomainRegistry not connected"})
     try:
-        _registry.deprecate_domain(domain)
+        ctx.domain_registry.deprecate_domain(domain)
         return json.dumps({"success": True, "message": f"Domain '{domain}' removed"})
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
 
-def _h_merge_domain(args=None, **kwargs):
+def _h_merge_domain(args=None, ctx=None, **kwargs):
     args = args or {}
     source = args.get("source", "")
     target = args.get("target", "")
-    if _registry is None:
+    if ctx is None or ctx.domain_registry is None:
         return json.dumps({"error": "DomainRegistry not connected"})
     try:
-        result = _registry.merge_domain(source, target, content_getter=_content_getter)
+        g = lambda layer, domain: _content_getter(layer, domain, ctx)
+        result = ctx.domain_registry.merge_domain(source, target, content_getter=g)
         return json.dumps({"success": True,
                            "message": f"Merged '{source}' → '{target}', {result['moved_items']} items moved"})
     except ValueError as e:
         return json.dumps({"error": str(e)})
 
 
-def _h_create_domain(args=None, **kwargs):
+def _h_create_domain(args=None, ctx=None, **kwargs):
     args = args or {}
     path = args.get("path", "")
     parent = args.get("parent", "general")
@@ -436,36 +430,40 @@ def _h_create_domain(args=None, **kwargs):
     relations = args.get("relations", "")
     initial_cards = args.get("initial_cards", [])
     initial_skills = args.get("initial_skills", [])
+    if ctx is None or ctx.domain_registry is None:
+        return json.dumps({"error": "DomainRegistry not connected"})
+    registry = ctx.domain_registry
+    knowledge = ctx.knowledge
+    skill_layer = ctx.skill_layer
     if not path or not description:
         return json.dumps({"error": "path and description are required"})
     if not initial_cards and not initial_skills:
         return json.dumps({"error": "Domain must have at least one initial card or skill. Empty domains are not allowed."})
-    if _registry is None:
-        return json.dumps({"error": "DomainRegistry not connected"})
     try:
-        _registry.add_node(path, parent, description, {}, relations)
+        registry.add_node(path, parent, description, {}, relations)
         created_cards = 0
-        if _knowledge:
+        if knowledge:
             from core.task import Domain
             for card_data in initial_cards:
-                _knowledge.add_card(
+                knowledge.add_card(
                     content=card_data["content"],
                     domain=Domain(path, "specific"),
                     source="learning_env",
                 )
                 created_cards += 1
         created_skills = 0
-        if _skill_layer:
+        if skill_layer:
             from core.task import Domain
             for skill_data in initial_skills:
-                _skill_layer.create_skill(
+                skill_layer.create_skill(
                     name=skill_data["name"],
                     content=skill_data["content"],
                     domain=Domain(path, "specific"),
                     created_by="learning_env",
                 )
                 created_skills += 1
-        _registry.compute_embedding(path, content_getter=_content_getter)
+        g = lambda layer, domain: _content_getter(layer, domain, ctx)
+        registry.compute_embedding(path, content_getter=g)
         return json.dumps({
             "success": True,
             "message": f"Domain '{path}' created under '{parent}'. Cards: {created_cards}, Skills: {created_skills}",

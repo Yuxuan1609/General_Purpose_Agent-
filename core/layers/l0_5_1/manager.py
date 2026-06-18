@@ -274,12 +274,14 @@ class L0_5_1Manager(LayerManager):
                  downstream: LayerManager | None = None,
                  upward=None, downward=None,
                  domain_registry=None, max_rounds=None,
-                 knowledge_stores: dict | None = None):
+                 knowledge_stores: dict | None = None,
+                 consol_ctx=None):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._philosophy = philosophy
         self._agent = L1Agent(auxiliary_llm, philosophy, domain_registry,
-                              knowledge_stores=knowledge_stores) if auxiliary_llm else None
+                               knowledge_stores=knowledge_stores) if auxiliary_llm else None
         self._registry = domain_registry
+        self._consol_ctx = consol_ctx
         if max_rounds is None:
             from core.config_loader import get_section
             max_rounds = get_section('runtime', default={}).get('max_rounds_l1', 5)
@@ -453,9 +455,9 @@ class L0_5_1Manager(LayerManager):
     def notify(self) -> Any:
         if self._l1_notify:
             result = dict(self._l1_notify)
-            from core.tools.consolidation_tools import get_pending_mods
-            mods = get_pending_mods()
-            if mods:
-                result["l1_modifications"] = mods
+            if self._consol_ctx:
+                mods = self._consol_ctx.drain_mods()
+                if mods:
+                    result["l1_modifications"] = mods
             return result
         return {"status": "ok", "layer": self.name}

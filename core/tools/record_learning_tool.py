@@ -11,7 +11,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def register_record_learning(registry, pending_dir: str = "data/learning/pending"):
+def register_record_learning(registry, pending_dir: str = "data/learning/pending",
+                              consol_ctx=None):
+    _consol_ctx = consol_ctx
     registry.register("record_learning", {
         "type": "function",
         "function": {
@@ -130,11 +132,14 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
     _log.info("Auto-learning: archived %d files → %s", len(json_files), archive_dir)
 
     # 3. Get learning context
-    from core.tools.consolidation_tools import get_learning_context
-    ctx = get_learning_context()
-    executor = ctx.get("executor")
-    knowledge = {"l1": ctx.get("philosophy"), "l2": ctx.get("knowledge"),
-                 "l3": ctx.get("skill_layer")}
+    executor = _consol_ctx.executor if _consol_ctx else None
+    knowledge = {}
+    if _consol_ctx:
+        knowledge = _consol_ctx.knowledge_stores or {}
+        if not knowledge:
+            knowledge = {"l1": _consol_ctx.philosophy,
+                        "l2": _consol_ctx.knowledge,
+                        "l3": _consol_ctx.skill_layer}
 
     if not executor:
         _log.warning("Auto-learning: no Executor in context, skipping")

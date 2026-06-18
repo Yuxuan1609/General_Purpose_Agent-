@@ -240,11 +240,12 @@ class L3Manager(LayerManager):
 
     def __init__(self, skill_layer, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None, max_rounds=None):
+                 domain_registry=None, max_rounds=None, consol_ctx=None):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
         self._agent = L3Agent(auxiliary_llm, skill_layer=skill_layer, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
+        self._consol_ctx = consol_ctx
         if max_rounds is None:
             from core.config_loader import get_section
             max_rounds = get_section('runtime', default={}).get('max_rounds_l3', 3)
@@ -344,9 +345,9 @@ class L3Manager(LayerManager):
     def notify(self) -> Any:
         if self._l3_notify:
             result = dict(self._l3_notify)
-            from core.tools.consolidation_tools import get_pending_mods
-            mods = get_pending_mods()
-            if mods:
-                result["l3_modifications"] = mods
+            if self._consol_ctx:
+                mods = self._consol_ctx.drain_mods()
+                if mods:
+                    result["l3_modifications"] = mods
             return result
         return {"status": "ok", "layer": "l3", "skills_matched": len(self._matched)}

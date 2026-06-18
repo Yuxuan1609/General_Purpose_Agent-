@@ -9,7 +9,8 @@ from core.layers.l3.manager import L3Manager
 
 def build_chain(philosophy, flexible_knowledge, skill_layer,
                 auxiliary_llm=None, domain_registry=None,
-                knowledge_stores: dict | None = None) -> L0_5_1Manager:
+                knowledge_stores: dict | None = None,
+                consol_ctx=None) -> L0_5_1Manager:
     """Build the three-layer chain bottom-up.
 
     Each layer is wired with UpwardComm + DownwardComm for LayerMessage protocol.
@@ -21,16 +22,17 @@ def build_chain(philosophy, flexible_knowledge, skill_layer,
     rt = get_section('runtime')
     l3 = L3Manager(skill_layer, upward=CommUp(), downward=CommDown(),
                    auxiliary_llm=auxiliary_llm, domain_registry=domain_registry,
-                   max_rounds=rt.get('max_rounds_l3', 3))
+                   max_rounds=rt.get('max_rounds_l3', 3), consol_ctx=consol_ctx)
     l2 = L2Manager(flexible_knowledge, downstream=l3,
                    upward=CommUp(), downward=CommDown(),
                    auxiliary_llm=auxiliary_llm, domain_registry=domain_registry,
-                   max_rounds=rt.get('max_rounds_l2', 3))
+                   max_rounds=rt.get('max_rounds_l2', 3), consol_ctx=consol_ctx)
     l1 = L0_5_1Manager(philosophy, auxiliary_llm=auxiliary_llm,
                         downstream=l2, upward=CommUp(), downward=CommDown(),
                         domain_registry=domain_registry,
                         knowledge_stores=knowledge_stores,
-                        max_rounds=rt.get('max_rounds_l1', 5))
+                        max_rounds=rt.get('max_rounds_l1', 5),
+                        consol_ctx=consol_ctx)
     return l1
 
 

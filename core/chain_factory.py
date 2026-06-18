@@ -47,12 +47,16 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
 
     knowledge_stores = {"l2": fk, "l3": sl}
     chain = _build(phil, fk, sl, auxiliary_llm=auxiliary_llm,
-                    domain_registry=reg, knowledge_stores=knowledge_stores)
-    _mount_tools(chain, data_root)
+                    domain_registry=reg, knowledge_stores=knowledge_stores,
+                    consol_ctx=consol_ctx)
+    _mount_tools(chain, data_root, consol_ctx=consol_ctx)
 
-    from core.tools.consolidation_tools import set_consolidation_stores, set_learning_context
-    set_consolidation_stores(phil, fk, sl, reg)
-    set_learning_context(knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
+    from core.tools.consolidation_tools import ConsolidationContext
+    consol_ctx = ConsolidationContext(
+        philosophy=phil, knowledge=fk, skill_layer=sl,
+        domain_registry=reg, executor=None,
+        knowledge_stores={"l1": phil, "l2": fk, "l3": sl},
+    )
 
     if env is not None:
         from core.agent_context import AgentContext
@@ -66,7 +70,7 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     return chain
 
 
-def _mount_tools(chain, data_root: Path):
+def _mount_tools(chain, data_root: Path, consol_ctx=None):
     """Register all tools and attach LayerInjector to every layer."""
     from core.tools import register_all_tools
     from core.tools.registry import ToolRegistry
@@ -75,7 +79,8 @@ def _mount_tools(chain, data_root: Path):
     from capability.layer_injector import LayerInjector
 
     registry = ToolRegistry()
-    register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals")
+    register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals",
+                       consol_ctx=consol_ctx)
     from core.tools.domain_tool import set_domain_registry
     for layer in _iter_layers(chain):
         if layer._registry:

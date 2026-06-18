@@ -109,14 +109,12 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `set_consolidation_stores` | `(phil, fk, sl, reg) → None` | 设置模块级 store 引用，供 handler 访问 | chain_factory.build_default_chain() | — |
-| `get_pending_mods` | `() → list[dict]` | 获取并清空所有待处理的 consolidation 修改记录 | L0_5_1Manager.notify(), L2Manager.notify(), L3Manager.notify() | — |
-| `register_consolidation_tools` | `(tool_registry) → None` | 注册全部 consolidation 工具（L1 rule/L2 card/L3 skill CRUD + domain ops） | register_all_tools() | ToolRegistry.register() |
+| `ConsolidationContext` | `@dataclass(philosophy, knowledge, skill_layer, domain_registry, executor, knowledge_stores, pending_mods)` | 注入式上下文，替代全部全局状态。record_mod()/drain_mods() 管理修改收集 | chain_factory / Manager notify() | consolidation handlers |
+| `register_consolidation_tools` | `(tool_registry, ctx: ConsolidationContext\|None) → None` | 注册全部 consolidation 工具，通过闭包绑定 ctx 到 handler | register_all_tools() | ToolRegistry.register() |
 | `L1_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L1 consolidation 可用工具名集合 | L1Agent.decide() | ToolRegistry.get_definitions() |
 | `L2_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L2 consolidation 可用工具名集合 | L2Agent.decide() | ToolRegistry.get_definitions() |
 | `L3_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L3 consolidation 可用工具名集合 | L3Agent.decide() | ToolRegistry.get_definitions() |
-| `set_learning_context` | `(executor=None, knowledge_stores=None) → None` | 设置全局 Executor/knowledge 引用，供 auto-learning 使用 | chain_factory, scripts | — |
-| `get_learning_context` | `() → dict` | 获取全局 Executor/knowledge 引用 | _dispatch_learning | — |
+| `_dispatch_learning` | `(domain, pending_path, json_files) → None` | 读取记录→archive→LearningEnv→Executor→步骤→apply 的完整学习循环（使用注入的 _consol_ctx） | _check_auto_trigger (via TaskRunner) | LearningEnv.process_in_memory, Executor.execute, LearningEnv.step |
 
 ## core/domain_registry.py (Task 3)
 
