@@ -72,4 +72,4 @@ def register_create_domain(tool_registry):
                 "required": ["path", "description"],
             },
         },
-    }, handler, toolset="core")
+    }, handler, toolset="core", override=True)

@@ -66,6 +66,14 @@
 | `TaskRunner.pending_tasks` | `() → list[str]` | List running task IDs | collect_tasks handler | — |
 | `TaskRunner.stats` | `() → dict` | Running statistics (count/success/error/duration) | — | — |
 | `get_task_runner` | `() → TaskRunner` | Global singleton access | _call_llm, tool handlers | — |
+| `TaskRunner.stats` | `() → dict` | 返回 `{tool_name: {count, success, error, total_elapsed, max_elapsed}}` | 监控/测试 | — |
+
+## core/config_loader.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `load_config` | `(config_path: Path) → dict` | 加载 config.yaml 返回完整 dict | 脚本入口 | — |
+| `get_section` | `(section: str, config_path=None, default=None) → dict` | 获取 config 子段。第一次调用时加载全量 config 并缓存。 | 所有模块构造函数 | load_config() |
 
 ## core/round_tree.py
 
@@ -104,6 +112,12 @@
 | `AgentContext` | `@dataclass(allowed_tools, denied_tools)` | Per-environment tool filter。从 `Environment.tool_policy` 构造（`from_policy()`） | chain_factory, Environment | — |
 | `AgentContext.from_policy` | `(policy: dict\|None) → AgentContext\|None` | 从 env tool_policy dict 构造；无策略返回 None | chain_factory | — |
 | `AgentContext.resolve` | `(tools: list[dict]) → list[dict]` | 按 allow/deny 过滤预过滤的 tool schema 列表。优先级：allowed > denied > pass | LayerAgent._get_tools | — |
+
+## core/tools/sysinfo_tool.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_sysinfo_tool` | `(registry) → None` | 注册 sysinfo 工具：os/hardware/env/network 四类系统信息。 | register_all_tools() | ToolRegistry.register() |
 
 ## core/tools/consolidation_tools.py
 
