@@ -46,10 +46,6 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         seed_knowledge(fk, phil, sl, domain_registry=reg)
 
     knowledge_stores = {"l2": fk, "l3": sl}
-    chain = _build(phil, fk, sl, auxiliary_llm=auxiliary_llm,
-                    domain_registry=reg, knowledge_stores=knowledge_stores,
-                    consol_ctx=consol_ctx)
-    _mount_tools(chain, data_root, consol_ctx=consol_ctx)
 
     from core.tools.consolidation_tools import ConsolidationContext
     consol_ctx = ConsolidationContext(
@@ -57,6 +53,11 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
         domain_registry=reg, executor=None,
         knowledge_stores={"l1": phil, "l2": fk, "l3": sl},
     )
+
+    chain = _build(phil, fk, sl, auxiliary_llm=auxiliary_llm,
+                    domain_registry=reg, knowledge_stores=knowledge_stores,
+                    consol_ctx=consol_ctx)
+    _mount_tools(chain, data_root, consol_ctx=consol_ctx)
 
     if env is not None:
         from core.agent_context import AgentContext

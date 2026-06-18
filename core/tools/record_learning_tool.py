@@ -4,6 +4,8 @@ import json, uuid, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+_consol_ctx = None
+
 from core.llm_factory import build_llm_client
 
 
@@ -13,6 +15,7 @@ def _now() -> str:
 
 def register_record_learning(registry, pending_dir: str = "data/learning/pending",
                               consol_ctx=None):
+    global _consol_ctx
     _consol_ctx = consol_ctx
     registry.register("record_learning", {
         "type": "function",
