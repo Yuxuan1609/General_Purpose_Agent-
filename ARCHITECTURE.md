@@ -94,7 +94,7 @@ Layer N:
 | 类型 | 适用场景 | 示例 |
 |------|----------|------|
 | 确定性 Agent | 规则引擎、协议处理、匹配算法 | L3Manager 技能匹配、Comm Agent 消息序列化 |
-| LLM Agent (V-structure) | 多阶段推理决策 | L1Agent（两阶段）、L2Agent（三阶段） |
+| LLM Agent (while-loop decide) | 多轮推理决策 | L1Agent / L2Agent / L3Agent（decide() + Manager while 循环） |
 | 混合 Agent | 确定性逻辑为主，特定节点委托 LLM | L1 Manager：规则 CRUD 走确定性，提案评估走 LLM |
 
 **信息隔离原则：**
@@ -213,7 +213,7 @@ Layer N:
 - **Manager**: 各层业务逻辑，只消费业务 dict
 - **Executor**: 独立决策者，组装各层 NOTIFY → prompt → LLM → action
 
-> 当前 `MAX_LOOPS=1`，Execute 段不进行多轮调用。后续需支持对话式多轮交互。
+> 每层 Manager 的 `query()` 在 while 循环中调用 Agent `decide()`，`max_rounds` 可配置（L1=5, L2=3, L3=3，见 `config.yaml:runtime`）。Agent 通过 capture_tool（l1_query/l1_report 等）声明 done 与否，控制循环退出。
 
 ---
 
@@ -246,7 +246,7 @@ Layer N:
 
 ```
 Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
- 各层 Manager 驱动 V-structure Agent 循环
+ 各层 Manager while 循环调用 Agent.decide()（capture_tool 控制 done）
  RESPONSE 链返回 → 各层 NOTIFY → Executor 组装 prompt
  Executor → LLM → parse action → AgentRuntime
  ExecutionRecord → pending/
@@ -260,53 +260,51 @@ Executor ──LayerMessage(QUERY)──→ L(0.5+1)→L2→L3
 
 仍作为数据对象保留，但不再作为独立层运行：
 
-- **MetaDriver** (`core/meta_driver.py`)：2 个验证器（not_duplicate/no_contradiction）、危险工具过滤
-- **Philosophy** (`core/philosophy.py`)：Rule.source 区分 L0.5 宪法（不可变）和 L1 行为规则（可变，反射可修改）
-- **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard + KnowledgeGraph，MD+JSON 双存
-- **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，支持 create/edit/delete
+- **Philosophy** (`core/philosophy.py`)：Rule.source 区分 L0.5 宪法（不可变）和 L1 行为规则（可变，反射可修改）。内置校验器（not_duplicate/no_contradiction）已迁入 Philosophy.add_rule/modify_rule（原 MetaDriver 已解散）
+- **FlexibleKnowledge** (`core/flexible_knowledge.py`)：KnowledgeCard 管理，SQLite 后端
+- **SkillLayer** (`core/skill_layer.py`)：SKILL.md 管理，支持 create/edit/delete，SQLite 后端
 
 ### L(0.5+1) — 合并宪法 + 行为准则层
 
-`core/layers/l0_5_1/manager.py`，由 **L1Agent（两阶段 V-structure）** 驱动：
+`core/layers/l0_5_1/manager.py`，由 **L1Agent（while-loop decide）** 驱动：
 
 - L0.5 rules (`source="l0_5"`)：通用认知原则，仅在配置中手工修改
 - L1 rules (`source="l1"`)：领域相关行为准则，反射可添加/修改/删除
 
 ```
-L1Agent.stage1(meta, state, domain_nodes)
-  → 判断"需要从下层获取什么知识" + 选领域节点 → {query, domain_nodes}
-
-L1Agent.stage2(meta, state, l2_result)
-  → 整合 L2 返回的知识卡片 + 行为准则 → 最终决策
-  → 输出 {done, result, reasoning}
+L0_5_1Manager.query(msg)
+  while round ≤ max_rounds:
+    L1Agent.decide(meta, state, history, tools, layer)
+      → capture_tool: l1_query(done=false, 向 L2 查询) / l1_report(done=true, 最终决策)
+    if done: break
+    else: propagate query → L2 → 收集 NOTIFY
+  → NOTIFY {done, result, reasoning}
 ```
 
 ### L2 — Flexible Knowledge（柔性知识层）
 
-`core/layers/l2/manager.py`，由 **L2Agent（三阶段 V-structure）** 驱动：
+`core/layers/l2/manager.py`，由 **L2Agent（while-loop decide）** 驱动：
 
 ```
-L2Agent.stage1(query, meta, state)
-  → LLM 对领域节点打分 → 选 top-5 节点
-
-L2Agent.stage2(query, meta, state, selected_nodes)
-  → 检索知识卡片 → LLM 筛选 ≤15 张 → 判断是否调 L3
-
-L2Agent.stage3(query, meta, state, selected_nodes, stage2_result)
-  → 整合 L3 返回 + 上下文 → 最终 NOTIFY
+L2Manager.query(msg)
+  while round ≤ max_rounds:
+    L2Agent.decide(query, meta, state, context, tools, layer)
+      → capture_tool: l2_query(done=false, 向 L3 查询) / l2_report(done=true, 最终回复)
+    if done: break
+    else: propagate queries_to_L3 → L3 → 收集 NOTIFY
+  → NOTIFY {reply, cards, reasoning}
 ```
 
-- **激活值计算**：`activation = confidence × (domain_match_score × 0.6 + recency_score × 0.4)`
-- **领域匹配**：exact=1.0 / parent=0.7 / child=0.5 / general=0.4 / unrelated=0.0
-- **KnowledgeGraph**：2 跳扩散激活（`spread_activation()`）
+- **领域检索**：通过 DomainRegistry 反向索引按 domain 检索知识卡片（`get_domain_cards`）
+- **质量字段**：`usefulness` / `misleading` / `comment`，通过 modify_l2_card 工具更新
 
 ### L3 — Skill Layer（技能层）
 
-`core/layers/l3/manager.py`，包裹 SkillLayer + L3Agent（LLM 选择+执行）：
+`core/layers/l3/manager.py`，包裹 SkillLayer + L3Agent（LLM decide）：
 
-- **匹配**：精确域 > 父域 > general 跨域 > 根域
+- **确定性匹配**：基于 DomainRegistry 反向索引按 domain 匹配技能（`get_items_for_domains`），回退到 `SkillLayer.match()`
 - **Skill CRUD**：`create_skill` / `edit_skill` / `delete_skill`
-- **L2→L3 编译**：同域 ≥3 卡片且平均激活值 > 0.7 → LLM 编译为 SKILL.md
+- **L2→L3 编译**：同域 ≥3 卡片 → LLM 编译为 SKILL.md
 
 ---
 
@@ -317,7 +315,7 @@ L2Agent.stage3(query, meta, state, selected_nodes, stage2_result)
 - **Phase 1 使用 RLCard 卡牌游戏环境**，环境直接返回客观评估信号
 - **Phase 1a**: Leduc Hold'em（简化德州扑克，信息集 10²，CFR 对手）
 - **Phase 1b**: Dou Dizhu（斗地主，信息集 10⁵³~10⁸³，DouZero 对手）
-- **Phase 1.5（已完成）**：Comm Agent + LayerMessage 链式通信 + V-structure Agent 实现
+- **Phase 1.5（已完成）**：Comm Agent + LayerMessage 链式通信 + Agent while-loop decide 设计
 - **L4 暂不实现**
 
 ### 评估策略（双轨）

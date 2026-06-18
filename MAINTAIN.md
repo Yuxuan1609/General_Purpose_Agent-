@@ -1,7 +1,7 @@
 # Architecture Maintain Doc — cognitive-agent
 
 > 记录所有模块的函数级信息：函数作用、参数签名、上下游调用关系。
-> 每次较大修改后即时更新。配合 COOKBOOK.md（概念↔代码映射）使用。
+> 每次较大修改后即时更新。
 
 ---
 
@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-18 | **#14 限制来源统一**：`LearningEnv.__init__` 默认 `_l2_limit`/`_l3_limit` 改从 `config.yaml:consolidation.l*.limits.soft` 读取（原读 `learning.l2_card_limit/l3_skill_limit`）。构造函数 override 参数 `l2_card_limit`/`l3_skill_limit` 保留优先级不变。删除 `config.yaml:learning.l2_card_limit`/`l3_skill_limit` 两个死 key（单一来源，避免一事两做）。触发语义对齐 spec：L2 触发 >25、level1=26-30、level2=31+；L3 触发 >15、level1=16-20、level2=21+。 |
 | 2026-06-17 | **Config Overhaul**：统一 `config.yaml` 为唯一配置入口。新建 `core/config_loader.py`（`load_config`/`get_section`）。所有模块从 config 读默认值 + 构造函数可覆盖。删除 `config/layers/`（6 个 yaml）和 `config/consolidation_tools.yaml`。Consolidation spec 合并进 config.yaml。 |MAINTAIN.md 修复签名不匹配（A）、删死引用（B）、修正 dataclass 字段（C）、补缺失方法文档（D）、修正上下游引用错误（E）。README 工具表/项目结构/测试数更新。COOKBOOK 标注过时。 |`DomainRegistry.unindex_item_all()` 替代外部 `_reverse_index` 直接访问（`flexible_knowledge.py`、`consolidation_tools.py`、`threshold_scorer.py`）。删 `sub_tags` 字段链（无消费者）。删 `apply_updates` + `add_failed_proposal_record`（零调用者）。`_apply_l2`/`_apply_l3` domain 变更前校验路径存在于 DomainRegistry。 |
 | 2026-06-17 | **MetaDriver 解散 + F39 索引同步**：`validate_l1_change` 迁入 `Philosophy.add_rule/modify_rule` 内置校验。`filter_dangerous`、`check_completion`、`L1ProposalProxy` 删除。`delete_skill` 加 `unindex_item` 调用。`_apply_l2`/`_apply_l3` domain 变更后调用 `DomainRegistry.update_item_domains()`。 |
 | 2026-06-16 | **Consolidation→ToolRegistry 迁移**：将 L1/L2/L3 consolidation 工具从 DictInjector 硬编码迁移到 ToolRegistry。新增 `core/tools/consolidation_tools.py`（10 工具注册 + module-level pending_mods）。Manager notify() 改用 `consolidation_tools.get_pending_mods()`。`config/tools.yaml` 新增 consolidation allowlist。`DictInjector` 标记为 dead code。 |
@@ -72,8 +73,8 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `load_config` | `(config_path: Path) → dict` | 加载 config.yaml 返回完整 dict | 脚本入口 | — |
-| `get_section` | `(section: str, config_path=None, default=None) → dict` | 获取 config 子段。第一次调用时加载全量 config 并缓存。 | 所有模块构造函数 | load_config() |
+| `load_config` | `(path: Path\|str\|None = None) → dict` | 加载 config.yaml 返回完整 dict（None 时用默认路径） | 脚本入口 | — |
+| `get_section` | `(*keys, default=None) → dict` | 按 keys 路径获取 config 子段（如 `get_section('learning')`）。第一次调用时加载全量 config 并缓存。 | 所有模块构造函数 | load_config() |
 
 ## core/round_tree.py
 
@@ -128,7 +129,6 @@
 | `L1_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L1 consolidation 可用工具名集合 | L1Agent.decide() | ToolRegistry.get_definitions() |
 | `L2_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L2 consolidation 可用工具名集合 | L2Agent.decide() | ToolRegistry.get_definitions() |
 | `L3_CONSOLIDATION_TOOL_NAMES` | `set[str]` | L3 consolidation 可用工具名集合 | L3Agent.decide() | ToolRegistry.get_definitions() |
-| `_dispatch_learning` | `(domain, pending_path, json_files) → None` | 读取记录→archive→LearningEnv→Executor→步骤→apply 的完整学习循环（使用注入的 _consol_ctx） | _check_auto_trigger (via TaskRunner) | LearningEnv.process_in_memory, Executor.execute, LearningEnv.step |
 
 ## core/domain_registry.py (Task 3)
 
@@ -180,14 +180,12 @@
 | `Executor._build_system_prompt` | `(context) → str` | 组装 [任务说明]+[行为准则](state.l1_rules)+[相关知识](state.l2_cards)+[可用技能](state.l3_skills) | _call_llm() | — |
 | `Executor._build_user_prompt` | `(context) → str` | 组装 [对局历史]+[当前局面] 从 state 提取 | _call_llm() | — |
 
-## config/ (Phase 1.5)
+## config/
 
 | 文件 | 内容 | 使用者 |
 |------|------|--------|
-| `config/layers/consolidation.yaml` | 各层内容规格与整理策略 | `LearningEnv.load_consolidation_spec()` |
-| `config.yaml` | 主配置入口（main_llm / auxiliary_llm） | `llm_factory.py` |
-| `config/layers/*` (其余) | 未接线，待 config overhaul | — |
-| `config/tools.yaml` | 工具 per-layer allowlist | `ToolCapability._get_allowlist()` |
+| `config.yaml` | 主配置入口（main_llm / auxiliary_llm / runtime / l1 / l2 / l3 / learning / consolidation） | `llm_factory.py`, `config_loader.py`, 各模块构造函数 |
+| `config/tools.yaml` | 工具 per-layer allowlist + timeout/fallback | `ToolCapability._get_allowlist()` |
 
 ## core/layers/comm.py (Phase 1.5)
 
@@ -221,7 +219,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L3Manager` | `__init__(skill_layer, downstream, upward, downward, auxiliary_llm, domain_registry=None, max_rounds=3)` | L3 层 Manager，包裹 SkillLayer + L3Agent | build_chain() | — |
+| `L3Manager` | `__init__(skill_layer, downstream, upward, downward, auxiliary_llm, domain_registry=None, max_rounds=None, consol_ctx=None)` | L3 层 Manager，包裹 SkillLayer + L3Agent。max_rounds=None 时从 config.yaml:runtime 读取 | build_chain() | — |
 | `L3Manager.query` | `(msg, trace_id) → None` | 确定性匹配技能 → while 循环 decide() 决策执行 | L2Manager._propagate | SkillLayer.match(), L3Agent.decide() |
 | `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
 | `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
@@ -232,11 +230,11 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm, domain_registry=None, max_rounds=3)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent | build_chain() | — |
+| `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm, domain_registry=None, max_rounds=None, consol_ctx=None)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent。max_rounds=None 时从 config.yaml:runtime 读取 | build_chain() | — |
 | `L2Manager.query` | `(msg, trace_id) → None` | while 循环 + decide() → propagate queries_to_L3 → 收集 NOTIFY | L0_5_1 DownwardComm | L2Agent.decide(), _propagate(), collect_notify() |
 | `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
-| `L2Manager._propagate` | `(obs, trace_id) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
-| `L2Agent` | `__init__(llm_client, knowledge)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
+| `L2Manager._propagate` | `(obs, trace_id, l3_task="", selected_nodes=None) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
+| `L2Agent` | `__init__(llm_client, knowledge, domain_nodes=None, domain_registry=None)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |
 | `L2Agent.decide` | `(query, meta, state, context, tools, layer) → dict{done, reply, selected_nodes, selected_cards, queries_to_L3, reasoning}` | 单步决策：通过 capture_tool（l2_query/l2_report）输出；`l2_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。 | L2Manager.query() | _get_cards_for_nodes(), _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
 | `L2Agent._get_cards_for_nodes` | `(nodes) → list[KnowledgeCard]` | 按节点 domain 检索知识卡片 | decide() | FlexibleKnowledge.get_domain_cards() |
 
@@ -244,14 +242,14 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `L0_5_1Manager` | `__init__(philosophy, auxiliary_llm, downstream, upward, downward, domain_registry, max_rounds, knowledge_stores)` | L(0.5+1) 层 Manager，包裹 Philosophy + L1Agent | build_chain() | — |
+| `L0_5_1Manager` | `__init__(philosophy, auxiliary_llm=None, downstream=None, upward=None, downward=None, domain_registry=None, max_rounds=None, knowledge_stores=None, consol_ctx=None)` | L(0.5+1) 层 Manager，包裹 Philosophy + L1Agent。max_rounds=None 时从 config.yaml:runtime 读取 | build_chain() | — |
 | `L0_5_1Manager.query` | `(msg, trace_id) → None` | while 循环调用 decide() → propagate queries 到 L2 → 收集 NOTIFY | Executor / 上层 | self._agent.decide(), self._downward.wrap_query(), collect_notify() |
 | `L0_5_1Manager.notify` | `() → dict` | 返回 `{done, result, reasoning}` 或 `{status:"ok"}` | collect_notify() | — |
 | `L0_5_1Manager.process` | `(data) → dict` | 返回 `{status:"ok", layer:"l0_5_1"}` | LayerManager.query() | — |
 | `L1Agent` | `__init__(llm_client, philosophy, domain_registry, knowledge_stores)` | L1 层 LLM Agent，while-loop 决策 | L0_5_1Manager | — |
 | `L1Agent.decide` | `(meta, state, history, tools, layer) → dict{done, result, queries, reasoning}` | 单步决策：通过 capture_tool（l1_query/l1_report）输出；`l1_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。 | L0_5_1Manager.query() | _build_system_prompt(), _build_user_context(), _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
-| `L1Agent._build_system_prompt` | `(instruction, meta) → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 | stage1/stage2 | Philosophy.all_rules() |
-| `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] | stage1/stage2 | — |
+| `L1Agent._build_system_prompt` | `(instruction, meta, static_context="") → str` | 注入游戏规则 + 行为准则(L1 rules) + 任务目标 + 静态上下文 | decide() | Philosophy.all_rules() |
+| `L1Agent._build_user_context` | `(state) → str` | 拼接 [当前局面] + [对局历史] + [修改结果确认]（读取 state.feedback / l1_feedback） | decide() | — |
 
 ## scripts/leduc_cognitive_agent.py (Phase 1)
 
@@ -279,11 +277,10 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `Rule` | `@dataclass(id, content, created_by, source, added_at, version, last_modified, usefulness, misleading, comment)` | L1 规则数据类 | Philosophy | — |
-| `L1Proposal` | `@dataclass(content, reason, rule_id, domain)` | 规则变更提案 | LearningEnv | Philosophy.apply() |
+| `L1Proposal` | `@dataclass(content, reason="", rule_id=None, domain="general")` | 规则变更提案 | LearningEnv | Philosophy.apply() |
 | `Philosophy` | `__init__(rules_path, max_rules, max_rule_length, db_path=None)` | L1 可演化行为规则管理（source="l0_5"不可变，"l1"可变）。内置自动校验。优先 SQLite 加载。 | L0_5_1Manager | L1SQLiteStore (if db_path) |
 | `Philosophy.all_rules` | `() → list[Rule]` | 返回所有规则（L0.5 + L1） | L1Agent._build_system_prompt | — |
 | `Philosophy.l1_rules` | `() → list[Rule]` | 仅返回 L1 可变规则 | Verifier, test | — |
-| `Philosophy.l0_5_rules` | `() → list[Rule]` | 仅返回 L0.5 不可变宪法 | — | — |
 | `Philosophy.add_rule` | `(content, created_by, source="l1") → Rule` | 添加新规则（自动校验 not_duplicate + no_contradiction + max_rules） | seed, L0_5_1Manager, LearningEnv | _validate_rule_change(), _save() |
 | `Philosophy.modify_rule` | `(rule_id, new_content) → Rule` | 修改规则（拒绝L0.5，自动校验）| L0_5_1Manager, LearningEnv | _validate_rule_change(), _save() |
 | `Philosophy.remove_rule` | `(rule_id) → None` | 删除规则（拒绝L0.5）| L0_5_1Manager | _save() |
@@ -454,7 +451,7 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `LearningEnv` | `__init__(pending_dir, knowledge_stores, preprocessing_llm, stats_file, l2_card_limit=30, l3_skill_limit=20, dry_run=False, consolidation_spec=None, domain_registry=None)` | 学习环境：消费 ExecutionRecords，产出知识变更，与 GameEnv 共享 Executor+LayerChain | run_leduc_cognitive.py | ThresholdScorer, Philosophy，FlexibleKnowledge，SkillLayer, DomainRegistry |
+| `LearningEnv` | `__init__(pending_dir, knowledge_stores, preprocessing_llm=None, l2_card_limit=None, l3_skill_limit=None, dry_run=False, consolidation_spec=None, domain_registry=None)` | 学习环境：消费 ExecutionRecords，产出知识变更，与 GameEnv 共享 Executor+LayerChain。l2/l3 limit 为 None 时从 config.yaml:consolidation.l*.limits.soft 读取（构造函数 override 仍优先） | run_leduc_cognitive.py | ThresholdScorer, Philosophy，FlexibleKnowledge，SkillLayer, DomainRegistry |
 | `LearningEnv.reset` | `(task_description) → EnvState` | 扫描 pending/ records，构建 observation | orchestrator | _scan_pending(), _build_learning_units() |
 | `LearningEnv.step` | `(action) → EnvStep` | 解析 NOTIFY layers → 验证 → 应用修改 → 记录统计。domain 变更自动同步 DomainRegistry 索引 | Executor | _parse_notify_layers(), _apply_layer_mod(), DomainRegistry.update_item_domains() |
 | `LearningEnv.build_task_observation` | `() → TaskObservation` | 构建 TaskObservation 供 Executor+Layers 消费 | run_leduc_cognitive.py | — |
@@ -524,7 +521,7 @@
 | `ToolCapability.is_visible_to` | `(layer) → bool` | 该层是否至少有一个工具可见 | CapabilityRegistry | — |
 | `ToolCapability.invoke` | `(layer, args{name, args}) → CapabilityResult` | 校验权限 → dispatch → 返回结果 | LayerInjector.execute_tool_call() | ToolRegistry.dispatch() |
 | `ToolCapability.get_schemas_by_layer` | `(layer) → list[dict]` | 返回该层可见工具的 OpenAI schema 列表 | LayerInjector.get_tools_for_layer() | ToolRegistry.get_definitions() |
-| `DEFAULT_TOOL_ALLOWLIST` | `dict[str, set[str]]` | L1={todo}, L2={todo,terminal,read_file,grep}, L3=full | ToolCapability.__init__ | — |
+| `_get_allowlist` | `() → dict[str, set[str]]` | 从 config/tools.yaml 读取 per-layer tool allowlist。无模块级常量 | ToolCapability.__init__ | yaml.safe_load |
 
 ### capability/knowledge_capability.py
 
@@ -561,7 +558,6 @@
 | `LayerAgent.set_injector` | `(injector) → None` | **新增**，注入 LayerInjector | chain_factory._mount_tools() | — |
 | `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit() |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | **新增**：JSON Schema → OpenAI function-calling tool 定义，供 capture_tools 模式使用。 | decide() | — |
-| `DictInjector` | `__init__(handlers: dict[str, callable])` | (deprecated, dead code) 已被 consolidation_tools.py + ToolRegistry 替代。 | — | — |
 
 ## core/env/learning_env.py — Phase 3 更新
 
@@ -596,14 +592,35 @@
 |------|------|------|-----------|---------|
 | `robust_parse` | `(text: str, schema: dict\|None) → dict` | 多层容错 JSON 解析：T0 直接解析 → T1 markdown 代码块提取 → T2 bracket 修复 → T3 语法修复 → T4 schema 字段级提取 | `LayerAgent._call_llm()` | `_try_json_loads`, `_extract_json_block`, `_bracket_repair`, `_syntax_repair`, `_schema_salvage` |
 
-## config/layers/consolidation.yaml — Phase 3 新增
+## core/env_loader.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `load_env` | `(project_root: Path\|None = None) → None` | 加载 .env 文件到 os.environ（跳过已设置的 key） | llm_factory.build_llm_client | — |
+
+## core/llm_factory.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `build_llm_client` | `(config_path=None, model=None, temperature=0.1) → LLMClient` | 从 config.yaml + .env 构建 LLMClient。支持 thinking/thinking_effort 配置 | 脚本入口, record_learning_tool._fill_observations_llm | env_loader.load_env, LLMClient() |
+
+## core/seed_knowledge.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `init_registry` | `(registry_path, embedding_model_path=None, db_path=None) → DomainRegistry` | 加载或初始化 DomainRegistry（空则 seed domain 树 + 持久化） | chain_factory.build_default_chain | DomainRegistry.load(), _seed_domain_nodes(), DomainSQLiteStore |
+| `seed_knowledge` | `(fk, phil, sl=None, domain_registry=None) → None` | 从 config.yaml seed L1 规则 + L2 卡片 + L3 技能 | chain_factory.build_default_chain | Philosophy.add_rule(), FlexibleKnowledge.add_card(), SkillLayer.create_skill() |
+| `_seed_domain_nodes` | `() → DomainRegistry` | 构建 seed domain 树（general/game/learning 层级） | init_registry | DomainRegistry.add_node() |
+
+## config.yaml — consolidation 段（Phase 3）
+
+> 原 `config/layers/consolidation.yaml` 已在 Config Overhaul 中合并进 `config.yaml` 的 `consolidation:` 段。
 
 | 功能 | 描述 |
 |------|------|
 | 各层条目规格 | L1 Rule / L2 KnowledgeCard / L3 Skill 的字段定义（名称、类型、长度、ID 格式、required） |
 | 容量限制 | soft/hard 两级，per-domain 细分 |
 | Anti-patterns | 各层应避免的内容模式（重复、过于泛化、低置信度等） |
-| 自动衰减规则 | activation < 0.1 + 30天 → deprecated；90天 → archive |
 | 三级整理策略 | Level 0（无）/ Level 1（例行归并，可回滚）/ Level 2（深度压缩，需审核） |
 
 ---

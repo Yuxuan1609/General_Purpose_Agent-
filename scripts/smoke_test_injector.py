@@ -81,9 +81,7 @@ def setup():
     ToolRegistry._instance = None  # reset singleton
     tool_reg = ToolRegistry()
 
-    from core.tools.todo_tool import register_todo_tool
     from core.tools.terminal_tool import register_terminal_tool
-    register_todo_tool(tool_reg)
     register_terminal_tool(tool_reg)
 
     # ── Knowledge stores (English content for keyword matching) ──

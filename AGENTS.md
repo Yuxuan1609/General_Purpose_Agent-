@@ -21,6 +21,7 @@ MAINTAIN.md 记录每个公开函数/类的：
 - **禁止一事两做**。同一个功能仅允许一种实现方式，发现重复实现必须合并。
 - **代码现状优先**。用户对项目的认知可能不如你清楚。遇到用户意图模糊时，先基于代码现状澄清用户意图，不自行发挥。
 - **不准在 Manager 里写 if  特殊分支**。Agent 的行为由 prompt 决定、不由 Manager 的 if/else 硬编码。特殊场景的调度逻辑应通过 task 的 meta/state 注入 prompt，让 Agent 自行判断。万不得已才加代码分支。
+- **工作计划必须考虑项目整体完整性**。制定工作计划后，不允许未经沟通就对部分内容做 defer 或用 stub 替代，这会导致潜在缺口。计划即承诺，变更需先确认。
 
 ## 架构原则
 
@@ -41,6 +42,5 @@ MAINTAIN.md 记录每个公开函数/类的：
 ## 关键文件
 
 - `MAINTAIN.md` — 函数级维护文档
-- `COOKBOOK.md` — 概念 ↔ 代码位置映射
 - `docs/superpowers/specs/` — 架构设计 spec
 - `docs/superpowers/plans/` — 实现计划

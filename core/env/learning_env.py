@@ -194,14 +194,14 @@ class LearningEnv(Environment):
         self._registry = domain_registry
         self._pre_llm = preprocessing_llm
         self._scorer = ThresholdScorer(pending_dir)
-        from core.config_loader import get_section
-        learn_cfg = get_section('learning', default={})
-        self._l2_limit = l2_card_limit if l2_card_limit is not None else learn_cfg.get('l2_card_limit', 30)
-        self._l3_limit = l3_skill_limit if l3_skill_limit is not None else learn_cfg.get('l3_skill_limit', 20)
         self._dry_run = dry_run
 
         # Consolidation spec — loaded from YAML or passed directly
         self._consolidation_spec = consolidation_spec or load_consolidation_spec()
+        l2_soft = self._consolidation_spec.get('l2', {}).get('limits', {}).get('soft')
+        l3_soft = self._consolidation_spec.get('l3', {}).get('limits', {}).get('soft')
+        self._l2_limit = l2_card_limit if l2_card_limit is not None else (l2_soft if l2_soft is not None else 25)
+        self._l3_limit = l3_skill_limit if l3_skill_limit is not None else (l3_soft if l3_soft is not None else 15)
 
         self._pending_records: list[dict] = []
         self._enriched_units: list[dict] = []

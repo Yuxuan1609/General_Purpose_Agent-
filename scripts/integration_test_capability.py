@@ -185,8 +185,8 @@ def setup():
     # ── ToolRegistry ──
     ToolRegistry._instance = None
     tool_reg = ToolRegistry()
-    from core.tools.todo_tool import register_todo_tool
-    register_todo_tool(tool_reg)
+    from core.tools.terminal_tool import register_terminal_tool
+    register_terminal_tool(tool_reg)
 
     # ── Knowledge stores ──
     games = InMemoryKnowledgeStore()

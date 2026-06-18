@@ -1,22 +1,25 @@
 # Phase 3+ 架构升级路线图
 
 > 当前架构最核心的功能链路（Execute → Record → LearningEnv → 知识更新）已跑通，但以下四大方向存在明显短板。下述为各方向的现状、缺口、目标设计及建议优先级。
+>
+> **2026-06-18 状态更新**：方向一（Tool/Knowledge 挂载）和方向三（while-loop decide）的核心部分已完成——ToolRegistry + CapabilityRegistry + LayerInjector 已接入各层 Agent 的多轮 tool call 循环；各层 Manager 已用 `decide()` + while 循环替代 V-structure 阶段流水线。下文保留了原始分析作为历史记录，部分"现状"和"缺口"描述已过时。
 
 ## 方向一：Tool Use & Knowledge 挂载
 
-**现状：**
-- `ToolRegistry` 单例（`core/tools/registry.py`）实现了 6 个工具（todo / terminal / web_search / skills_list / skill_view / skill_manage），线程安全，支持 `check_fn` 过滤和 `toolset` 分组
-- 工具仅在旧 `main.py` / `_archive/` 路径中使用，新 Executor + Layers 链**未挂载工具**
-- `L0_5_1Manager` 有 TODO 注释指明"工具集成保留给通用任务场景"
+**现状（2026-06-18 更新）：**
+- `ToolRegistry`（`core/tools/registry.py`）已实现 20+ 工具注册（terminal/web_search/tavily_search/read_file/grep/kb_*/ask_user/create_domain/tool_proposal/sysinfo/check_task/collect_tasks/record_learning + 10 consolidation tools），线程安全，支持 `check_fn` 过滤和 `toolset` 分组
+- 工具通过 `chain_factory._mount_tools()` → `CapabilityRegistry` → `LayerInjector` 注入各层 Agent 的多轮 tool call 循环（DeepSeek `role:"tool"` 兼容）
+- 层可见性由 `config/tools.yaml` per-layer allowlist 控制（`ToolCapability._get_allowlist()`）
+- `KnowledgeCapability` 已实现但**未在 chain_factory 默认注册**（需手动接入）
 - 当前游戏环境不需要工具调用，但通用任务（编程、搜索、代码验证）离开工具寸步难行
 
 **缺口：**
-1. 工具定义无法注入各层 LLM prompt（L1/L2/L3 的 system prompt 未携带工具 schema）
-2. 工具调用结果无法回流到层链（无 `ToolResult → LayerMessage` 的封装路径）
-3. 没有工具执行的**安全层级路由**——哪些工具 L1 可见、哪些 L2 可见、哪些仅 Executor 可见
+1. ~~工具定义无法注入各层 LLM prompt~~ ✅ 已解决（LayerInjector）
+2. ~~工具调用结果无法回流到层链~~ ✅ 已解决（`_call_llm` 多轮 tool call 循环）
+3. ~~没有工具执行的安全层级路由~~ ✅ 已解决（config/tools.yaml allowlist）
 4. Knowledge 挂载是单向的——L2 卡片只能被 LLM 读取，无法作为工具的触发条件
 5. LearningEnv 内无法调用 `terminal`/`web_search` 对学习内容做验证
-6. **`todo` 工具升级**：当前仅为被动追踪列表（全局单例内存，不持久化，LLM 几乎不使用）。需升级为 `open-code` 风格的主动任务编排工具（多状态流转、跨 turn 持久化、进度注入 prompt）
+6. **`todo` 工具**：原计划升级为主动任务编排工具，当前 `todo_tool.py` 已删除（无消费者）。如需任务跟踪能力，需重新设计
 
 **目标设计：**
 ```
@@ -90,15 +93,15 @@
 
 ## 方向三：Agent 调度模式优化（Hermes 式循环编排）
 
-**现状：**
+**现状（2026-06-18 更新）：**
 - Orchestrator 横向分层（Task Decomposer → Task Runner(s) → Meta Learner）**标记为 TODO，代码未实现**
-- 当前每层的 V-structure 循环 `MAX_LOOPS=1`——单次查询后直接决策，无多轮追问
-- 任务划分职责硬编码在 prompt 中，未在架构层面显式约束
+- 各层 Manager 已实现 while 循环 `decide()` 模式（`max_rounds` 可配置：L1=5, L2=3, L3=3），Agent 通过 capture_tool 声明 done 控制循环退出
+- 任务划分职责由 prompt + capture_tool schema 约束，未在架构层面显式硬编码
 
 **缺口：**
-1. 每层缺少独立的持续循环
-2. 无 Hermes 式的 `while step(): observe → decide → act` 内部循环
-3. L1→L2、L2→L3 之间无多轮对话能力
+1. ~~每层缺少独立的持续循环~~ ✅ 已解决（while-loop decide）
+2. ~~无 Hermes 式的 `while step(): observe → decide → act` 内部循环~~ ✅ 已解决
+3. L1→L2、L2→L3 之间的多轮对话能力有限（L3 的 query() 无外层 while 循环，迭代在 `_call_llm` tool-call 层）
 
 **目标设计：**
 ```
@@ -124,10 +127,10 @@
 | **多轮追问** | 可追问 L2 | 可追问 L3 | — |
 
 **关键变更点：**
-- 将 `MAX_LOOPS` 从 1 提升到可配置值（如 3）
-- 每层 Manager 从被动 `process()` 改为主动 `run_loop()`
+- ~~将 `MAX_LOOPS` 从 1 提升到可配置值（如 3）~~ ✅ 已完成（config.yaml:runtime.max_rounds_l1/l2/l3）
+- ~~每层 Manager 从被动 `process()` 改为主动 `run_loop()`~~ ✅ 已完成（query() while 循环 + decide()）
 - 新增 `Orchestrator` 实现类
-- **Stage1 工具挂载**：当前仅 stage2 在 consolidation 时挂载工具（deprecate/create/modify）。Hermes 循环下，stage1 也需要挂载工具（如 `todo` 分步跟踪、`knowledge_query` 查卡片），实现多轮拆解-反馈-调整。
+- ~~**Stage1 工具挂载**~~ ✅ 已完成（工具通过 LayerInjector 在 decide() 中始终可用，不再有 stage1/stage2 区分）
 
 ---
 

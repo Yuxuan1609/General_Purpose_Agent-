@@ -103,7 +103,6 @@ pip install pyyaml pytest ddgs
 export DEEPSEEK_API_KEY=your-key-here
 
 # 4. 运行
-python3 main.py "test query"
 python3 -m pytest tests/ -v
 ```
 
@@ -144,9 +143,10 @@ l1_max_rule_length: 100
 ### 运行
 
 ```bash
-python main.py                              # 打印各层状态
-python main.py "explain how asyncio works"  # 执行任务
 pytest tests/ -v                            # 运行测试
+python scripts/interactive_agent.py         # 交互式 CLI
+python scripts/run_leduc_cognitive.py       # Leduc 对局
+python scripts/run_douzero_llm.py --mode cognitive  # DouZero 认知链
 ```
 
 ### RLCard 环境 (Phase 1)
@@ -208,23 +208,28 @@ python scripts/test_kb_io.py
 
 | 工具 | 功能 | 注册位置 |
 |------|------|----------|
-| `todo` | 子任务跟踪 | `core/tools/todo_tool.py` |
 | `terminal` | 命令行执行（30s 超时） | `core/tools/terminal_tool.py` |
-| `web_search` | DuckDuckGo 网络搜索 | `core/tools/web_search_tool.py` |
-| `read_file` | 读取文件（offset/limit） | `capability/example_tools.py` |
-| `grep` | 正则搜索文件内容 | `capability/example_tools.py` |
-| `knowledge_query` | 静态知识库语义搜索 | `capability/knowledge_capability.py` |
-| `skills_list/view/manage` | 技能管理 | `core/skill_layer.py` |
+| `web_search` | SearXNG/DuckDuckGo 网络搜索 | `core/tools/web_search_tool.py` |
+| `tavily_search` | Tavily AI 搜索（web_search 降级备选） | `core/tools/web_search_tool.py` |
+| `read_file` | 读取文件（offset/limit） | `core/tools/file_tools.py` |
+| `grep` | 正则搜索文件内容 | `core/tools/file_tools.py` |
+| `kb_query`/`kb_delete`/`kb_fill_gap` | KB 查询/删除/补缺 | `core/tools/kb_tools.py` |
+| `ask_user` | 向用户提问（tkinter 弹窗 + console fallback） | `core/tools/kb_tools.py` |
+| `create_domain` | L1 创建领域节点 | `core/tools/domain_tool.py` |
+| `tool_proposal` | Agent 提案新工具 | `core/tools/tool_proposal.py` |
+| `sysinfo` | 系统信息查询（os/hardware/env/network） | `core/tools/sysinfo_tool.py` |
+| `check_task`/`collect_tasks` | 异步任务状态查询/收割 | `core/tools/async_tools.py` |
 | `record_learning` | Agent 主动提案学习内容 | `core/tools/record_learning_tool.py` |
 | `consolidation_tools` (10) | L1/L2/L3 知识整理 CRUD + domain 管理 | `core/tools/consolidation_tools.py` |
+| `knowledge_query` | 静态知识库语义搜索（KnowledgeCapability，需手动注册到 CapabilityRegistry） | `capability/knowledge_capability.py` |
 
-**层可见性（ToolPolicy）**：
+**层可见性（ToolPolicy）** — 完整 allowlist 见 `config/tools.yaml`：
 
-| 层 | 可见工具 |
+| 层 | 可见工具类别 |
 |----|---------|
-| L1 | `todo`, `knowledge_query` |
-| L2 | `todo`, `terminal`, `read_file`, `grep`, `knowledge_query` |
-| L3 | 全部（含 `web_search`, `skills_*`） |
+| L1 | terminal, kb_query, ask_user, create_domain, record_learning, l1 consolidation (3), query_domain, deprecate_domain, merge_domain, sysinfo, check_task, collect_tasks |
+| L2 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_fill_gap, l2 consolidation (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
+| L3 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_fill_gap, l3 consolidation (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
 
 > 当 `tools` 注入时自动禁用 `json_mode`（DeepSeek 不兼容）。输出改用 `@modify` markup 格式或 tool call 原生格式。
 
@@ -280,7 +285,6 @@ Agent 通过 record_learning 工具主动提案学习内容：
 
 ```
 cognitive-agent/
-  _archive/              # 已归档旧架构代码
   config.yaml            # 用户配置（唯一入口，config/layers/*.yaml 已删除）
   pyproject.toml         # 项目元数据与依赖
   config/                # 分层工具配置
@@ -294,6 +298,8 @@ cognitive-agent/
     types.py             # TaskObservation, ExecutionRecord
     executor.py          # Executor — 独立决策者
     llm_client.py        # LLMResponse + LLMClient
+    llm_factory.py       # build_llm_client 工厂
+    env_loader.py        # .env 加载
     layer_message.py     # LayerMessage 信封 + MessageType 枚举
     task.py              # Domain, LearningUnit
     philosophy.py        # L1 规则 CRUD（内置校验）
@@ -302,9 +308,12 @@ cognitive-agent/
     agent_context.py     # AgentContext — per-env 工具过滤
     config_loader.py     # 统一配置加载 (config.yaml)
     model_manager.py     # embedding 模型单例 + 共享 models_cache
-    chain_factory.py     # 统一构建三层链
+    chain_factory.py     # build_default_chain — 统一构建三层链 + 挂载工具
+    seed_knowledge.py    # init_registry + seed_knowledge 初始数据
     domain_registry.py   # DomainNode + DomainRegistry（反向索引+embedding）
     task_runner.py       # 异步任务调度（ThreadPool + stats）
+    json_repair.py       # robust_parse 多层容错 JSON 解析
+    round_tree.py        # DecisionNode + RoundHistory 决策树快照
     env/                 # 环境抽象 (base.py, learning_env.py, interaction_env.py, threshold_scorer.py)
     knowledge/           # KnowledgeBase — SQLite 向量知识库
     layers/              # 三层链式 Manager
@@ -336,7 +345,7 @@ cognitive-agent/
     test_auto_learning.py     # auto-learning 管线测试
     test_consolidation_real.py# 真实 LLM consolidation 测试
   data/                  # 运行时数据
-  tests/                 # pytest (206 tests, 27 files)
+  tests/                 # pytest (229 tests, 27 files)
     fixtures/              #   Consolidation 测试数据
   docs/                  # 设计文档
 ```
@@ -392,7 +401,6 @@ per-layer modifications (create/update/deprecate)
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — 完整架构设计：A1-A4 设计原则、E1-E8 工程原则、通信协议、各层详解、评估策略
 - **[IDENTITY.md](IDENTITY.md)** — 每层 Agent 术语与概念：L1 行为准则 Agent、L2 知识卡片 Agent、L3 技能执行 Agent 的完整定义与领域边界
-- **[COOKBOOK.md](COOKBOOK.md)** — README 各章节与代码位置的精确对照表
 - **[MAINTAIN.md](MAINTAIN.md)** — 函数级维护文档
 - **[LEARNING_JOURNAL.md](LEARNING_JOURNAL.md)** — 可迁移工程技巧记录
 - **[DEBUG_JOURNAL.md](DEBUG_JOURNAL.md)** — 复杂 Bug 排查记录

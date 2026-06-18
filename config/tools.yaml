@@ -117,7 +117,7 @@ tools:
   record_learning:
     sync: false
     timeout: 5
-    allowlist: [l1]
+    allowlist: [l1, l2]
     fallback:
       max_retries: 0
       degrade: []

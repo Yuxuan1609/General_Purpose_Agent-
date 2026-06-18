@@ -54,8 +54,6 @@ executor:
 
 # ── LearningEnv ──
 learning:
-  l2_card_limit: 30
-  l3_skill_limit: 20
   trigger_threshold: 5.0
   trigger_count_weight: 1.0
   trigger_complexity_weight: 1.0

@@ -276,6 +276,12 @@ class L2Agent(LayerAgent):
             "l2_query：向下调度，done固定为false。每次只下发一个技能任务。\n"
             "l2_report：向上回复，done固定为true，含 reply 最终结论"
         )
+        instruction += (
+            "\n\n【学习记录】\n"
+            "如果本轮分析中发现了值得固化的知识（L2知识缺口、新发现的高效策略、L3技能缺失等），"
+            "可以调用 record_learning 工具记录。判断标准: 完成了复杂查询或分析任务、"
+            "发现 L2 知识缺口或 L3 技能缺失、当前结果可作为可复用经验。"
+        )
         if l2_fmt:
             instruction += (
                 "\n\n【整理任务】你只负责 L2 知识卡片的修改。"

@@ -322,3 +322,30 @@ class TestConsolidationTask:
         task = learning_env.build_consolidation_task()
         assert task.session["domain"] == "learning/compile"
         assert "learning/compile" in task.session["domains_hint"]
+
+
+# ── tests: consolidation limit source (#14) ─────────────────────────────
+
+class TestConsolidationLimitSource:
+    """LearningEnv 默认限制必须取自 consolidation.l*.limits.soft，
+    不再从 learning.l2_card_limit/l3_skill_limit 读取（修复 spec/代码脱钩）。"""
+
+    def test_l2_default_reads_consolidation_soft(self, pending_dir, knowledge_stores):
+        from core.config_loader import get_section
+        soft = get_section('consolidation', default={}).get('l2', {}).get('limits', {}).get('soft')
+        assert soft is not None, "config.yaml must define consolidation.l2.limits.soft"
+        env = LearningEnv(pending_dir, knowledge_stores)
+        assert env._l2_limit == soft
+
+    def test_l3_default_reads_consolidation_soft(self, pending_dir, knowledge_stores):
+        from core.config_loader import get_section
+        soft = get_section('consolidation', default={}).get('l3', {}).get('limits', {}).get('soft')
+        assert soft is not None, "config.yaml must define consolidation.l3.limits.soft"
+        env = LearningEnv(pending_dir, knowledge_stores)
+        assert env._l3_limit == soft
+
+    def test_constructor_override_still_wins(self, pending_dir, knowledge_stores):
+        env = LearningEnv(pending_dir, knowledge_stores,
+                          l2_card_limit=50, l3_skill_limit=40)
+        assert env._l2_limit == 50
+        assert env._l3_limit == 40

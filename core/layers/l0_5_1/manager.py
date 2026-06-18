@@ -59,7 +59,7 @@ L1_CONSOLIDATION_STRATEGY = ConsolidationStrategy(
 
 
 class L1Agent(LayerAgent):
-    """L1 LLM Agent — two-stage V-structure processing.
+    """L1 LLM Agent — while-loop decide processing.
 
     System prompt carries the task goal + game rules + behavior rules.
     User prompt carries the current situation + history (dynamic per-step).
@@ -93,6 +93,7 @@ class L1Agent(LayerAgent):
             "- 用户给出明确的正向/负向反馈\n"
             "只填 domain, learning_target, importance, reasoning。\n"
             "L2/L3的详细evidence会由后台自动补充。\n"
+            "注意：如果之前已提交过内容相似的 learning_target，不要重复调用 record_learning。\n"
         )
         return (
             f"## 认知层架构\n"
@@ -241,8 +242,8 @@ class L1Agent(LayerAgent):
 class L0_5_1Manager(LayerManager):
     """L(0.5+1) Manager — wraps Philosophy + L1Agent.
 
-    Overrides query() to drive V-structure loop:
-      Stage1 → AgentPacket(QUERY) → L2 → Stage2 → done? NOTIFY : retry
+    Overrides query() to drive while-loop decide:
+      decide() → l1_query(向 L2 查询) / l1_report(done=true, NOTIFY) → 循环至 done 或 max_rounds
 
     NOTIFY goes to both upper layer and Executor.
     TODO: Content may differ per target.

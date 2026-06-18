@@ -11,7 +11,6 @@ baselines/
 DouZero-1.1.0/
 douzero_checkpoints/
 alpha-zero-general/
-_archive/
 data/learning/pending/
 data/interaction/
 data/tool_proposals/
