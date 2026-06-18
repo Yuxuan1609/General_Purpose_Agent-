@@ -165,6 +165,25 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
     except Exception as e:
         _log.error("Auto-learning execute failed: %s", e)
 
+    # 6. Clean up archive — delete entries older than 30 days
+    _clean_old_archives(archive_dir.parent, 30)
+
+
+def _clean_old_archives(archive_root: Path, max_age_days: int):
+    """Delete archive subdirectories older than max_age_days."""
+    import time
+    if not archive_root.exists():
+        return
+    cutoff = time.time() - max_age_days * 86400
+    for d in archive_root.iterdir():
+        if d.is_dir():
+            try:
+                if d.stat().st_mtime < cutoff:
+                    shutil.rmtree(d, ignore_errors=True)
+                    _log.info("Auto-learning: cleaned old archive %s", d.name)
+            except OSError:
+                pass
+
 
 SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target 扫描决策树，
 提取 L2 和 L3 层中与该目标相关的 observation。
