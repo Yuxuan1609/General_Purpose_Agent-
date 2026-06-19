@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-20 | **TaskRunner 增强（Gradio v2 Task 3）**：`TaskState` 新增 `progress`/`metadata`/`cancelled` 字段。`TaskRunner.submit` 加 `metadata` 参数（可含 session_id/parent_task_id 供前端关联）。`TaskRunner.collect` 加 `keep_history=True` 默认值——默认保留历史不删除（旧行为 auto-remove 改由 `keep_history=False` 触发）。新增 `update_progress`/`subscribe`/`unsubscribe`/`list_tasks`/`cancel`（协作式取消）+ `_notify` 事件分发。`status()` 加 `cancelled` 计数。`get_task_runner` 标记 DEPRECATED（dispatch 改用 `get_shared_runner`，仅留测试隔离实例）。 |
 | 2026-06-19 | **Gradio Frontend Plan + MAINTAIN.md 修正**：新增 `core/setup.py`、`core/monitor.py`、`scripts/gradio_app.py` 三个模块文档。修正 6 处签名过时：`L0_5_1Manager`/`L2Manager`/`L3Manager`/`build_chain` 删 `consol_ctx` 参数；`Rule` 删 usefulness/misleading/comment 字段；`LearningEnv.step` 描述更新为轻量。新增 `core/chain_factory.py` — `build_default_chain`/`_mount_tools`/`_iter_layers`。新增 `scripts/interactive_agent.py` — `main`/`_setup_executor`/`_show_notifies`。删 `TaskRunner.stats` 重复条目，`get_task_runner` 替换为 `get_shared_runner`。删 `core/llm_factory.py` 重复章节。 |
 | 2026-06-18 | **#12 A段 拆 ConsolidationContext**：`ConsolidationContext` 废弃，拆为 `consolidation_injection`（store DI）+ `runtime_registry`（chain/executor 全局注册）。9 CRUD handler 改为直接改 store（不再 record_mod → drain_mods side-channel）。`pending_mods`/`drain_mods`/三层 Manager `_consol_ctx`/learning env `_apply_*`/`_parse_*`/`_quality_kwargs` 全删。`learning env step` 退化为轻量（只计轮次）。DomainRegistry 加 `mark_domain_dirty`/`flush_correlations`（增量，L1 Manager.query 在 decide 返回后调）。8 脚本 `chain._consol_ctx.executor = executor` 改 `register_runtime(chain, executor)`。L1 `Rule` 删 usefulness/misleading/comment 字段 + `L1SQLiteStore` 删对应列 + `modify_l1_rule` schema 删 quality。auto-learning 改调 `get_executor()`。`build_chain`/`build_default_chain`/`register_all_tools` 删 consol_ctx 参数。 |
 | 2026-06-18 | **#20 B段 decide-once 统一模型**：三层 Manager 外层 while 全废，每层只调一次 `decide()`，多轮统一在 `_call_llm` tool loop（`MAX_TOOL_TURNS`）。`l1_query`/`l2_query` 从 capture_tool 降级为 ToolRegistry 普通工具（新建 `core/tools/downward_comm_tool.py`，handler 同步调 downstream.query + collect_notify 回灌 tool result）。`L3_CONTINUE_TOOL` 删除（l3_report 是唯一退出信号）。consolidation cascade 整段删除（record_learning 后由 Agent 自驱分发）。`ConsolidationStrategy.allowed_base_tools` L1/L2 加 downward 工具。RoundTree 改 thread-local node 栈绑定 decide 建节点（`round_tree.py` 新增 `current_node`/`push_node`/`pop_node`）。`config.yaml:runtime.max_rounds_l1/l2/l3` 删除。`build_chain` 删 max_rounds 参数。`L0_5_1Manager`/`L2Manager`/`L3Manager` __init__ 删 max_rounds。 |
@@ -62,14 +63,22 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `TaskRunner` | `__init__(max_workers=8)` | Thread pool + task lifecycle + stats, WAL-safe singleton | _call_llm, tool handlers | threading.Lock, ThreadPoolExecutor |
-| `TaskRunner.submit` | `(tool_name, fn) → str` | Submit async task, returns task_id | async tool handlers | ThreadPoolExecutor.submit |
-| `TaskRunner.run_sync_batch` | `(calls, timeout) → list[dict]` | Parallel execution of sync tools in batch | _call_llm | — |
-| `TaskRunner.collect` | `(task_ids) → list[dict]` | Collect completed tasks, auto-remove | collect_tasks handler | — |
+| `TaskState` | `dataclass(task_id, tool_name, status, created_at, result, error, progress=0.0, metadata={}, cancelled=False)` | 任务状态：running/done/error/cancelled | TaskRunner, check/list_tasks 返回 | — |
+| `TaskRunner` | `__init__(max_workers=8)` | Thread pool + task lifecycle + stats + progress + 事件订阅，singleton | _call_llm, tool handlers, Gradio frontend | threading.Lock, ThreadPoolExecutor |
+| `TaskRunner.submit` | `(tool_name, fn, metadata=None) → str` | Submit async task, returns task_id；metadata 可含 session_id/parent_task_id 供前端关联 | async tool handlers | ThreadPoolExecutor.submit |
+| `TaskRunner.update_progress` | `(task_id, progress) → None` | 更新运行中任务进度（0-100）并触发 _notify | Gradio frontend | _notify() |
+| `TaskRunner.subscribe` | `(callback) → None` | 订阅任务状态变更事件 | Gradio frontend | — |
+| `TaskRunner.unsubscribe` | `(callback) → None` | 取消订阅 | Gradio frontend | — |
+| `TaskRunner.list_tasks` | `(status?, tool_name?, session_id?) → list[TaskState]` | 按状态/工具名/session_id(metadata)过滤任务 | Gradio frontend | — |
+| `TaskRunner.cancel` | `(task_id) → bool` | 协作式取消：置 cancelled 标志，handler 自检退出 | Gradio frontend | _notify() |
+| `TaskRunner.run_sync_batch` | `(calls, timeout=300) → list[dict]` | Parallel execution of sync tools in batch | _call_llm | — |
+| `TaskRunner.collect` | `(task_ids, keep_history=True) → list[dict]` | 收集已完成任务结果；keep_history=True 默认保留历史不删除，False 则移除（旧行为） | collect_tasks handler, _drain_async | — |
 | `TaskRunner.check` | `(task_id) → TaskState\|None` | Query single task status | check_task handler | — |
-| `TaskRunner.pending_tasks` | `() → list[str]` | List running task IDs | collect_tasks handler | — |
+| `TaskRunner.pending_tasks` | `() → list[str]` | List running task IDs | collect_tasks handler, _drain_async | — |
 | `TaskRunner.stats` | `() → dict` | Running statistics (count/success/error/duration) | — | — |
-| `get_shared_runner` | `() → TaskRunner` | 全局单例（复用同一 runner）。另有 `get_task_runner()` 每次新建。 | _call_llm, tool handlers | — |
+| `TaskRunner.status` | `() → dict` | running/done/error/cancelled 计数 + by_tool 统计 | snapshot | — |
+| `get_shared_runner` | `() → TaskRunner` | 全局单例（复用同一 runner） | _call_llm, tool handlers, Gradio frontend | — |
+| `get_task_runner` | `() → TaskRunner` | 每次新建；dispatch 已弃用改用 get_shared_runner，仅留测试隔离实例 | test fixtures | — |
 
 ## core/chain_factory.py
 
