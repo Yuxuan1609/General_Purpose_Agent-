@@ -43,6 +43,11 @@ class TaskRunner:
         task_id = uuid.uuid4().hex[:12]
 
         def _wrapper():
+            _ctx_session_id = (metadata or {}).get("session_id")
+            _ctx_parent_task_id = (metadata or {}).get("parent_task_id")
+            if _ctx_session_id:
+                from core.session import set_task_context, clear_task_context
+                set_task_context(_ctx_session_id, _ctx_parent_task_id or "")
             start = time.time()
             try:
                 result = fn()
@@ -53,6 +58,9 @@ class TaskRunner:
                 elapsed = time.time() - start
                 self._record_stat(tool_name, "error", elapsed)
                 raise
+            finally:
+                if _ctx_session_id:
+                    clear_task_context()
 
         future = self._pool.submit(_wrapper)
         task = TaskState(

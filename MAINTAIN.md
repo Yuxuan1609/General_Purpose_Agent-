@@ -693,13 +693,7 @@
 
 ---
 
-## core/setup.py (NEW — Gradio Frontend Plan)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `setup_executor` | `(project_root: Path\|None = None) → (chain, executor)` | 一次性构建 llm → chain → executor → register_runtime。CLI 和 Gradio 共用 | interactive_agent, gradio_app | build_llm_client, build_default_chain, register_runtime |
-
-## core/session.py (NEW — Gradio Frontend Plan)
+## core/session.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
@@ -721,7 +715,7 @@
 | `SessionStore.close` | `() → None` | 关闭 sqlite 连接 | tests, Gradio shutdown | — |
 | `get_session_store` | `() → SessionStore` | 全局单例（双重检查锁） | Gradio frontend, dispatch handlers | SessionStore |
 
-## core/monitor.py (NEW — Gradio Frontend Plan)
+## core/monitor.py
 
 > 纯查询模块——聚合 trace 数据源供前端展示，不修改任何状态。所有数据来自 SessionStore / per-layer 日志文件 / RoundTree.snapshot() / chain 内部。
 
@@ -736,19 +730,6 @@
 | `_capacity_snapshot` | `(chain) → dict` | L2 cards / L3 skills 数量 vs config 上限，返回 {l2:{count,limit,over}, l3:{...}} | snapshot | get_section('learning'), chain._downstream._knowledge.cards, chain._downstream._downstream._skill_layer.list_all() |
 | `_learning_snapshot` | `(pending_dir) → dict` | 统计 pending/ 下各 domain 文件数和 archive 总数，返回 {domains, total_pending, total_archive} | snapshot | Path.iterdir/glob/rglob |
 | `_session_summary` | `() → dict` | 活跃 session 计数 + 最近一条 session，返回 {count, latest} | snapshot | get_session_store().list_sessions() |
-
-## scripts/gradio_app.py (NEW — Gradio Frontend Plan)
-
-| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
-|----------|------|------|-----------|---------|
-| `SessionState` | `@dataclass(env, trace_history: list[StepTrace])` | 每个用户的 session 状态（env + trace） | gr.State | — |
-| `_create_session` | `(system_prompt=DEFAULT, debug=True, enable_learning=True) → SessionState` | 新建 InteractionEnv + reset | clear_chat, gr.State | InteractionEnv.reset |
-| `main` | `() → None` | Gradio UI 入口：构建 UI + chat callback + 定时刷新监控 | 直接运行 | setup_executor, snapshot, StepTrace |
-| `chat` | `(user_input, history, session_state) → tuple` | 单轮对话：env → execute → step → build trace → 返回 7 outputs | msg.submit, send_btn.click | executor.execute, _build_monitor_display |
-| `clear_chat` | `(session_state) → (list, str, SessionState)` | 重置会话：创建新 env → 清空 chatbot | clear_btn.click | _create_session |
-| `_build_monitor_display` | `(chain, trace, all_traces) → tuple[gr.update, ...]` | 构建 5 个监控组件更新：task/capacity/learning/trace_table/trace_detail | chat, refresh_btn, app.load | snapshot, _format_trace_detail |
-| `_format_trace_detail` | `(trace: StepTrace) → str` | 格式化最近一步 trace 为 Markdown（按层分别映射 key） | _build_monitor_display | — |
-| `_empty_monitor` | `() → tuple[gr.update, ...]` | 返回空状态的 5-tuple（无 trace 时用） | chat early return, clear_chat | — |
 
 ## Long-term TODO
 
