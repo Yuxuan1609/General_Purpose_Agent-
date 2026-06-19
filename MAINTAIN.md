@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-20 | **Monitor 模块（Gradio v2 Task 6）**：新增 `core/monitor.py`——纯查询聚合模块，供 Gradio 前端展示。5 个公开函数 `snapshot`/`task_list`/`task_detail`/`log_tail`/`decision_tree` + 4 个内部 helper `_task_list`/`_capacity_snapshot`/`_learning_snapshot`/`_session_summary`。数据源：SessionStore（session/task 元数据）、per-layer 日志文件（`logs/interaction/{ts}/*.log`）、RoundTree.snapshot()（决策树）、chain 内部（L2/L3 capacity）。不修改任何状态，函数内 lazy import 避免循环依赖。MAINTAIN.md 中原计划版 monitor 章节（`StepTrace`/`_task_snapshot`/`_log_snapshot`）替换为实际实现（`StepTrace` 归属 gradio_app，由 Task 7 处理）。 |
 | 2026-06-20 | **SessionStore（Gradio v2 Task 4）**：新增 `core/session.py` — `SessionStore`（SQLite WAL 持久化 sessions + tasks 元数据）+ thread-local task context（`set_task_context`/`get_task_context`/`clear_task_context`）+ `get_session_store` 单例。sessions 表（id/name/created_at/status/log_dir/last_active_at），tasks 表（id/session_id/parent_task_id/type/tool_name/status/progress/trace_id/result_summary/created_at/updated_at，FK→sessions，idx_tasks_session/idx_tasks_parent 索引）。`mark_interrupted_on_startup` 崩溃恢复：status='running' 且 updated_at 超阈值的 task 标记为 'interrupted'。Gradio 前端用 sessions 管理用户工作区、用 tasks 关联顶层对话与子 agent dispatch。dispatch handler 通过 thread-local context 读取当前 session/task 无需参数透传。 |
 | 2026-06-20 | **TaskRunner 增强（Gradio v2 Task 3）**：`TaskState` 新增 `progress`/`metadata`/`cancelled` 字段。`TaskRunner.submit` 加 `metadata` 参数（可含 session_id/parent_task_id 供前端关联）。`TaskRunner.collect` 加 `keep_history=True` 默认值——默认保留历史不删除（旧行为 auto-remove 改由 `keep_history=False` 触发）。新增 `update_progress`/`subscribe`/`unsubscribe`/`list_tasks`/`cancel`（协作式取消）+ `_notify` 事件分发。`status()` 加 `cancelled` 计数。`get_task_runner` 标记 DEPRECATED（dispatch 改用 `get_shared_runner`，仅留测试隔离实例）。 |
 | 2026-06-19 | **Gradio Frontend Plan + MAINTAIN.md 修正**：新增 `core/setup.py`、`core/monitor.py`、`scripts/gradio_app.py` 三个模块文档。修正 6 处签名过时：`L0_5_1Manager`/`L2Manager`/`L3Manager`/`build_chain` 删 `consol_ctx` 参数；`Rule` 删 usefulness/misleading/comment 字段；`LearningEnv.step` 描述更新为轻量。新增 `core/chain_factory.py` — `build_default_chain`/`_mount_tools`/`_iter_layers`。新增 `scripts/interactive_agent.py` — `main`/`_setup_executor`/`_show_notifies`。删 `TaskRunner.stats` 重复条目，`get_task_runner` 替换为 `get_shared_runner`。删 `core/llm_factory.py` 重复章节。 |
@@ -717,14 +718,19 @@
 
 ## core/monitor.py (NEW — Gradio Frontend Plan)
 
+> 纯查询模块——聚合 trace 数据源供前端展示，不修改任何状态。所有数据来自 SessionStore / per-layer 日志文件 / RoundTree.snapshot() / chain 内部。
+
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `StepTrace` | `@dataclass(timestamp, user_input, action_text, notify_layers, tool_calls, record_learning_calls)` | 每次 execute 的三层决策快照 | gradio_app | — |
-| `snapshot` | `(chain=None, pending_dir="data/learning/pending") → dict` | 聚合静态状态：tasks/learning/capacity/sessions | gradio_app | _task_snapshot, _learning_snapshot, _capacity_snapshot, _log_snapshot |
-| `_task_snapshot` | `() → dict` | TaskRunner.get_shared_runner().status() | snapshot | get_shared_runner().status() |
-| `_learning_snapshot` | `(pending_dir) → dict` | 统计 pending/ 下各 domain 文件数和 archive 总数 | snapshot | Path.glob |
-| `_capacity_snapshot` | `(chain) → dict` | L2 cards / L3 skills 数量 vs 上限 | snapshot | chain._downstream._knowledge.cards, chain._downstream._downstream._skill_layer.list_all(), get_section('learning') |
-| `_log_snapshot` | `() → dict` | 统计 logs/interaction/ 下 session 目录数 | snapshot | Path.iterdir |
+| `snapshot` | `(session_id=None, chain=None, pending_dir="data/learning/pending") → dict` | 聚合全量状态快照，返回 {tasks, capacity, learning, sessions} | gradio_app | _task_list, _capacity_snapshot, _learning_snapshot, _session_summary |
+| `task_list` | `(session_id, parent_task_id=None) → list[dict]` | 按 session 列出 tasks（可按 parent 过滤） | gradio_app, _task_list | get_session_store().list_tasks() |
+| `task_detail` | `(task_id) → dict\|None` | 单个 task 详情 | gradio_app | get_session_store().get_task() |
+| `log_tail` | `(log_dir, layer, lines=50) → str` | 读 per-layer 日志文件尾部 N 行（layer: l0_5_1/l2/l3/executor）；文件不存在返回 "" | gradio_app | Path.readlines() |
+| `decision_tree` | `(task_id=None) → list[DecisionNode]` | 复用 RoundTree.snapshot()——线程局部决策树 | gradio_app | get_round_history().snapshot() |
+| `_task_list` | `(session_id) → list[dict]` | session_id 为 None 时返回空列表，否则委托 task_list | snapshot | task_list |
+| `_capacity_snapshot` | `(chain) → dict` | L2 cards / L3 skills 数量 vs config 上限，返回 {l2:{count,limit,over}, l3:{...}} | snapshot | get_section('learning'), chain._downstream._knowledge.cards, chain._downstream._downstream._skill_layer.list_all() |
+| `_learning_snapshot` | `(pending_dir) → dict` | 统计 pending/ 下各 domain 文件数和 archive 总数，返回 {domains, total_pending, total_archive} | snapshot | Path.iterdir/glob/rglob |
+| `_session_summary` | `() → dict` | 活跃 session 计数 + 最近一条 session，返回 {count, latest} | snapshot | get_session_store().list_sessions() |
 
 ## scripts/gradio_app.py (NEW — Gradio Frontend Plan)
 
