@@ -126,11 +126,11 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `register_record_learning` | `(registry, pending_dir) → None` | Register record_learning tool (sync=false) | register_all_tools() | ToolRegistry.register |
-| `_record_learning_handler` | `(args) → str` | Submit to TaskRunner, return task_id | ToolRegistry.dispatch | TaskRunner.submit, _build_and_save |
+| `_record_learning_handler` | `(args) → str` | Submit to TaskRunner, return task_id；有 thread-local context 时登记到 SessionStore | ToolRegistry.dispatch | TaskRunner.submit, _build_and_save, SessionStore.register_task (via get_task_context) |
 | `_build_and_save` | `(domain, target, importance, reasoning) → dict` | Build stub → LLM fills observations → write pending JSON | _record_learning_handler | RoundTree.snapshot, _fill_observations_llm |
 | `_fill_observations_llm` | `(record, tree_nodes, target) → None` | LLM sub-agent: scan tree, extract L2/L3 observations (json_mode) | _build_and_save | build_llm_client, LLM.chat |
 | `_format_tree_for_llm` | `(nodes) → str` | Structure-aware tree formatting with numbering (1, 1.1, 1.1.1) | _fill_observations_llm | — |
-| `_check_auto_trigger` | `(pending_path, domain) → None` | 检查 pending/{domain}/ 下 ≥5 个文件时触发 auto-learning | _build_and_save | TaskRunner.submit |
+| `_check_auto_trigger` | `(pending_path, domain) → None` | 检查 pending/{domain}/ 下 ≥5 个文件时触发 auto-learning；有 context 时登记到 SessionStore | _build_and_save | TaskRunner.submit, SessionStore.register_task (via get_task_context) |
 | `_dispatch_learning` | `(domain, pending_path, json_files) → None` | 读取记录→archive→LearningEnv→Executor→layers→step→apply 的完整学习循环 | _check_auto_trigger (via TaskRunner) | get_learning_context, LearningEnv.process_in_memory, Executor.execute, LearningEnv.step |
 
 ## core/model_manager.py
@@ -259,7 +259,7 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。含 `_injector` 属性。 | L1Agent, L2Agent | — |
-| `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch() |
+| `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。async 分支有 thread-local context 时登记到 SessionStore。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch(), SessionStore.register_task (async branch, via get_task_context) |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义（已少用，CaptureToolDef.to_openai_tool() 替代） | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
 | `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
@@ -624,7 +624,7 @@
 | 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent.set_injector` | `(injector) → None` | **新增**，注入 LayerInjector | chain_factory._mount_tools() | — |
-| `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit() |
+| `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id；async 分支有 thread-local context 时登记到 SessionStore | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), SessionStore.register_task (async branch, via get_task_context) |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | **新增**：JSON Schema → OpenAI function-calling tool 定义，供 capture_tools 模式使用。 | decide() | — |
 
 ## core/env/learning_env.py — Phase 3 更新

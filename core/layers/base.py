@@ -289,7 +289,9 @@ class LayerAgent(ABC):
                             async_calls.append(tc)
                 if async_calls:
                     from core.task_runner import get_shared_runner
+                    from core.session import get_task_context, get_session_store
                     runner = get_shared_runner()
+                    session_id, parent_task_id = get_task_context()
                     for tc in async_calls:
                         name = tc.function.name
                         args_json = tc.function.arguments
@@ -300,7 +302,16 @@ class LayerAgent(ABC):
                                 return _inj.execute_tool_call(_l, _n, _a)
                             return _exec
                         exec_fn = _make_async_exec(self._injector, layer, name, args_json)
-                        tid = runner.submit(name, exec_fn)
+                        metadata = {"session_id": session_id, "parent_task_id": parent_task_id}
+                        tid = runner.submit(name, exec_fn, metadata=metadata)
+                        if session_id:
+                            try:
+                                get_session_store().register_task(
+                                    tid, session_id, name,
+                                    parent_task_id=parent_task_id, tool_name=name,
+                                )
+                            except Exception:
+                                pass
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,

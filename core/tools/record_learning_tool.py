@@ -54,7 +54,18 @@ def _record_learning_handler(args=None, **kwargs):
         return _build_and_save(domain, target, importance, reasoning)
 
     from core.task_runner import get_shared_runner
-    tid = get_shared_runner().submit("record_learning", _run)
+    from core.session import get_task_context, get_session_store
+    session_id, parent_task_id = get_task_context()
+    metadata = {"session_id": session_id, "parent_task_id": parent_task_id}
+    tid = get_shared_runner().submit("record_learning", _run, metadata=metadata)
+    if session_id:
+        try:
+            get_session_store().register_task(
+                tid, session_id, "record_learning",
+                parent_task_id=parent_task_id, tool_name="record_learning",
+            )
+        except Exception:
+            pass
     return json.dumps({"task_id": tid, "status": "running"})
 
 
@@ -99,9 +110,20 @@ def _check_auto_trigger(pending_path: Path, domain: str):
         return
 
     from core.task_runner import get_shared_runner
-    get_shared_runner().submit(
+    from core.session import get_task_context, get_session_store
+    session_id, parent_task_id = get_task_context()
+    metadata = {"session_id": session_id, "parent_task_id": parent_task_id}
+    tid = get_shared_runner().submit(
         "auto_learning", lambda d=domain, p=pending_path, files=json_files:
-        _dispatch_learning(d, p, files))
+        _dispatch_learning(d, p, files), metadata=metadata)
+    if session_id:
+        try:
+            get_session_store().register_task(
+                tid, session_id, "auto_learning",
+                parent_task_id=parent_task_id, tool_name="auto_learning",
+            )
+        except Exception:
+            pass
 
 
 def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
