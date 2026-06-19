@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-20 | **SessionStore（Gradio v2 Task 4）**：新增 `core/session.py` — `SessionStore`（SQLite WAL 持久化 sessions + tasks 元数据）+ thread-local task context（`set_task_context`/`get_task_context`/`clear_task_context`）+ `get_session_store` 单例。sessions 表（id/name/created_at/status/log_dir/last_active_at），tasks 表（id/session_id/parent_task_id/type/tool_name/status/progress/trace_id/result_summary/created_at/updated_at，FK→sessions，idx_tasks_session/idx_tasks_parent 索引）。`mark_interrupted_on_startup` 崩溃恢复：status='running' 且 updated_at 超阈值的 task 标记为 'interrupted'。Gradio 前端用 sessions 管理用户工作区、用 tasks 关联顶层对话与子 agent dispatch。dispatch handler 通过 thread-local context 读取当前 session/task 无需参数透传。 |
 | 2026-06-20 | **TaskRunner 增强（Gradio v2 Task 3）**：`TaskState` 新增 `progress`/`metadata`/`cancelled` 字段。`TaskRunner.submit` 加 `metadata` 参数（可含 session_id/parent_task_id 供前端关联）。`TaskRunner.collect` 加 `keep_history=True` 默认值——默认保留历史不删除（旧行为 auto-remove 改由 `keep_history=False` 触发）。新增 `update_progress`/`subscribe`/`unsubscribe`/`list_tasks`/`cancel`（协作式取消）+ `_notify` 事件分发。`status()` 加 `cancelled` 计数。`get_task_runner` 标记 DEPRECATED（dispatch 改用 `get_shared_runner`，仅留测试隔离实例）。 |
 | 2026-06-19 | **Gradio Frontend Plan + MAINTAIN.md 修正**：新增 `core/setup.py`、`core/monitor.py`、`scripts/gradio_app.py` 三个模块文档。修正 6 处签名过时：`L0_5_1Manager`/`L2Manager`/`L3Manager`/`build_chain` 删 `consol_ctx` 参数；`Rule` 删 usefulness/misleading/comment 字段；`LearningEnv.step` 描述更新为轻量。新增 `core/chain_factory.py` — `build_default_chain`/`_mount_tools`/`_iter_layers`。新增 `scripts/interactive_agent.py` — `main`/`_setup_executor`/`_show_notifies`。删 `TaskRunner.stats` 重复条目，`get_task_runner` 替换为 `get_shared_runner`。删 `core/llm_factory.py` 重复章节。 |
 | 2026-06-18 | **#12 A段 拆 ConsolidationContext**：`ConsolidationContext` 废弃，拆为 `consolidation_injection`（store DI）+ `runtime_registry`（chain/executor 全局注册）。9 CRUD handler 改为直接改 store（不再 record_mod → drain_mods side-channel）。`pending_mods`/`drain_mods`/三层 Manager `_consol_ctx`/learning env `_apply_*`/`_parse_*`/`_quality_kwargs` 全删。`learning env step` 退化为轻量（只计轮次）。DomainRegistry 加 `mark_domain_dirty`/`flush_correlations`（增量，L1 Manager.query 在 decide 返回后调）。8 脚本 `chain._consol_ctx.executor = executor` 改 `register_runtime(chain, executor)`。L1 `Rule` 删 usefulness/misleading/comment 字段 + `L1SQLiteStore` 删对应列 + `modify_l1_rule` schema 删 quality。auto-learning 改调 `get_executor()`。`build_chain`/`build_default_chain`/`register_all_tools` 删 consol_ctx 参数。 |
@@ -691,6 +692,28 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `setup_executor` | `(project_root: Path\|None = None) → (chain, executor)` | 一次性构建 llm → chain → executor → register_runtime。CLI 和 Gradio 共用 | interactive_agent, gradio_app | build_llm_client, build_default_chain, register_runtime |
+
+## core/session.py (NEW — Gradio Frontend Plan)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `set_task_context` | `(session_id: str, task_id: str) → None` | 设置当前线程的 session_id + task_id（dispatch 跟踪用） | Gradio chat handler（execute 前）, dispatch handlers | threading.local |
+| `get_task_context` | `() → tuple[str\|None, str\|None]` | 返回当前线程的 (session_id, task_id)，未设置返回 (None, None) | record_learning_tool handler, base.py dispatch handlers | threading.local |
+| `clear_task_context` | `() → None` | 清除当前线程的 task context | Gradio chat handler（execute 后）, test fixtures | threading.local |
+| `SessionStore` | `__init__(db_path: Path\|str = "data/cognitive/sessions.db")` | SQLite WAL 持久化 sessions + tasks 元数据，check_same_thread=False + 写锁 | get_session_store, Gradio frontend, tests | sqlite3 |
+| `SessionStore.create_session` | `(name: str, log_dir: str\|None = None) → dict` | 新建用户工作区（uuid hex[:12]，status='active'），返回 session dict | Gradio frontend | — |
+| `SessionStore.list_sessions` | `(include_closed: bool = False) → list[dict]` | 列出 sessions（默认排除 status='closed'），按 last_active_at DESC | Gradio frontend | — |
+| `SessionStore.get_session` | `(session_id: str) → dict\|None` | 按 id 获取单个 session | Gradio frontend | — |
+| `SessionStore.update_session` | `(session_id: str, **fields) → bool` | 按字段更新 session，自动刷新 last_active_at（跳过该字段显式赋值） | Gradio frontend, close_session | — |
+| `SessionStore.close_session` | `(session_id: str) → None` | 标记 session 为 status='closed'（软关闭，可 include_closed=true 列出） | Gradio frontend | update_session |
+| `SessionStore.delete_session` | `(session_id: str) → None` | 硬删除 session + 级联删除其全部 tasks | Gradio frontend | — |
+| `SessionStore.register_task` | `(task_id, session_id, type, parent_task_id=None, tool_name=None, trace_id=None) → None` | 注册 task（INSERT OR REPLACE，默认 status='running' progress=0.0） | Gradio chat handler（top task）, dispatch handlers（sub task via thread-local context） | — |
+| `SessionStore.update_task` | `(task_id: str, **fields) → bool` | 按字段更新 task，自动刷新 updated_at | Gradio frontend, dispatch handlers | — |
+| `SessionStore.list_tasks` | `(session_id: str, parent_task_id: str\|None = None) → list[dict]` | 列出 session 下 tasks，可按 parent_task_id 过滤子任务 | Gradio frontend | — |
+| `SessionStore.get_task` | `(task_id: str) → dict\|None` | 按 id 获取单个 task | Gradio frontend, dispatch handlers | — |
+| `SessionStore.mark_interrupted_on_startup` | `(threshold_seconds: int = 3600) → int` | 崩溃恢复：status='running' 且 updated_at 早于阈值的 task 改 'interrupted'，返回受影响行数 | gradio_app 启动 | — |
+| `SessionStore.close` | `() → None` | 关闭 sqlite 连接 | tests, Gradio shutdown | — |
+| `get_session_store` | `() → SessionStore` | 全局单例（双重检查锁） | Gradio frontend, dispatch handlers | SessionStore |
 
 ## core/monitor.py (NEW — Gradio Frontend Plan)
 
