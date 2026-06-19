@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,11 +15,12 @@ class L1SQLiteStore:
     def __init__(self, db_path: Path | str):
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        self._write_lock = threading.Lock()
 
     def _init_schema(self):
         self._conn.execute("""
@@ -35,20 +37,21 @@ class L1SQLiteStore:
         self._conn.commit()
 
     def insert(self, rule: dict) -> None:
-        self._conn.execute("""
-            INSERT OR REPLACE INTO l1_rules
-            (id, content, created_by, source, added_at, version, last_modified)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            rule["id"],
-            rule["content"],
-            rule.get("created_by", "unknown"),
-            rule.get("source", "l1"),
-            rule.get("added_at", _now()),
-            rule.get("version", 1),
-            rule.get("last_modified", _now()),
-        ))
-        self._conn.commit()
+        with self._write_lock:
+            self._conn.execute("""
+                INSERT OR REPLACE INTO l1_rules
+                (id, content, created_by, source, added_at, version, last_modified)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                rule["id"],
+                rule["content"],
+                rule.get("created_by", "unknown"),
+                rule.get("source", "l1"),
+                rule.get("added_at", _now()),
+                rule.get("version", 1),
+                rule.get("last_modified", _now()),
+            ))
+            self._conn.commit()
 
     def update(self, rule_id: str, **fields) -> bool:
         sets = []
@@ -61,17 +64,19 @@ class L1SQLiteStore:
         sets.append("last_modified = ?")
         values.append(_now())
         values.append(rule_id)
-        self._conn.execute(
-            f"UPDATE l1_rules SET {', '.join(sets)} WHERE id = ?",
-            values,
-        )
-        self._conn.commit()
-        return self._conn.total_changes > 0
+        with self._write_lock:
+            self._conn.execute(
+                f"UPDATE l1_rules SET {', '.join(sets)} WHERE id = ?",
+                values,
+            )
+            self._conn.commit()
+            return self._conn.total_changes > 0
 
     def delete(self, rule_id: str) -> bool:
-        self._conn.execute("DELETE FROM l1_rules WHERE id = ?", (rule_id,))
-        self._conn.commit()
-        return self._conn.total_changes > 0
+        with self._write_lock:
+            self._conn.execute("DELETE FROM l1_rules WHERE id = ?", (rule_id,))
+            self._conn.commit()
+            return self._conn.total_changes > 0
 
     def get(self, rule_id: str) -> dict | None:
         row = self._conn.execute(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,11 +16,12 @@ class L2SQLiteStore:
     def __init__(self, db_path: Path | str):
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        self._write_lock = threading.Lock()
 
     def _init_schema(self):
         self._conn.execute("""
@@ -40,25 +42,26 @@ class L2SQLiteStore:
         self._conn.commit()
 
     def insert(self, card: dict) -> None:
-        self._conn.execute("""
-            INSERT OR REPLACE INTO l2_cards
-            (id, content, domain, available_domains, source,
-             created_at, updated_at, last_used, usefulness, misleading, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            card["id"],
-            card["content"],
-            card.get("domain", "general"),
-            json.dumps(card.get("available_domains", [])),
-            card.get("source", "observation"),
-            card.get("created_at", _now()),
-            card.get("updated_at", _now()),
-            card.get("last_used", _now()),
-            card.get("usefulness", 0),
-            card.get("misleading", 0),
-            card.get("comment", ""),
-        ))
-        self._conn.commit()
+        with self._write_lock:
+            self._conn.execute("""
+                INSERT OR REPLACE INTO l2_cards
+                (id, content, domain, available_domains, source,
+                 created_at, updated_at, last_used, usefulness, misleading, comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                card["id"],
+                card["content"],
+                card.get("domain", "general"),
+                json.dumps(card.get("available_domains", [])),
+                card.get("source", "observation"),
+                card.get("created_at", _now()),
+                card.get("updated_at", _now()),
+                card.get("last_used", _now()),
+                card.get("usefulness", 0),
+                card.get("misleading", 0),
+                card.get("comment", ""),
+            ))
+            self._conn.commit()
 
     def update(self, card_id: str, **fields) -> bool:
         sets = []
@@ -73,17 +76,19 @@ class L2SQLiteStore:
         sets.append("updated_at = ?")
         values.append(_now())
         values.append(card_id)
-        self._conn.execute(
-            f"UPDATE l2_cards SET {', '.join(sets)} WHERE id = ?",
-            values,
-        )
-        self._conn.commit()
-        return self._conn.total_changes > 0
+        with self._write_lock:
+            self._conn.execute(
+                f"UPDATE l2_cards SET {', '.join(sets)} WHERE id = ?",
+                values,
+            )
+            self._conn.commit()
+            return self._conn.total_changes > 0
 
     def delete(self, card_id: str) -> bool:
-        self._conn.execute("DELETE FROM l2_cards WHERE id = ?", (card_id,))
-        self._conn.commit()
-        return self._conn.total_changes > 0
+        with self._write_lock:
+            self._conn.execute("DELETE FROM l2_cards WHERE id = ?", (card_id,))
+            self._conn.commit()
+            return self._conn.total_changes > 0
 
     def get(self, card_id: str) -> dict | None:
         row = self._conn.execute(

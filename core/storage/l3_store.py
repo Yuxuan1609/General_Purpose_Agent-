@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,11 +15,12 @@ class L3SQLiteStore:
     def __init__(self, db_path: Path | str):
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
+        self._write_lock = threading.Lock()
 
     def _init_schema(self):
         self._conn.execute("""
@@ -43,30 +45,31 @@ class L3SQLiteStore:
         self._conn.commit()
 
     def insert(self, skill: dict) -> None:
-        self._conn.execute("""
-            INSERT OR REPLACE INTO l3_skills
-            (name, description, content, domain, available_domains,
-             cross_domain, version, created_by, source_cards,
-             created_at, updated_at, last_used, usefulness, misleading, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            skill["name"],
-            skill.get("description", ""),
-            skill.get("content", ""),
-            skill.get("domain", "general"),
-            json.dumps(skill.get("available_domains", [])),
-            1 if skill.get("cross_domain") else 0,
-            skill.get("version", "1.0.0"),
-            skill.get("created_by", "agent"),
-            json.dumps(skill.get("source_cards", [])),
-            skill.get("created_at", _now()),
-            skill.get("updated_at", _now()),
-            skill.get("last_used", _now()),
-            skill.get("usefulness", 0),
-            skill.get("misleading", 0),
-            skill.get("comment", ""),
-        ))
-        self._conn.commit()
+        with self._write_lock:
+            self._conn.execute("""
+                INSERT OR REPLACE INTO l3_skills
+                (name, description, content, domain, available_domains,
+                 cross_domain, version, created_by, source_cards,
+                 created_at, updated_at, last_used, usefulness, misleading, comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                skill["name"],
+                skill.get("description", ""),
+                skill.get("content", ""),
+                skill.get("domain", "general"),
+                json.dumps(skill.get("available_domains", [])),
+                1 if skill.get("cross_domain") else 0,
+                skill.get("version", "1.0.0"),
+                skill.get("created_by", "agent"),
+                json.dumps(skill.get("source_cards", [])),
+                skill.get("created_at", _now()),
+                skill.get("updated_at", _now()),
+                skill.get("last_used", _now()),
+                skill.get("usefulness", 0),
+                skill.get("misleading", 0),
+                skill.get("comment", ""),
+            ))
+            self._conn.commit()
 
     def update(self, name: str, **fields) -> bool:
         sets = []
@@ -83,17 +86,19 @@ class L3SQLiteStore:
         sets.append("updated_at = ?")
         values.append(_now())
         values.append(name)
-        self._conn.execute(
-            f"UPDATE l3_skills SET {', '.join(sets)} WHERE name = ?",
-            values,
-        )
-        self._conn.commit()
-        return self._conn.total_changes > 0
+        with self._write_lock:
+            self._conn.execute(
+                f"UPDATE l3_skills SET {', '.join(sets)} WHERE name = ?",
+                values,
+            )
+            self._conn.commit()
+            return self._conn.total_changes > 0
 
     def delete(self, name: str) -> bool:
-        self._conn.execute("DELETE FROM l3_skills WHERE name = ?", (name,))
-        self._conn.commit()
-        return self._conn.total_changes > 0
+        with self._write_lock:
+            self._conn.execute("DELETE FROM l3_skills WHERE name = ?", (name,))
+            self._conn.commit()
+            return self._conn.total_changes > 0
 
     def get(self, name: str) -> dict | None:
         row = self._conn.execute(
