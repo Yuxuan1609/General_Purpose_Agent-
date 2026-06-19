@@ -28,22 +28,6 @@ def _strip_frontmatter(content: str) -> str:
 
 from core.layers.base import CaptureToolDef, ConsolidationStrategy
 
-L3_CONTINUE_TOOL = CaptureToolDef(
-    name="l3_continue",
-    description="【特殊工具：继续思考】当你需要进一步思考或执行工具来完成L2下发的任务时使用。"
-    "调用此工具表示还需要继续工作。禁止以文本方式直接回复！",
-    done=False,
-    schema={
-        "type": "object",
-        "properties": {
-            "done": {"type": "boolean", "const": False},
-            "skills_used": {"type": "array", "items": {"type": "string"}},
-            "reasoning": {"type": "string"},
-        },
-        "required": ["done", "reasoning"],
-    },
-)
-
 L3_REPORT_TOOL = CaptureToolDef(
     name="l3_report",
     description="【特殊工具：向上汇报】当L2下发的任务执行完成时使用。"
@@ -202,17 +186,12 @@ class L3Agent(LayerAgent):
                 "reasoning": result.get("reasoning", ""),
             }
 
-        # Normal mode: two capture tools
+        # Normal mode: single capture tool (l3_continue removed; multi-turn via tool loop)
         base_tools = self._get_tools(layer) or []
-        all_tools = base_tools + [L3_CONTINUE_TOOL.to_openai_tool(), L3_REPORT_TOOL.to_openai_tool()]
+        all_tools = base_tools + [L3_REPORT_TOOL.to_openai_tool()]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                capture_tools={"l3_continue", "l3_report"})
-        if not result.get("done"):
-            raw = result.get("_raw") or result.get("result") or result.get("reply") or ""
-            if raw:
-                return {"done": True, "result": str(raw), "reasoning": "direct reply",
-                        "skills_used": []}
+                                capture_tools={"l3_report"})
         return result
 
 
@@ -228,16 +207,11 @@ class L3Manager(LayerManager):
 
     def __init__(self, skill_layer, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None, max_rounds=None, consol_ctx=None):
+                 domain_registry=None):
         super().__init__("l3", downstream, upward=upward, downward=downward)
         self._skill_layer = skill_layer
         self._agent = L3Agent(auxiliary_llm, skill_layer=skill_layer, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
-        self._consol_ctx = consol_ctx
-        if max_rounds is None:
-            from core.config_loader import get_section
-            max_rounds = get_section('runtime', default={}).get('max_rounds_l3', 3)
-        self.max_rounds = max_rounds
         self._matched: list[str] = []
         self._matched_skills: list[dict] = []
         self._l3_notify: dict | None = None
@@ -306,6 +280,10 @@ class L3Manager(LayerManager):
             "l3_task": l3_task,
         }
 
+        from core.round_tree import DecisionNode, push_node, pop_node, current_node
+        l3_node = DecisionNode(layer="l3", query=l3_task or obs.meta, result="", reasoning="")
+        push_node(l3_node)
+
         tools = self._agent._get_tools("l3") if self._agent else None
         meta = l3_task or (obs.meta if obs else "")
         result = self._agent.decide(
@@ -314,6 +292,13 @@ class L3Manager(LayerManager):
         )
         logger.debug("  result: done=%s result=%s",
                      result.get("done"), str(result.get("result", ""))[:2000])
+
+        l3_node.result = result.get("result", "")
+        l3_node.reasoning = result.get("reasoning", "")
+        pop_node()
+        parent = current_node()
+        if parent is not None:
+            parent.children.append(l3_node)
 
         self._l3_notify = {
             "skills_matched": len(self._matched),
@@ -332,10 +317,5 @@ class L3Manager(LayerManager):
 
     def notify(self) -> Any:
         if self._l3_notify:
-            result = dict(self._l3_notify)
-            if self._consol_ctx:
-                mods = self._consol_ctx.drain_mods()
-                if mods:
-                    result["l3_modifications"] = mods
-            return result
+            return dict(self._l3_notify)
         return {"status": "ok", "layer": "l3", "skills_matched": len(self._matched)}

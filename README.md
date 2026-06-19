@@ -235,6 +235,129 @@ python scripts/test_kb_io.py
 
 ---
 
+## 工具调整路线图
+
+以下为工具系统的规划优化项，基于当前代码现状分析提出，待后续实施。
+
+### 1. 新增 `tool_overview` 工具
+
+**现状**：Agent 通过 prompt 或尝试调用才知道有哪些可用工具，缺乏运行时自省能力。
+
+**计划**：
+- 新增 `tool_overview` 工具，注册到 `ToolRegistry`，对所有层可见
+- 调用后返回当前 Agent 可见的 tool list（名称 + 描述 + 参数 schema 摘要）
+- 实现方式：利用 `ToolRegistry.get_definitions()` + `AgentContext` 的 allowlist 过滤
+- 帮助 Agent 在 while-loop 中动态了解自身能力边界
+
+### 2. `tool_proposal` 改由 L1 接收
+
+**现状**：`tool_proposal` 在 `config/tools.yaml:225` 的 allowlist 为 `[l2, l3]`。
+
+**计划**：
+- 将 allowlist 改为 `[l1]`，使 L1 Agent 成为工具提案的唯一入口
+- L1 作为行为准则层，能从全局视角判断工具缺口，避免 L2/L3 各自提案导致碎片化
+- 提案结果仍为 `_proposal_dir` 持久化，人工审核流程不变
+
+### 3. 简化文件操作工具，改用 `terminal`
+
+**现状**：L2/L3 同时拥有 `read_file`（`core/tools/file_tools.py:43`）和 `grep`（`core/tools/file_tools.py:116`）专用工具，与 `terminal` 功能重叠。
+
+**计划**：
+- 移除 `read_file` 和 `grep` 工具，文件读写统一通过 `terminal` 执行（`cat`、`grep`、`head`、`tail` 等命令）
+- 消除 `file_tools.py` 中路径校验逻辑（`_validate_path:18`）的维护成本
+- 保留 `set_workspace_root` 接口，作为 `terminal` 命令的路径安全层
+- 风险与对策：`terminal` 不可用时降级到内置文件工具（fallback 机制）
+
+### 4. KB 工具审查：`kb_query` / `kb_delete` / `kb_fill_gap`
+
+**现状**（`core/tools/kb_tools.py`）：
+
+| 工具 | 位置 | 可见层 | 实现复杂度 |
+|------|------|--------|-----------|
+| `kb_query` | `_kb_query_handler:226` | L1/L2/L3 | 高（依赖 `SubAgentLoop`，LLM 驱动的多轮查询） |
+| `kb_delete` | `_kb_delete_handler:245` | L2/L3 | 低（直接 SQLite 操作） |
+| `kb_fill_gap` | `_kb_fill_gap_handler:266` | L2/L3 | 高（依赖 `FillGapLoop`，LLM 驱动的填补管线） |
+
+**计划**：
+- `kb_query`：评估 `SubAgentLoop` 的可靠性与开销；考虑简化或用 `terminal` + 本地文件查询替代
+- `kb_delete`：功能已清晰，增加 `dry_run` 参数预览删除影响
+- `kb_fill_gap`：评估 `FillGapLoop` 的实际效果；考虑与 `kb_query` 合并为单一 KB 交互工具
+- 统一 KB 工具的超时配置和错误处理策略
+
+### 5. `check_task` / `collect_tasks` 优化
+
+**现状**（`core/tools/async_tools.py`）：
+
+| 工具 | 功能 | 问题 |
+|------|------|------|
+| `check_task` | 按 task_id 查状态 | 只返回 `status`，不返回部分结果或进度 |
+| `collect_tasks` | 批量收割已完成任务 | 调用后移除任务记录，无法追溯历史 |
+
+**计划**：
+- `check_task` 增强：增加 `progress` 字段、预计剩余时间、部分结果预览
+- `collect_tasks` 增强：增加 `keep_history` 参数，保留已收集任务的可选日志
+- 合并为单一 `task_manager` 工具（`action: check | collect | list | cancel`）
+- 增加 `list_tasks` 功能：按状态、工具名、时间范围列出所有任务
+
+### 6. Consolidation CRUD 工具优化
+
+**现状**（`core/tools/consolidation_tools.py`）：
+- 9 个分离工具：`deprecate/create/modify` × L1/L2/L3
+- 每个工具独立注册、独立 schema，但 handler 已通过 `_ModSpec`（`:223`）和 `_make_handler`（`:247`）统一工厂化
+
+**计划**：
+- 合并为 3 个跨层工具：`deprecate_item`、`create_item`、`modify_item`，每工具接受 `layer` 参数
+- 工具数量从 9 降至 3，减少 Agent 的选择空间和 prompt 长度
+- `_ModSpec` 和 `_make_handler` 工厂保持不变，仅包装层从 9 次注册变为 3 次
+- 配套 `config/tools.yaml` 中仍按层配置 allowlist（L1 只能操作 l1 数据）
+
+### 7. 任务追踪优化
+
+**现状**（`core/task_runner.py`）：
+
+| 方面 | 当前 | 问题 |
+|------|------|------|
+| 持久化 | 纯内存 `_tasks: dict` | 进程崩溃后丢失所有任务状态 |
+| 历史 | `collect` 后删除 | 无法追溯已完成的异步任务 |
+| 进度 | 仅 `running/done/error` | 无进度百分比或阶段信息 |
+| 取消 | 不支持 | 提交后无法取消 |
+| 超时 | 无单任务超时 | 卡住的任务永不会终止 |
+
+**计划**：
+- 增加可选的 SQLite 持久化层（参考 `data/cognitive/` 已有存储模式）
+- 添加 `cancel(task_id)` 接口
+- 单任务超时机制（`config/tools.yaml` 中每个工具的 `timeout` 应传递到 `TaskRunner`）
+- 任务进度回调：允许 handler 更新 `progress`（0-100）
+- `status()` 返回增加 per-task 耗时统计和资源使用
+
+### 8. Sub-Agent 与 Fire-Dispatch 模式审查
+
+**现状**：
+
+| 模式 | 位置 | 说明 |
+|------|------|------|
+| `SubAgentLoop` | `scripts/interactive_kb_agent.py:217` | LLM 驱动的两阶段 KB 查询子 Agent（Search → Meta Review），`kb_query` 内部调用 |
+| `FillGapLoop` | `scripts/interactive_kb_agent.py:550` | LLM 驱动的知识填补子 Agent，`kb_fill_gap` 内部调用 |
+| 后台 sub-agent | `core/tools/record_learning_tool.py` | `record_learning` 提交后自动扫描 RoundTree 补充 L2/L3 evidence |
+| Fire-Dispatch | `core/layers/base.py:246-351` (`_call_llm`) | 按 `sync` 参数拆分：sync=true 走 `run_sync_batch` 并行执行，sync=false 走 `TaskRunner.submit()` fire-and-forget |
+
+**Fire-Dispatch 当前问题**：
+- `_call_llm` async dispatch 后仅注入一条 `[Pending async tasks]` 系统消息（`:348`），Agent 需在下一轮手动调用 `collect_tasks` 收割，流程断裂
+- 同一轮内 async 工具的结果无法被当前推理回合消费，增加 Agent 认知负担
+- 同步批处理的超时 (`batch_timeout`) 硬编码为 300s（`:297`），未从 `config/tools.yaml` 读取各工具独立超时
+
+**Sub-Agent 当前问题**：
+- `SubAgentLoop` / `FillGapLoop` 依赖 `scripts/` 目录，不适合作为核心库代码被 `core/tools/kb_tools.py` 导入
+- 子 Agent 内部无超时透传、无层上下文（layer context），无法感知 Agent 当前决策环境
+- `record_learning` 的后台 sub-agent 与主线程完全解耦，无进度回查机制
+
+**计划**：
+- **Fire-Dispatch**：改为 async 结果自动注入下一轮 tool call 循环，消除 Agent 手动收割需求。同步批处理超时改为从 `config/tools.yaml` 按工具读取。评估 sync_batch 与 async_dispatch 是否可统一为单一 TaskRunner 队列。
+- **Sub-Agent**：将 `SubAgentLoop` 和 `FillGapLoop` 从 `scripts/` 迁移到 `core/tools/` 作为内部工具代理，暴露统一接口并透传超时。增加进度反馈机制，允许主 Agent 在 while-loop 中查询子 Agent 状态。
+- **统一调度层**：评估 `_call_llm` 中的工具调度逻辑是否应抽取为独立的 `ToolDispatcher` 组件，与 `TaskRunner` 结合，实现调度策略与 Agent 推理分离（A4）。
+
+---
+
 ## 异步任务调度
 
 sync 是所有工具的通用参数（Agent 可逐次覆盖）：

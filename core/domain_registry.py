@@ -25,6 +25,7 @@ class DomainRegistry:
             "l2": {}, "l3": {}, "tool": {},
         }
         self._embedding_model_path = embedding_model_path
+        self._dirty_domains: set[str] = set()
         self._db = None
         if db_path:
             from core.storage.domain_store import DomainSQLiteStore
@@ -245,6 +246,28 @@ class DomainRegistry:
                 if corr > 0.0 or self._nodes[a].correlations.get(b) or self._nodes[b].correlations.get(a):
                     self.update_correlation(a, b, corr)
                     count += 1
+        return count
+
+    def mark_domain_dirty(self, path: str) -> None:
+        """Mark a domain as modified for incremental correlation flush."""
+        if path in self._nodes:
+            self._dirty_domains.add(path)
+
+    def flush_correlations(self) -> int:
+        """Recompute correlations only for dirty domains vs all others.
+        O(n x dirty_count) instead of O(n^2). Clears dirty set after."""
+        dirty = list(self._dirty_domains)
+        self._dirty_domains.clear()
+        count = 0
+        for a in dirty:
+            if a not in self._nodes:
+                continue
+            for b in self._nodes:
+                if a == b:
+                    continue
+                corr = self.compute_correlation(a, b)
+                self.update_correlation(a, b, corr)
+                count += 1
         return count
 
     # ── deprecate & merge ──

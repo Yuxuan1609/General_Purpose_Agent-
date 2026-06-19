@@ -23,9 +23,6 @@ class Rule:
     added_at: str = field(default_factory=_now)
     version: int = 1
     last_modified: str = field(default_factory=_now)
-    usefulness: int = 0
-    misleading: int = 0
-    comment: str = ""
 
 
 @dataclass
@@ -176,9 +173,6 @@ class Philosophy:
                 added_at=r.get("added_at", _now()),
                 version=r.get("version", 1),
                 last_modified=r.get("last_modified", _now()),
-                usefulness=r.get("usefulness", 0),
-                misleading=r.get("misleading", 0),
-                comment=r.get("comment", ""),
             )
             for r in self._db.list_all()
         ]

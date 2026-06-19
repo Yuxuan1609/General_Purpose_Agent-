@@ -222,7 +222,8 @@ def main():
     from core.executor import Executor
     executor = Executor(layer_root=chain, llm_client=llm,
                         learning_dir=PROJECT_ROOT / "data" / "learning")
-    chain._consol_ctx.executor = executor
+    from core.runtime_registry import register_runtime
+    register_runtime(chain, executor)
 
     # ── LearningEnv with spec ──
     spec = load_consolidation_spec()

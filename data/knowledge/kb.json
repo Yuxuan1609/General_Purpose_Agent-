@@ -14,14 +14,25 @@
           "capability",
           "system-design",
           "architecture",
-          "capability-system"
+          "capability-system",
+          "agent",
+          "layer",
+          "tool-registry",
+          "learning-environment",
+          "module",
+          "agent-capability",
+          "knowledge",
+          "knowledge-supplement",
+          "knowledge-capability",
+          "hierarchical",
+          "L1-L2-L3"
         ],
         "related": [],
         "parent": [],
         "children": []
       },
       "created_at": "2026-06-15T08:28:23.396969+00:00",
-      "updated_at": "2026-06-18T01:07:08.634774+00:00",
+      "updated_at": "2026-06-18T08:58:37.251706+00:00",
       "last_used": "2026-06-15T08:28:23.396980+00:00"
     }
   },

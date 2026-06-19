@@ -3,7 +3,6 @@ import json
 import logging
 from typing import Any
 from core.task import Domain
-from core.types import TaskObservation
 from core.layers.base import LayerManager, LayerAgent, _indent
 from core.layers.comm import AgentPacket
 from core.layer_message import LayerMessage
@@ -11,51 +10,7 @@ from core.layer_message import LayerMessage
 logger = logging.getLogger("l2")
 
 
-def cascade_consolidation_to_l3(downstream, meta, state, trace_id):
-    """Propagate consolidation task to L3 and collect NOTIFY."""
-    cascade_obs = TaskObservation(
-        meta=meta,
-        state={
-            **state,
-            "context_history": [],
-            "domains_hint": state.get("domains_hint", []),
-        },
-        session={
-            "domain": state.get("domains_hint", ["general"])[0],
-            "enable_learning": False,
-        },
-    )
-    downstream.query(cascade_obs, trace_id)
-    return downstream.collect_notify()
-
-
 from core.layers.base import CaptureToolDef, ConsolidationStrategy
-
-L2_QUERY_TOOL = CaptureToolDef(
-    name="l2_query",
-    description="【特殊工具：向下调度】当需要下层L3执行具体技能任务时使用。"
-    "通过 selected_nodes 选择相关领域，通过 queries_to_L3 下发任务。禁止以文本方式直接回复！",
-    done=False,
-    schema={
-        "type": "object",
-        "properties": {
-            "done": {"type": "boolean", "const": False},
-            "selected_nodes": {"type": "array", "items": {
-                "type": "object", "properties": {
-                    "path": {"type": "string"}, "score": {"type": "number"},
-                },
-            }},
-            "queries_to_L3": {"type": "array", "items": {
-                "type": "object", "properties": {
-                    "domain": {"type": "string", "description": "目标领域"},
-                    "task": {"type": "string", "description": "委托 L3 执行的技能任务"},
-                },
-            }},
-            "reasoning": {"type": "string"},
-        },
-        "required": ["done", "reasoning"],
-    },
-)
 
 L2_REPORT_TOOL = CaptureToolDef(
     name="l2_report",
@@ -83,7 +38,7 @@ L2_REPORT_TOOL = CaptureToolDef(
 from core.tools.consolidation_tools import L2_CONSOLIDATION_TOOL_NAMES
 L2_CONSOLIDATION_STRATEGY = ConsolidationStrategy(
     consolidation_tool_names=L2_CONSOLIDATION_TOOL_NAMES,
-    allowed_base_tools={"kb_query", "read_file", "grep"},
+    allowed_base_tools={"kb_query", "read_file", "grep", "l2_query"},
     report_tool=L2_REPORT_TOOL,
 )
 
@@ -325,12 +280,12 @@ class L2Agent(LayerAgent):
                 "reasoning": result.get("reasoning", ""),
             }
 
-        # Normal mode: two capture tools
+        # Normal mode: single capture tool (l2_query is now a regular tool)
         base_tools = self._get_tools(layer) or []
-        all_tools = base_tools + [L2_QUERY_TOOL.to_openai_tool(), L2_REPORT_TOOL.to_openai_tool()]
+        all_tools = base_tools + [L2_REPORT_TOOL.to_openai_tool()]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                capture_tools={"l2_query", "l2_report"})
+                                capture_tools={"l2_report"})
         if not result.get("done"):
             raw = result.get("_raw") or result.get("reply") or ""
             if raw:
@@ -373,27 +328,19 @@ class L2Agent(LayerAgent):
 class L2Manager(LayerManager):
     """L2 Manager — wraps FlexibleKnowledge + L2Agent.
 
-    Overrides query() to drive while-loop:
-      decide() → propagate queries to L3 → collect NOTIFY.
-
-    NOTIFY goes to both upper layer (L1) and Executor.
+    Single decide() call. L2 queries L3 via l2_query tool (in _call_llm tool loop).
+    RoundTree built via thread-local node stack bound to decide.
     """
 
     def __init__(self, knowledge, downstream: LayerManager | None = None,
                  upward=None, downward=None, auxiliary_llm=None,
-                 domain_registry=None, max_rounds=None, consol_ctx=None):
+                 domain_registry=None):
         super().__init__("l2", downstream, upward=upward, downward=downward)
         self._knowledge = knowledge
         self._agent = L2Agent(auxiliary_llm, knowledge, domain_registry=domain_registry) if auxiliary_llm else None
         self._registry = domain_registry
-        self._consol_ctx = consol_ctx
-        if max_rounds is None:
-            from core.config_loader import get_section
-            max_rounds = get_section('runtime', default={}).get('max_rounds_l2', 3)
-        self.max_rounds = max_rounds
         self._l2_notify: dict | None = None
         self._cards: list[dict] = []
-        self._l3_history: list[dict] = []
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -422,26 +369,31 @@ class L2Manager(LayerManager):
             logger.warning("L2Agent not initialized (no auxiliary_llm), skipping")
             self._cards = []
             self._l2_notify = {"reply": "", "cards": [], "reasoning": "no agent"}
-            self._propagate(obs, trace_id)
             return
 
         state = dict(obs.state) if obs and obs.state else {}
-        # Clear L3 history on new executor trace (no context_history in state)
-        if "context_history" not in state:
-            self._l3_history.clear()
         context: dict = {
             "selected_nodes": selected_nodes,
             "candidate_cards": [],
             "l3_results": [],
         }
 
+        from core.round_tree import DecisionNode, push_node, pop_node
+        l2_node = DecisionNode(layer="l2", query=query, result="", reasoning="")
+        push_node(l2_node)
+
+        logger.debug("── L2 decide ──")
         tools = self._agent._get_tools("l2") if self._agent else None
         result = self._agent.decide(
-            query=query, meta=meta, state=state,
+            query=query, meta=obs.meta, state=state,
             context=context, tools=tools, layer="l2",
         )
         logger.debug("  result: done=%s reply=%s",
                      result.get("done"), str(result.get("reply", ""))[:2000])
+
+        l2_node.result = result.get("reply", "")
+        l2_node.reasoning = result.get("reasoning", "")
+        pop_node()
 
         cards = result.get("selected_cards", [])
         self._cards = cards
@@ -450,58 +402,6 @@ class L2Manager(LayerManager):
             "cards": cards,
             "reasoning": result.get("reasoning", ""),
         }
-
-        # Cascade consolidation to L3
-        if "l2_output_format" in state and self._downstream and self._agent:
-            l3_notify_full = cascade_consolidation_to_l3(
-                self._downstream, meta, state, trace_id)
-            if l3_notify_full:
-                self._l2_notify["l3_modifications"] = \
-                    l3_notify_full.get("l3_modifications",
-                                       l3_notify_full.get("l3", {}).get("l3_modifications", []))
-
-        for q in result.get("queries_to_L3", []):
-            sub_obs = TaskObservation(
-                meta=q["task"],
-                state={
-                    **state, "domain": q.get("domain", ""),
-                    "context_history": list(self._l3_history),
-                },
-            )
-            self._propagate(sub_obs, trace_id)
-            l3_notify = self._downstream.collect_notify()
-            l3_result_text = ""
-            if isinstance(l3_notify, dict):
-                l3_part = l3_notify.get("l3", {})
-                if isinstance(l3_part, dict):
-                    l3_result_text = l3_part.get("result", "")
-            self._l3_history.append({
-                "query": q["task"][:200],
-                "reply": l3_result_text[:1000],
-            })
-
-        # Collect L3 children for RoundTree
-        if self._l2_notify and self._l3_history:
-            l3_children = []
-            for h in self._l3_history:
-                l3_children.append({
-                    "task": h.get("query", ""),
-                    "result": h.get("reply", ""),
-                })
-            self._l2_notify["_l3_children"] = l3_children
-
-    def _propagate(self, obs, trace_id: str, l3_task: str = "",
-                   selected_nodes: list[dict] | None = None) -> None:
-        if self._downstream:
-            enriched_state = dict(obs.state) if obs.state else {}
-            if l3_task:
-                enriched_state["l3_task"] = l3_task
-            if selected_nodes:
-                enriched_state["selected_nodes"] = selected_nodes
-            enriched_obs = TaskObservation(
-                meta=obs.meta, state=enriched_state, session=obs.session,
-            )
-            self._downstream.query(enriched_obs, trace_id=trace_id)
 
     def _build_cards(self, selected_nodes: list[dict]) -> list[dict]:
         """E3: build cards list locally, return value — no obs.state mutation."""
@@ -539,12 +439,7 @@ class L2Manager(LayerManager):
 
     def notify(self) -> Any:
         if self._l2_notify:
-            result = dict(self._l2_notify)
-            if self._consol_ctx:
-                mods = self._consol_ctx.drain_mods()
-                if mods:
-                    result["l2_modifications"] = mods
-            return result
+            return dict(self._l2_notify)
         return {"status": "ok", "layer": self.name}
 
 

@@ -4,8 +4,6 @@ import json, uuid, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-_consol_ctx = None
-
 from core.llm_factory import build_llm_client
 
 
@@ -15,8 +13,7 @@ def _now() -> str:
 
 def register_record_learning(registry, pending_dir: str = "data/learning/pending",
                               consol_ctx=None):
-    global _consol_ctx
-    _consol_ctx = consol_ctx
+    """Register record_learning tool. consol_ctx param kept for backward compat, unused."""
     registry.register("record_learning", {
         "type": "function",
         "function": {
@@ -135,17 +132,18 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
     _log.info("Auto-learning: archived %d files → %s", len(json_files), archive_dir)
 
     # 3. Get learning context
-    executor = _consol_ctx.executor if _consol_ctx else None
-    knowledge = {}
-    if _consol_ctx:
-        knowledge = _consol_ctx.knowledge_stores or {}
-        if not knowledge:
-            knowledge = {"l1": _consol_ctx.philosophy,
-                        "l2": _consol_ctx.knowledge,
-                        "l3": _consol_ctx.skill_layer}
+    from core.runtime_registry import get_executor
+    from core.tools.consolidation_injection import get_store
+    executor = get_executor()
+    knowledge = {
+        "l1": get_store("l1"),
+        "l2": get_store("l2"),
+        "l3": get_store("l3"),
+    }
+    knowledge = {k: v for k, v in knowledge.items() if v is not None}
 
     if not executor:
-        _log.warning("Auto-learning: no Executor in context, skipping")
+        _log.warning("Auto-learning: no Executor registered, skipping")
         return
 
     # 4. Create LearningEnv and build task

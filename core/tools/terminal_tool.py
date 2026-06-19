@@ -29,7 +29,7 @@ def _get_shell():
 
 
 def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
-    def handler(args=None, timeout=30):
+    def handler(args=None, timeout=300):
         command = (args or {}).get("command", "")
         effective_timeout = (args or {}).get("timeout", timeout) if args else timeout
         if not command:
@@ -38,8 +38,13 @@ def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
             return json.dumps({"error": f"Command not allowed: {command}"})
         try:
             shell = _get_shell()
-            result = subprocess.run(command, shell=True, executable=shell,
-                                    capture_output=True, text=True, timeout=effective_timeout)
+            if shell != "cmd":
+                cmd = f'"{shell}" -Command "{command}"'
+                result = subprocess.run(cmd, shell=False,
+                                        capture_output=True, text=True, timeout=effective_timeout)
+            else:
+                result = subprocess.run(command, shell=True,
+                                        capture_output=True, text=True, timeout=effective_timeout)
             return json.dumps({
                 "stdout": result.stdout,
                 "stderr": result.stderr,

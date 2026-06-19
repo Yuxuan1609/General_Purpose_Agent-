@@ -91,6 +91,36 @@ class LayerAgent(ABC):
         """Attach a LayerInjector for tool calling capability."""
         self._injector = injector
 
+    def _drain_pending_async(self, grace_seconds: float = 5.0):
+        """Wait briefly for pending async tasks to finish before exiting decide.
+
+        Prevents orphaned background tasks (e.g. web_search) from spewing logs
+        after the layer's final answer has been produced.
+        """
+        try:
+            from core.task_runner import get_task_runner
+            runner = get_task_runner()
+            pending = runner.pending_tasks()
+            if not pending:
+                return
+            self._log.debug("  ── draining %d pending async tasks (grace=%.0fs) ──",
+                           len(pending), grace_seconds)
+            runner.collect(pending)  # non-blocking, only returns completed
+            import time
+            deadline = time.time() + grace_seconds
+            while time.time() < deadline:
+                pending = runner.pending_tasks()
+                if not pending:
+                    break
+                time.sleep(0.2)
+                runner.collect(pending)
+            remaining = runner.pending_tasks()
+            if remaining:
+                self._log.debug("  ── %d async tasks still running after grace, abandoning ──",
+                               len(remaining))
+        except Exception:
+            pass
+
     def set_context(self, ctx) -> None:
         self._context = ctx
 
@@ -187,6 +217,7 @@ class LayerAgent(ABC):
                         self._log.debug("  ═══ capture tool '%s' (turn %d) ═══\n%s",
                                        tc.function.name, turn,
                                        _indent(tc.function.arguments, 4))
+                        self._drain_pending_async()
                         try:
                             parsed = json.loads(tc.function.arguments)
                             if isinstance(parsed, dict):
@@ -194,27 +225,68 @@ class LayerAgent(ABC):
                                 return parsed
                         except json.JSONDecodeError:
                             self._log.warning("capture_tool arguments not valid JSON")
+                        self._drain_pending_async()
                         return {"_raw": tc.function.arguments, "_capture_tool": tc.function.name}
                     executable_calls.append(tc)
 
                 if not executable_calls:
                     continue  # all calls were captured
 
-                # Split by sync param
+                # Split: downward comm tools force all sync tools to run inline (serial, main thread)
+                # to avoid concurrent layer chain traversal with other tool execution.
+                _DOWNWARD_TOOLS = {"l1_query", "l2_query"}
+                has_downward = any(tc.function.name in _DOWNWARD_TOOLS for tc in executable_calls)
+
+                if has_downward:
+                    # Serial inline — all tools run one-by-one on main thread
+                    for tc in executable_calls:
+                        try:
+                            raw_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        except json.JSONDecodeError:
+                            raw_args = {}
+                        if raw_args.get("sync", True):
+                            name = tc.function.name
+                            a = tc.function.arguments
+                            self._log.debug("  ├─ inline: %s(%s) id=%s", name, a[:400], tc.id)
+                            result = self._injector.execute_tool_call(layer, name, a)
+                            if result.success:
+                                result_content = result.data
+                            else:
+                                result_content = {"error": result.error}
+                            serialized = json.dumps(result_content, ensure_ascii=False)
+                            self._log.debug("  └─ inline result (id=%s): %s", tc.id, serialized[:500])
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": serialized,
+                            })
+                        else:
+                            name = tc.function.name
+                            args_json = tc.function.arguments
+                            self._log.debug("  ├─ async (deferred): %s(%s) id=%s",
+                                           name, args_json[:400], tc.id)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": json.dumps({
+                                    "task_id": "deferred", "status": "queued",
+                                    "note": "deferred until after chain call; use collect_tasks",
+                                }),
+                            })
+
+                # No downward comm — normal flow: split sync/async
                 sync_batch = []
                 async_calls = []
-                for tc in executable_calls:
-                    try:
-                        raw_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    except json.JSONDecodeError:
-                        raw_args = {}
-                    sync = raw_args.get("sync", True)
-                    if sync:
-                        sync_batch.append(tc)
-                    else:
-                        async_calls.append(tc)
-
-                # Process async calls — submit to TaskRunner
+                if not has_downward:
+                    for tc in executable_calls:
+                        try:
+                            raw_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        except json.JSONDecodeError:
+                            raw_args = {}
+                        if raw_args.get("sync", True):
+                            sync_batch.append(tc)
+                        else:
+                            async_calls.append(tc)
                 if async_calls:
                     from core.task_runner import get_task_runner
                     runner = get_task_runner()
@@ -240,7 +312,7 @@ class LayerAgent(ABC):
                     from core.task_runner import get_task_runner
                     runner = get_task_runner()
                     batch = []
-                    batch_timeout = 30
+                    batch_timeout = 300
                     for tc in sync_batch:
                         inj = self._injector
                         l = layer
@@ -300,6 +372,7 @@ class LayerAgent(ABC):
             text = resp.text if hasattr(resp, 'text') else str(resp)
             self._log.debug("  ── final answer (turn %d, messages=%d) ──\n%s",
                            turn, len(messages), _indent(text[:500], 4))
+            self._drain_pending_async()
 
             if capture_tools or schema is None:
                 return {"done": True, "reply": text, "result": text, "reasoning": "", "_raw": text}
@@ -321,6 +394,7 @@ class LayerAgent(ABC):
         # Max turns exceeded — give LLM one final chance to summarize from accumulated tool results
         self._log.warning("Max tool call turns (%d) exceeded, messages=%d — asking for summary",
                          self._max_tool_turns, len(messages))
+        self._drain_pending_async()
         try:
             messages.append({"role": "user", "content": "[系统] 你已达到工具调用次数上限，不可以再调用工具。请基于对话中已获取的信息，直接以纯文本形式给出最终答案。"})
             resp = self._llm.chat(messages=messages, json_mode=False, tools=None)
@@ -366,10 +440,10 @@ class LayerAgent(ABC):
 
     @abstractmethod
     def decide(self, **kwargs) -> dict:
-        """Single decision step for Manager while-loop.
+        """Single decision step — called once by Manager.query().
 
-        Each layer Agent implements this with its own schema.
-        Manager calls this in a while loop, checking `done` in return value.
+        Multi-turn behavior happens inside decide() via _call_llm tool loop
+        (MAX_TOOL_TURNS). Each layer Agent implements this with its own schema.
         """
         ...
 

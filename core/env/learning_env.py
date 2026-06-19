@@ -156,17 +156,6 @@ _L3_OUTPUT: dict = {
 }
 
 
-def _quality_kwargs(payload: dict) -> dict:
-    """Extract quality fields from a modification payload, only including set keys."""
-    kwargs = {}
-    for key in ("usefulness", "misleading"):
-        if key in payload:
-            kwargs[key] = int(payload[key])
-    if "comment" in payload:
-        kwargs["comment"] = str(payload["comment"])
-    return kwargs
-
-
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -239,88 +228,24 @@ class LearningEnv(Environment):
         return EnvState(observation=review["meta"])
 
     def step(self, action: str) -> EnvStep:
-        parsed = self._parse_notify_layers(action)
-        if not parsed:
-            self._step_count += 1
-            return EnvStep(
-                state=EnvState(observation="(no modifications parsed)"),
-                reward=0.0, done=True)
-        return self._apply_parsed_mods(parsed)
-
-    def apply_modifications(self, notify_layers: dict) -> EnvStep:
-        """Apply structured modifications from tool calls (consolidation).
-        notify_layers: {"l0_5_1": {...l1_modifications: [...]}, "l2": {...}, "l3": {...}}
-        """
-        parsed: dict = {
-            "l1_modifications": notify_layers.get("l0_5_1", {}).get("l1_modifications", []),
-            "l2_modifications": notify_layers.get("l2", {}).get("l2_modifications", []),
-            "l3_modifications": notify_layers.get("l3", {}).get("l3_modifications", []),
-        }
-        return self._apply_parsed_mods(parsed)
-
-    def _apply_parsed_mods(self, parsed: dict) -> EnvStep:
-
-        summary = {"l1": [], "l2": [], "l3": [], "errors": []}
-        feedback: dict[str, list[str]] = {"l1": [], "l2": [], "l3": []}
-        for layer_key in ("l1", "l2", "l3"):
-            mods = parsed.get(f"{layer_key}_modifications", [])
-            for mod in mods:
-                target = mod.get("target", "?")
-                mod_type = mod.get("type", "?")
-                try:
-                    if not self._dry_run:
-                        self._apply_layer_mod(layer_key, mod)
-                    summary[layer_key].append(target)
-                    feedback[layer_key].append(f"{mod_type} {target}: ok")
-                except Exception as e:
-                    summary["errors"].append(
-                        {"target": target, "error": str(e)})
-                    feedback[layer_key].append(f"{mod_type} {target}: REJECTED ({e})")
-                    logger.warning("Failed to apply %s mod: %s", layer_key, e)
-        self._layer_feedback = {
-            "l1": "\n".join(feedback["l1"]) if feedback["l1"] else "",
-            "l2": "\n".join(feedback["l2"]) if feedback["l2"] else "",
-            "l3": "\n".join(feedback["l3"]) if feedback["l3"] else "",
-        }
-        total = sum(len(v) for v in feedback.values())
-        ok_count = sum(1 for v in feedback.values() for x in v if x.endswith(": ok"))
-        rej_count = total - ok_count
-        mode = "dry-run (未实际应用)" if self._dry_run else "已应用"
-        self._shared_feedback = (
-            f"本次共 {total} 条修改 ({mode})：{ok_count} 成功"
-            + (f"，{rej_count} 被拒" if rej_count else "")
-        )
-
-        if not self._dry_run:
-            # Auto-refresh domain embeddings + correlations after learning round
-            if self._registry:
-                affected: set[str] = set()
-                for layer_key in ("l1", "l2", "l3"):
-                    for mod in parsed.get(f"{layer_key}_modifications", []):
-                        domain = mod.get("domain")
-                        if domain:
-                            affected.add(domain)
-                        # Also collect domains from create_target
-                        target = mod.get("target")
-                        if target and "/" in str(target):
-                            affected.add(str(target).split("/", 1)[0])
-                if affected:
-                    l2 = self._knowledge.get("l2")
-                    l3 = self._knowledge.get("l3")
-                    def _getter(layer, d):
-                        if layer == "l2" and l2:
-                            return [c.content for c in l2.cards if d in c.available_domains]
-                        if layer == "l3" and l3:
-                            return [m.description for n, m in l3._skills.items() if d in m.available_domains]
-                        return []
-                    self._registry.refresh_embeddings_for(list(affected), content_getter=_getter)
-                    self._registry.compute_all_correlations()
         self._step_count += 1
         self._done = True
-
+        self._shared_feedback = "学习轮次完成（修改由工具 handler 直接改库）"
+        self._layer_feedback = {"l1": "", "l2": "", "l3": ""}
         return EnvStep(
-            state=self._build_step_state(summary),
+            state=EnvState(observation=self._shared_feedback),
             reward=0.0, done=True)
+
+    def apply_modifications(self, notify_layers: dict) -> EnvStep:
+        self._step_count += 1
+        self._done = True
+        self._shared_feedback = "学习轮次完成（修改由工具 handler 直接改库）"
+        self._layer_feedback = {"l1": "", "l2": "", "l3": ""}
+        return EnvStep(
+            state=EnvState(observation=self._shared_feedback),
+            reward=0.0, done=True)
+
+    # ── observation building ────────────────────────────────────────────
 
     def build_task_observation(self) -> TaskObservation | None:
         if not self._current_observation:
@@ -658,189 +583,6 @@ class LearningEnv(Environment):
                 "step_index": 0,
                 "enable_learning": False,
             },
-        )
-
-    # ── notify parsing ──────────────────────────────────────────────────
-
-    def _parse_notify_layers(self, action: str) -> dict:
-        action = action.strip()
-
-        if not (action.startswith("{") or action.startswith("[")):
-            if self._pre_llm:
-                return self._parse_notify_llm(action)
-            logger.warning("Cannot parse action as JSON, no LLM fallback")
-            return {}
-
-        try:
-            parsed = json.loads(action)
-        except json.JSONDecodeError:
-            if self._pre_llm:
-                return self._parse_notify_llm(action)
-            logger.warning("Cannot parse action as JSON: %s", str(action)[:200])
-            return {"_parse_error": True}
-
-        if not isinstance(parsed, dict):
-            return {}
-
-        result = {}
-        l1_notify = parsed.get("l0_5_1", {})
-        if isinstance(l1_notify, dict):
-            result["l1_modifications"] = self._normalize_mods(
-                l1_notify.get("l1_modifications", []))
-
-        l2_notify = parsed.get("l2", {})
-        if isinstance(l2_notify, dict):
-            result["l2_modifications"] = self._normalize_mods(
-                l2_notify.get("l2_modifications", []))
-            result["_l2_cards_used"] = l2_notify.get("cards_used", [])
-
-        l3_notify = parsed.get("l3", {})
-        if isinstance(l3_notify, dict):
-            result["l3_modifications"] = self._normalize_mods(
-                l3_notify.get("l3_modifications", []))
-            result["_l3_skills_used"] = l3_notify.get("skills_used", [])
-
-        return result
-
-    @staticmethod
-    def _normalize_mods(raw) -> list[dict]:
-        if isinstance(raw, list):
-            return raw
-        return []
-
-    def _parse_notify_llm(self, text: str) -> dict:
-        prompt = (
-            "Extract per-layer modifications from the following analysis. "
-            "Output JSON with l1_modifications, l2_modifications, l3_modifications arrays.\n\n"
-            f"Analysis:\n{text}"
-        )
-        try:
-            resp = self._pre_llm.chat(
-                messages=[{"role": "user", "content": prompt}],
-                json_mode=True,
-            )
-            raw = resp.text if hasattr(resp, 'text') else str(resp)
-            parsed = json.loads(raw)
-            return {
-                "l1_modifications": self._normalize_mods(parsed.get("l1_modifications", [])),
-                "l2_modifications": self._normalize_mods(parsed.get("l2_modifications", [])),
-                "l3_modifications": self._normalize_mods(parsed.get("l3_modifications", [])),
-            }
-        except Exception as e:
-            logger.warning("LLM parse failed: %s", e)
-            return {"_parse_error": True, "_error": str(e)}
-
-    # ── apply ────────────────────────────────────────────────────────────
-
-    def _apply_layer_mod(self, layer: str, modification: dict) -> None:
-        target = modification.get("target", "")
-        mod_type = modification.get("type", "update")
-        payload = modification.get("payload", {})
-
-        if "/" not in target:
-            target = f"{layer}/{target}"
-        layer_prefix, key = target.split("/", 1)
-        if layer_prefix != layer:
-            raise ValueError(f"Target layer '{layer_prefix}' != mod layer '{layer}'")
-        if mod_type not in ("update", "create", "deprecate"):
-            raise ValueError(f"Unknown type: {mod_type}")
-
-        if layer == "l1":
-            self._apply_l1(mod_type, key, payload)
-        elif layer == "l2":
-            self._apply_l2(mod_type, key, payload)
-        elif layer == "l3":
-            self._apply_l3(mod_type, key, payload)
-
-    def _apply_l1(self, mod_type: str, rule_id: str, payload: dict) -> None:
-        store = self._knowledge.get("l1")
-        if store is None:
-            raise ValueError("L1 store not available")
-        content = payload.get("content", "")
-        from core.config_loader import get_section
-        max_rule_len = get_section('l1', default={}).get('max_rule_length', 300)
-        if len(content) > max_rule_len:
-            raise ValueError(f"Content too long: {len(content)} chars")
-        if mod_type == "create":
-            store.add_rule(content, created_by="learning_env", source="l1")
-        elif mod_type == "update":
-            store.modify_rule(rule_id, content)
-        elif mod_type == "deprecate":
-            store.remove_rule(rule_id)
-
-    def _apply_l2(self, mod_type: str, card_id: str, payload: dict) -> None:
-        store = self._knowledge.get("l2")
-        if store is None:
-            raise ValueError("L2 store not available")
-        content = payload.get("content", "")
-        from core.task import Domain
-        if mod_type == "create":
-            domain = payload.get("domain", "general")
-            store.add_card(content=content, domain=Domain(domain, "specific"),
-                           source="learning_env")
-        elif mod_type == "update":
-            kwargs = _quality_kwargs(payload)
-            result = store.modify_card(card_id, content or None, **kwargs)
-            if result is None:
-                raise ValueError(f"Card not found: {card_id}")
-            if "domain" in payload:
-                new_domain = payload["domain"]
-                if new_domain and new_domain != result.domain.path:
-                    if self._registry and self._registry.get_node(new_domain) is None:
-                        raise ValueError(f"Domain not found in registry: {new_domain}")
-                    result.domain = Domain(new_domain, "specific")
-                    result.available_domains = [new_domain]
-                    if self._registry:
-                        self._registry.update_item_domains("l2", card_id, [new_domain])
-        elif mod_type == "deprecate":
-            if not store.remove_card(card_id):
-                raise ValueError(f"Card not found: {card_id}")
-
-    def _apply_l3(self, mod_type: str, skill_name: str, payload: dict) -> None:
-        store = self._knowledge.get("l3")
-        if store is None:
-            raise ValueError("L3 store not available")
-        content = payload.get("content", "")
-        from core.task import Domain
-        if mod_type == "create":
-            domain = payload.get("domain", "general")
-            store.create_skill(name=skill_name, content=content,
-                               domain=Domain(domain, "specific"),
-                               created_by="learning_env")
-        elif mod_type == "update":
-            kwargs = _quality_kwargs(payload)
-            store.edit_skill(skill_name, content or None, **kwargs)
-            if "domain" in payload:
-                new_domain = payload["domain"]
-                if new_domain:
-                    if self._registry and self._registry.get_node(new_domain) is None:
-                        raise ValueError(f"Domain not found in registry: {new_domain}")
-                    meta = store._skills.get(skill_name)
-                    if meta:
-                        meta.domain = Domain(new_domain, "specific")
-                        meta.available_domains = [new_domain]
-                        if self._registry:
-                            self._registry.update_item_domains("l3", skill_name, [new_domain])
-        elif mod_type == "deprecate":
-            store.delete_skill(skill_name)
-
-    # ── observation building ────────────────────────────────────────────
-
-    def _build_step_state(self, summary: dict) -> EnvState:
-        parts = []
-        for layer in ("l1", "l2", "l3"):
-            items = summary.get(layer, [])
-            if items:
-                label = {"l1": "L1 rules", "l2": "L2 cards", "l3": "L3 skills"}
-                parts.append(f"{label[layer]}: " + ", ".join(str(i) for i in items))
-        if not parts:
-            parts.append("(no modifications)")
-        errors = summary.get("errors", [])
-        if errors:
-            parts.append(f"Errors: {len(errors)}")
-        return EnvState(
-            observation="\n".join(parts),
-            info={"step_count": self._step_count, "done": self._done},
         )
 
     def _build_learning_units(self, records: list[dict]) -> list[dict]:

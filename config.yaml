@@ -17,9 +17,6 @@ auxiliary_llm:
 
 # ── Runtime ──
 runtime:
-  max_rounds_l1: 5
-  max_rounds_l2: 3
-  max_rounds_l3: 3
   max_tool_turns: 5
   task_runner_workers: 8
 

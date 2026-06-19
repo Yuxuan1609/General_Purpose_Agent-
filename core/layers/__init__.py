@@ -9,30 +9,23 @@ from core.layers.l3.manager import L3Manager
 
 def build_chain(philosophy, flexible_knowledge, skill_layer,
                 auxiliary_llm=None, domain_registry=None,
-                knowledge_stores: dict | None = None,
-                consol_ctx=None) -> L0_5_1Manager:
+                knowledge_stores: dict | None = None) -> L0_5_1Manager:
     """Build the three-layer chain bottom-up.
 
     Each layer is wired with UpwardComm + DownwardComm for LayerMessage protocol.
     Returns the root (L0.5+1 Manager) which has L2 and L3 wired in.
     """
-    from core.config_loader import get_section
     from core.layers.comm import UpwardComm as CommUp, DownwardComm as CommDown
 
-    rt = get_section('runtime')
     l3 = L3Manager(skill_layer, upward=CommUp(), downward=CommDown(),
-                   auxiliary_llm=auxiliary_llm, domain_registry=domain_registry,
-                   max_rounds=rt.get('max_rounds_l3', 3), consol_ctx=consol_ctx)
+                   auxiliary_llm=auxiliary_llm, domain_registry=domain_registry)
     l2 = L2Manager(flexible_knowledge, downstream=l3,
                    upward=CommUp(), downward=CommDown(),
-                   auxiliary_llm=auxiliary_llm, domain_registry=domain_registry,
-                   max_rounds=rt.get('max_rounds_l2', 3), consol_ctx=consol_ctx)
+                   auxiliary_llm=auxiliary_llm, domain_registry=domain_registry)
     l1 = L0_5_1Manager(philosophy, auxiliary_llm=auxiliary_llm,
                         downstream=l2, upward=CommUp(), downward=CommDown(),
                         domain_registry=domain_registry,
-                        knowledge_stores=knowledge_stores,
-                        max_rounds=rt.get('max_rounds_l1', 5),
-                        consol_ctx=consol_ctx)
+                        knowledge_stores=knowledge_stores)
     return l1
 
 

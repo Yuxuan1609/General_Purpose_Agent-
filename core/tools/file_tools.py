@@ -187,7 +187,7 @@ def _grep_rg(search_dir: str, pattern: str, include: str) -> str:
         cmd.extend(["--glob", include])
 
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=30,
+        cmd, capture_output=True, text=True, timeout=300,
     )
     lines = result.stdout.strip().splitlines()[:50]
     return json.dumps({"matches": lines, "count": len(lines)}, ensure_ascii=False)

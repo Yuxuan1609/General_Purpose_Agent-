@@ -10,29 +10,6 @@ logger = logging.getLogger("l0_5_1")
 
 from core.layers.base import CaptureToolDef, ConsolidationStrategy
 
-L1_QUERY_TOOL = CaptureToolDef(
-    name="l1_query",
-    description="【特殊工具：向下查询】当需要下层L2的策略知识辅助决策时使用。"
-    "每次只提交一个问题，收到回复后再决定是否继续查询。禁止以文本方式直接回复！",
-    done=False,
-    schema={
-        "type": "object",
-        "properties": {
-            "done": {"type": "boolean", "const": False},
-            "queries": {
-                "type": "array", "maxItems": 1,
-                "items": {"type": "object", "properties": {
-                    "query": {"type": "string", "description": "向下层 L2 查询的问题"},
-                    "domains_hint": {"type": "array", "items": {"type": "string"},
-                                    "description": "建议查询的领域"},
-                }},
-            },
-            "reasoning": {"type": "string"},
-        },
-        "required": ["done", "queries", "reasoning"],
-    },
-)
-
 L1_REPORT_TOOL = CaptureToolDef(
     name="l1_report",
     description="【特殊工具：向上汇报】当你有了足够信息可以做出最终决策时使用。"
@@ -53,7 +30,7 @@ L1_REPORT_TOOL = CaptureToolDef(
 from core.tools.consolidation_tools import L1_CONSOLIDATION_TOOL_NAMES
 L1_CONSOLIDATION_STRATEGY = ConsolidationStrategy(
     consolidation_tool_names=L1_CONSOLIDATION_TOOL_NAMES,
-    allowed_base_tools={"kb_query", "ask_user"},
+    allowed_base_tools={"kb_query", "ask_user", "l1_query"},
     report_tool=L1_REPORT_TOOL,
 )
 
@@ -226,12 +203,12 @@ class L1Agent(LayerAgent):
                 "queries": [],
             }
 
-        # Normal mode: two capture tools
+        # Normal mode: single capture tool (l1_query is now a regular tool)
         base_tools = self._get_tools(layer) or []
-        all_tools = base_tools + [L1_QUERY_TOOL.to_openai_tool(), L1_REPORT_TOOL.to_openai_tool()]
+        all_tools = base_tools + [L1_REPORT_TOOL.to_openai_tool()]
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
-                                capture_tools={"l1_query", "l1_report"})
+                                capture_tools={"l1_report"})
         if not result.get("done"):
             raw = result.get("_raw") or result.get("result") or result.get("reply") or ""
             if raw:
@@ -242,31 +219,21 @@ class L1Agent(LayerAgent):
 class L0_5_1Manager(LayerManager):
     """L(0.5+1) Manager — wraps Philosophy + L1Agent.
 
-    Overrides query() to drive while-loop decide:
-      decide() → l1_query(向 L2 查询) / l1_report(done=true, NOTIFY) → 循环至 done 或 max_rounds
-
-    NOTIFY goes to both upper layer and Executor.
-    TODO: Content may differ per target.
+    Single decide() call. L1 queries L2 via l1_query tool (in _call_llm tool loop).
+    RoundTree built via thread-local node stack bound to decide.
     """
 
     def __init__(self, philosophy, auxiliary_llm=None,
                  downstream: LayerManager | None = None,
                  upward=None, downward=None,
-                 domain_registry=None, max_rounds=None,
-                 knowledge_stores: dict | None = None,
-                 consol_ctx=None):
+                 domain_registry=None,
+                 knowledge_stores: dict | None = None):
         super().__init__("l0_5_1", downstream, upward=upward, downward=downward)
         self._philosophy = philosophy
         self._agent = L1Agent(auxiliary_llm, philosophy, domain_registry,
                                knowledge_stores=knowledge_stores) if auxiliary_llm else None
         self._registry = domain_registry
-        self._consol_ctx = consol_ctx
-        if max_rounds is None:
-            from core.config_loader import get_section
-            max_rounds = get_section('runtime', default={}).get('max_rounds_l1', 5)
-        self.max_rounds = max_rounds
         self._l1_notify: dict | None = None
-        self._l2_history: list[dict] = []
 
     def process(self, data: Any) -> dict:
         return {"status": "ok", "layer": self.name}
@@ -281,162 +248,37 @@ class L0_5_1Manager(LayerManager):
             return
 
         state = dict(obs.state or {})
-        # Clear L2 history on new executor trace (no context_history in state means fresh input)
-        if "context_history" not in state:
-            self._l2_history.clear()
-        history: list[dict] = []
+        if self._registry:
+            state["domain_nodes"] = self._registry.list_all()
 
-        for round_idx in range(1, self.max_rounds + 1):
-            logger.debug("── L1 decide [round %d/%d] ──", round_idx, self.max_rounds)
+        from core.round_tree import DecisionNode, get_round_history, push_node, pop_node
+        l1_node = DecisionNode(layer="l0_5_1", query=meta, result="", reasoning="")
+        push_node(l1_node)
 
-            if self._registry:
-                state["domain_nodes"] = self._registry.list_all()
-
-            tools = self._agent._get_tools("l1") if self._agent else None
-            result = self._agent.decide(
-                meta=meta, state=state, history=history,
-                tools=tools, layer="l1",
-            )
-            logger.debug("  result: done=%s result=%s",
-                         result.get("done"), str(result.get("result", ""))[:2000])
-
-            if result.get("done"):
-                self._l1_notify = {
-                    "done": True,
-                    "result": result.get("result", ""),
-                    "reasoning": result.get("reasoning", ""),
-                }
-                # Build RoundTree node
-                from core.round_tree import DecisionNode, get_round_history
-                l1_node = DecisionNode(
-                    layer="l0_5_1",
-                    query=meta,
-                    result=self._l1_notify.get("result", ""),
-                    reasoning=self._l1_notify.get("reasoning", ""),
-                )
-                for h in self._l2_history:
-                    l2_data = h.get("l2_reply", {})
-                    l2_node = DecisionNode(
-                        layer="l2",
-                        query=str(h.get("query", "")),
-                        result=str(l2_data.get("reply", "")),
-                        reasoning=str(l2_data.get("reasoning", "")),
-                    )
-                    l3_children = l2_data.get("_l3_children", [])
-                    for l3 in l3_children:
-                        l2_node.children.append(DecisionNode(
-                            layer="l3",
-                            query=str(l3.get("task", "")),
-                            result=str(l3.get("result", "")),
-                        ))
-                    l1_node.children.append(l2_node)
-                get_round_history().push(l1_node)
-                # Cascade consolidation to L2/L3
-                if "l1_output_format" in state and self._downstream:
-                    cascade_obs = TaskObservation(
-                        meta=meta,
-                        state={
-                            **state,
-                            "context_history": [],
-                            "domains_hint": obs.session.get("domains_hint", [])
-                                if obs.session else [],
-                        },
-                        session={
-                            "domain": (obs.session.get("domains_hint", ["general"])[0]
-                                       if obs.session else "general"),
-                            "enable_learning": False,
-                        },
-                    )
-                    self._downstream.query(cascade_obs, trace_id)
-                    l2_notify = self._downstream.collect_notify()
-                    mods = []
-                    if isinstance(l2_notify, dict):
-                        mods = l2_notify.get("l2_modifications", [])
-                        l3_mods = l2_notify.get("l3_modifications", [])
-                        self._l1_notify["l3_modifications"] = l3_mods
-                    self._l1_notify["l2_modifications"] = mods
-                return
-
-            queries = result.get("queries", [])
-            if not queries:
-                self._l1_notify = {
-                    "done": True,
-                    "result": result.get("result", ""),
-                    "reasoning": result.get("reasoning", ""),
-                }
-                return
-
-            for q in queries:
-                sub_state = {
-                    **state,
-                    "query_context": q,
-                    "domains_hint": q.get("domains_hint", []),
-                    "context_history": list(self._l2_history),
-                }
-                sub_obs = TaskObservation(meta=q["query"], state=sub_state)
-                q_msg = self._downward.wrap_query(
-                    payload=sub_obs,
-                    source=self.name,
-                    target=self._downstream.name,
-                    trace_id=trace_id,
-                )
-                self._downstream.query(q_msg, trace_id)
-                l2_notify = self._downstream.collect_notify()
-                history.append({
-                    "round": round_idx,
-                    "query": q["query"],
-                    "l2_reply": l2_notify,
-                })
-                state[f"l2_round_{round_idx}"] = l2_notify
-                # Record L2 round into context history for next L2 call
-                l2_reply_text = ""
-                if isinstance(l2_notify, dict):
-                    l2_part = l2_notify.get("l2", {})
-                    if isinstance(l2_part, dict):
-                        l2_reply_text = l2_part.get("reply", "")
-                if not l2_reply_text:
-                    l2_reply_text = str(l2_notify)
-                self._l2_history.append({
-                    "query": q["query"][:200],
-                    "reply": l2_reply_text[:2000],
-                })
-
-        # Force terminate — inject accumulated L2 history so LLM has context
-        logger.debug("── L1 force terminate (max_rounds=%d) ──", self.max_rounds)
-        history_text = ""
-        if history:
-            lines = []
-            for h in history:
-                q_text = h.get("query", "")
-                l2_reply = h.get("l2_reply", {})
-                reply_text = ""
-                if isinstance(l2_reply, dict):
-                    l1_part = l2_reply.get("l0_5_1", {})
-                    if isinstance(l1_part, dict):
-                        reply_text = l1_part.get("reply", "")
-                if not reply_text:
-                    reply_text = str(l2_reply)
-                lines.append(f"查询: {q_text}\nL2回复: {reply_text[:50000]}")
-            history_text = "\n\n".join(lines)
-        user_text = (
-            f"鉴于已超过最大轮次，基于已有信息给出最终决策。\n\n"
-            f"[已完成的查询与回复]\n{history_text}" if history_text
-            else "鉴于已超过最大轮次，基于已有信息给出最终决策。"
+        logger.debug("── L1 decide ──")
+        tools = self._agent._get_tools("l1") if self._agent else None
+        result = self._agent.decide(
+            meta=meta, state=state, history=[],
+            tools=tools, layer="l1",
         )
-        force = self._agent._call_llm(
-            system=self._agent._build_system_prompt("force_terminate", meta),
-            user=user_text,
-            layer="l1",
-        )
-        force_result = force.get("result", "") or force.get("_raw", "") or str(force)
-        self._l1_notify = {"done": True, "result": force_result, "reasoning": "max_rounds"}
+        logger.debug("  result: done=%s result=%s",
+                     result.get("done"), str(result.get("result", ""))[:2000])
+
+        l1_node.result = result.get("result", "")
+        l1_node.reasoning = result.get("reasoning", "")
+        pop_node()
+        get_round_history().push(l1_node)
+
+        if self._registry:
+            self._registry.flush_correlations()
+
+        self._l1_notify = {
+            "done": True,
+            "result": result.get("result", ""),
+            "reasoning": result.get("reasoning", ""),
+        }
 
     def notify(self) -> Any:
         if self._l1_notify:
-            result = dict(self._l1_notify)
-            if self._consol_ctx:
-                mods = self._consol_ctx.drain_mods()
-                if mods:
-                    result["l1_modifications"] = mods
-            return result
+            return dict(self._l1_notify)
         return {"status": "ok", "layer": self.name}

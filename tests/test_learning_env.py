@@ -117,133 +117,34 @@ class TestLearningEnvReset:
 # ── tests: step (per-layer notify format) ───────────────────────────────
 
 class TestLearningEnvStep:
-    def test_step_with_l1_update(self, learning_env, mock_l1,
-                                 sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/rule_1", "type": "update",
-            "payload": {"content": "New rule"},
-        }])
-        step = learning_env.step(action)
-        assert "L1 rules" in step.state.observation
-        mock_l1.modify_rule.assert_called_once_with("rule_1", "New rule")
+    """Step is lightweight post-A: handlers directly modify stores; step just
+    bumps count and marks done. Application layer (_apply_*, _parse_*) deleted."""
 
-    def test_step_with_l1_create(self, learning_env, mock_l1,
-                                 sample_pending_records):
+    def test_step_marks_done(self, learning_env, sample_pending_records):
         learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/new_rule", "type": "create",
-            "payload": {"content": "New rule"},
-        }])
-        learning_env.step(action)
-        mock_l1.add_rule.assert_called_once_with(
-            "New rule", created_by="learning_env", source="l1")
-
-    def test_step_with_l1_deprecate(self, learning_env, mock_l1,
-                                    sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/rule_old", "type": "deprecate", "payload": {},
-        }])
-        learning_env.step(action)
-        mock_l1.remove_rule.assert_called_once_with("rule_old")
-
-    def test_step_with_l2_mods(self, learning_env, mock_l2,
-                               sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l2_mods=[
-            {"target": "l2/card_1", "type": "update",
-             "payload": {"content": "Updated"}},
-            {"target": "l2/new_card", "type": "create",
-             "payload": {"content": "New", "domain": "game/leduc", "confidence": 0.8}},
-        ])
-        learning_env.step(action)
-        mock_l2.modify_card.assert_called_once()
-        mock_l2.add_card.assert_called_once()
-
-    def test_step_with_l3_mods(self, learning_env, mock_l3,
-                               sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l3_mods=[
-            {"target": "l3/skill_a", "type": "update",
-             "payload": {"content": "# Updated skill"}},
-        ])
-        learning_env.step(action)
-        mock_l3.edit_skill.assert_called_once_with(
-            "skill_a", "# Updated skill")
-
-    def test_step_all_layers(self, learning_env, mock_l1, mock_l2, mock_l3,
-                             sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(
-            l1_mods=[{"target": "l1/r1", "type": "update",
-                       "payload": {"content": "r1"}}],
-            l2_mods=[{"target": "l2/c1", "type": "update",
-                       "payload": {"content": "c1"}}],
-            l3_mods=[{"target": "l3/s1", "type": "update",
-                       "payload": {"content": "# s1"}}],
-        )
-        step = learning_env.step(action)
-        assert "L1 rules" in step.state.observation
-        assert "L2 cards" in step.state.observation
-        assert "L3 skills" in step.state.observation
-        mock_l1.modify_rule.assert_called_once()
-        mock_l2.modify_card.assert_called_once()
-        mock_l3.edit_skill.assert_called_once()
-
-    def test_step_reward_always_zero(self, learning_env,
-                                     sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/r1", "type": "update",
-            "payload": {"content": "x"},
-        }])
-        step = learning_env.step(action)
-        assert step.reward == 0.0
-
-    def test_step_errors_captured(self, learning_env,
-                                  sample_pending_records, knowledge_stores):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/r1", "type": "unknown_type",
-            "payload": {"content": "x"},
-        }])
-        step = learning_env.step(action)
-        assert "Errors" in step.state.observation
-        assert step.reward == 0.0
+        step = learning_env.step('{"any": "json"}')
         assert step.done is True
 
-    def test_step_target_layer_mismatch(self, learning_env,
-                                        sample_pending_records):
+    def test_step_bumps_count(self, learning_env, sample_pending_records):
         learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l2/wrong_layer", "type": "update",
-            "payload": {"content": "x"},
-        }])
-        step = learning_env.step(action)
-        assert "Errors" in step.state.observation
+        assert learning_env._step_count == 0
+        learning_env.step('{}')
+        assert learning_env._step_count == 1
 
-    def test_step_empty_mods(self, learning_env, sample_pending_records):
+    def test_step_reward_always_zero(self, learning_env, sample_pending_records):
         learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[], l2_mods=[], l3_mods=[])
-        step = learning_env.step(action)
-        assert "(no modifications)" in step.state.observation
+        step = learning_env.step("any text")
+        assert step.reward == 0.0
 
-    def test_step_invalid_json_fallback(self, learning_env,
-                                        sample_pending_records):
+    def test_step_sets_feedback(self, learning_env, sample_pending_records):
         learning_env.reset("learn from leduc games")
-        step = learning_env.step("not json at all")
+        learning_env.step('{}')
+        assert learning_env._shared_feedback != ""
+
+    def test_apply_modifications_marks_done(self, learning_env, sample_pending_records):
+        learning_env.reset("learn from leduc games")
+        step = learning_env.apply_modifications({})
         assert step.done is True
-
-    def test_step_content_too_long_rejected(self, learning_env, mock_l1,
-                                            sample_pending_records):
-        learning_env.reset("learn from leduc games")
-        action = _make_action(l1_mods=[{
-            "target": "l1/r1", "type": "update",
-            "payload": {"content": "x" * 600},
-        }])
-        step = learning_env.step(action)
-        assert "Errors" in step.state.observation
 
 
 # ── tests: build_task_observation ───────────────────────────────────────

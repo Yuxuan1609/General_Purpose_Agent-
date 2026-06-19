@@ -157,39 +157,40 @@ def test_process_in_memory_empty():
 # ═══════════════════════════════════════════════════════════════════
 
 def test_learning_context_roundtrip():
-    """ConsolidationContext stores and returns same references."""
-    from core.tools.consolidation_tools import ConsolidationContext
+    """consolidation_injection stores and returns same references."""
+    from core.tools.consolidation_injection import set_consolidation_stores, get_store, get_registry
 
     tmp = _tmp()
     phil, fk, sl = _make_knowledge_stores(tmp)
-    mock_exec = MagicMock()
+    mock_reg = MagicMock()
 
-    ctx = ConsolidationContext(philosophy=phil, knowledge=fk, skill_layer=sl,
-                               executor=mock_exec)
+    set_consolidation_stores({"l1": phil, "l2": fk, "l3": sl}, registry=mock_reg)
 
-    assert ctx.executor is mock_exec
-    assert ctx.philosophy is phil
-    assert ctx.knowledge is fk
-    assert ctx.skill_layer is sl
+    assert get_registry() is mock_reg
+    assert get_store("l1") is phil
+    assert get_store("l2") is fk
+    assert get_store("l3") is sl
 
-    print("  PASS: ConsolidationContext — roundtrip OK")
+    print("  PASS: consolidation_injection — roundtrip OK")
 
 
 def test_learning_context_partial_update():
-    """ConsolidationContext.executor can be set after construction."""
+    """consolidation_injection stores persist after set_registry call."""
+    from core.tools.consolidation_injection import set_consolidation_stores, get_store, get_registry, set_registry
+
     tmp = _tmp()
     phil, fk, sl = _make_knowledge_stores(tmp)
 
-    from core.tools.consolidation_tools import ConsolidationContext
-    ctx = ConsolidationContext(philosophy=phil, knowledge=fk, skill_layer=sl)
-    assert ctx.executor is None
+    set_consolidation_stores({"l1": phil, "l2": fk, "l3": sl})
+    assert get_registry() is None
 
-    mock_exec = MagicMock()
-    ctx.executor = mock_exec
-    assert ctx.executor is mock_exec
-    assert ctx.philosophy is phil, "knowledge_stores should persist"
+    mock_reg = MagicMock()
+    set_registry(mock_reg)
+    assert get_registry() is mock_reg
+    assert get_store("l1") is phil, "knowledge_stores should persist"
+    assert get_store("l2") is fk
 
-    print("  PASS: ConsolidationContext — partial update preserves stores")
+    print("  PASS: consolidation_injection — partial update preserves stores")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -240,7 +241,8 @@ def test_build_and_save_below_threshold():
 def test_build_and_save_triggers_auto_learning():
     """Writing ≥5 files triggers archive + dispatch."""
     from core.tools.record_learning_tool import _build_and_save
-    from core.tools.consolidation_tools import ConsolidationContext
+    from core.runtime_registry import register_runtime
+    from core.tools.consolidation_injection import set_consolidation_stores
 
     tmp = _tmp()
     domain = f"{TEST_DOMAIN}_trigger"
@@ -257,11 +259,8 @@ def test_build_and_save_triggers_auto_learning():
             "l3": {"l3_modifications": [], "result": "ok"},
         }
     }
-    ctx = ConsolidationContext(philosophy=phil, knowledge=fk, skill_layer=sl,
-                                executor=mock_exec,
-                                knowledge_stores={"l1": phil, "l2": fk, "l3": sl})
-    import core.tools.record_learning_tool as rlt
-    rlt._consol_ctx = ctx
+    register_runtime(MagicMock(), mock_exec)
+    set_consolidation_stores({"l1": phil, "l2": fk, "l3": sl})
 
     import core.tools.record_learning_tool as rlt
     orig_path = rlt.Path
@@ -321,7 +320,8 @@ def test_dispatch_learning_skips_without_executor():
         json_files.append(fp)
 
     # Clear executor
-    rlt._consol_ctx = None
+    import core.runtime_registry as runtime_reg
+    runtime_reg._executor = None
 
     import core.tools.record_learning_tool as rlt
     orig_path = rlt.Path
@@ -438,7 +438,7 @@ def main():
     test_process_in_memory_structure()
     test_process_in_memory_empty()
 
-    print("\n=== ConsolidationContext ===")
+    print("\n=== consolidation_injection ===")
     test_learning_context_roundtrip()
     test_learning_context_partial_update()
 

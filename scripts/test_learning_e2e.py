@@ -184,7 +184,8 @@ def main():
             llm_client=llm,
             learning_dir=PROJECT_ROOT / "data" / "learning",
         )
-        chain._consol_ctx.executor = executor
+        from core.runtime_registry import register_runtime
+        register_runtime(chain, executor)
 
         task = lenv.build_task_observation()
         if task is None:

@@ -108,7 +108,8 @@ def _make_agent(
                 chain = layers
             executor = Executor(layer_root=chain, llm_client=llm_client,
                                 learning_dir=PROJECT_ROOT / "data" / "learning")
-            chain._consol_ctx.executor = executor
+            from core.runtime_registry import register_runtime
+            register_runtime(chain, executor)
             return DouZeroCognitiveAgent(executor=executor, position=position)
         else:
             from scripts.douzero_agent import DouZeroLLMAgent

@@ -29,10 +29,7 @@ class L1SQLiteStore:
                 source TEXT NOT NULL DEFAULT 'l1',
                 added_at TEXT NOT NULL,
                 version INTEGER NOT NULL DEFAULT 1,
-                last_modified TEXT NOT NULL,
-                usefulness INTEGER NOT NULL DEFAULT 0,
-                misleading INTEGER NOT NULL DEFAULT 0,
-                comment TEXT NOT NULL DEFAULT ''
+                last_modified TEXT NOT NULL
             )
         """)
         self._conn.commit()
@@ -40,9 +37,8 @@ class L1SQLiteStore:
     def insert(self, rule: dict) -> None:
         self._conn.execute("""
             INSERT OR REPLACE INTO l1_rules
-            (id, content, created_by, source, added_at, version, last_modified,
-             usefulness, misleading, comment)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, content, created_by, source, added_at, version, last_modified)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             rule["id"],
             rule["content"],
@@ -51,9 +47,6 @@ class L1SQLiteStore:
             rule.get("added_at", _now()),
             rule.get("version", 1),
             rule.get("last_modified", _now()),
-            rule.get("usefulness", 0),
-            rule.get("misleading", 0),
-            rule.get("comment", ""),
         ))
         self._conn.commit()
 

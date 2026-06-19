@@ -2,7 +2,7 @@
 from pathlib import Path
 
 
-def register_all_tools(registry, proposal_dir: Path | None = None, consol_ctx=None):
+def register_all_tools(registry, proposal_dir: Path | None = None):
     """Register all core tools onto the given ToolRegistry.
 
     Args:
@@ -28,12 +28,15 @@ def register_all_tools(registry, proposal_dir: Path | None = None, consol_ctx=No
     register_create_domain(registry)
     register_kb_tools(registry)
     register_async_tools(registry)
-    register_consolidation_tools(registry, ctx=consol_ctx)
+    register_consolidation_tools(registry)
     from core.tools.sysinfo_tool import register_sysinfo_tool
     register_sysinfo_tool(registry)
 
     from core.tools.record_learning_tool import register_record_learning
-    register_record_learning(registry, consol_ctx=consol_ctx)
+    register_record_learning(registry)
+
+    from core.tools.downward_comm_tool import register_downward_tools
+    register_downward_tools(registry)
 
     if proposal_dir:
         set_proposal_dir(proposal_dir)

@@ -1,12 +1,12 @@
 # Tool system configuration — allowlist, timeout, fallback
 # Priority: LLM arg timeout > tool config timeout > default_timeout
 
-default_timeout: 30
+default_timeout: 300
 
 tools:
   terminal:
     sync: true
-    timeout: 30
+    timeout: 300
     allowlist: [l1, l2, l3]
     fallback:
       max_retries: 2
@@ -231,6 +231,23 @@ tools:
     sync: true
     timeout: 10
     allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  # ── Downward comm tools ──
+  l1_query:
+    sync: true
+    timeout: 120
+    allowlist: [l1]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  l2_query:
+    sync: true
+    timeout: 120
+    allowlist: [l2]
     fallback:
       max_retries: 0
       degrade: []

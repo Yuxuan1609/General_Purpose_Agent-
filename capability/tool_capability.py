@@ -37,7 +37,7 @@ def _load_fallback_config(name: str) -> dict | None:
 
 def _get_tool_timeout(name: str) -> int:
     cfg = _load_tool_config()
-    default = cfg.get("default_timeout", 30)
+    default = cfg.get("default_timeout", 300)
     return cfg.get("tools", {}).get(name, {}).get("timeout", default)
 
 

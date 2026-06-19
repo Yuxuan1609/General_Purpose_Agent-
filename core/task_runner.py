@@ -63,7 +63,7 @@ class TaskRunner:
             task.status = "error"
             task.error = str(e)
 
-    def run_sync_batch(self, calls: list[dict], timeout: float = 30) -> list[dict]:
+    def run_sync_batch(self, calls: list[dict], timeout: float = 300) -> list[dict]:
         """Run multiple sync tool calls in parallel. Returns results in call order."""
         futures: dict[str, Future] = {}
         for c in calls:

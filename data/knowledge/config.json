@@ -10,9 +10,9 @@
   },
   "dimensions": 768,
   "backend": "numpy",
-  "offset": 2,
+  "offset": 3,
   "build": {
-    "create": "2026-06-18T01:06:50Z",
+    "create": "2026-06-18T08:58:05Z",
     "python": "3.13.14",
     "settings": {
       "numpy": "2.2.4"
@@ -20,6 +20,6 @@
     "system": "Windows (AMD64)",
     "txtai": "8.0.0-fork"
   },
-  "update": "2026-06-18T01:07:10Z",
+  "update": "2026-06-18T08:58:40Z",
   "autoid": 1
 }

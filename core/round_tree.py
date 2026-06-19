@@ -53,3 +53,30 @@ def get_round_history() -> RoundHistory:
     if _history is None:
         _history = RoundHistory()
     return _history
+
+
+# ── Thread-local node stack for RoundTree construction ──
+
+import threading
+
+_current_node_stack = threading.local()
+
+
+def current_node() -> DecisionNode | None:
+    stack = getattr(_current_node_stack, "stack", None)
+    return stack[-1] if stack else None
+
+
+def push_node(node: DecisionNode) -> None:
+    stack = getattr(_current_node_stack, "stack", None)
+    if stack is None:
+        stack = []
+        _current_node_stack.stack = stack
+    stack.append(node)
+
+
+def pop_node() -> DecisionNode | None:
+    stack = getattr(_current_node_stack, "stack", None)
+    if not stack:
+        return None
+    return stack.pop()

@@ -57,7 +57,7 @@ def _search_ddgs(query: str, max_results: int = 5) -> list[dict]:
 
 
 def register_web_search_tool(registry):
-    def handler(args=None, timeout=30):
+    def handler(args=None, timeout=300):
         query = (args or {}).get("query", "")
         if not query:
             return json.dumps({"error": "No query provided"})
@@ -124,7 +124,7 @@ def register_tavily_search_tool(registry):
     import os
     api_key = os.environ.get("TAVILY_API_KEY", "")
 
-    def handler(args=None, timeout=30):
+    def handler(args=None, timeout=300):
         query = (args or {}).get("query", "")
         if not query:
             return json.dumps({"error": "No query provided"})

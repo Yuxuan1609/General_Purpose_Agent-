@@ -47,17 +47,9 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
 
     knowledge_stores = {"l2": fk, "l3": sl}
 
-    from core.tools.consolidation_tools import ConsolidationContext
-    consol_ctx = ConsolidationContext(
-        philosophy=phil, knowledge=fk, skill_layer=sl,
-        domain_registry=reg, executor=None,
-        knowledge_stores={"l1": phil, "l2": fk, "l3": sl},
-    )
-
     chain = _build(phil, fk, sl, auxiliary_llm=auxiliary_llm,
-                    domain_registry=reg, knowledge_stores=knowledge_stores,
-                    consol_ctx=consol_ctx)
-    _mount_tools(chain, data_root, consol_ctx=consol_ctx)
+                    domain_registry=reg, knowledge_stores=knowledge_stores)
+    _mount_tools(chain, data_root)
 
     if env is not None:
         from core.agent_context import AgentContext
@@ -71,7 +63,7 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
     return chain
 
 
-def _mount_tools(chain, data_root: Path, consol_ctx=None):
+def _mount_tools(chain, data_root: Path):
     """Register all tools and attach LayerInjector to every layer."""
     from core.tools import register_all_tools
     from core.tools.registry import ToolRegistry
@@ -80,13 +72,34 @@ def _mount_tools(chain, data_root: Path, consol_ctx=None):
     from capability.layer_injector import LayerInjector
 
     registry = ToolRegistry()
-    register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals",
-                       consol_ctx=consol_ctx)
+    register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals")
+
     from core.tools.domain_tool import set_domain_registry
     for layer in _iter_layers(chain):
         if layer._registry:
             set_domain_registry(layer._registry)
             break
+
+    from core.tools.consolidation_injection import set_consolidation_stores
+    l2 = chain._downstream
+    l3 = l2._downstream if l2 else None
+    set_consolidation_stores(
+        {"l1": chain._philosophy,
+         "l2": l2._knowledge if l2 else None,
+         "l3": l3._skill_layer if l3 else None},
+        registry=chain._registry,
+    )
+
+    from core.tools.downward_comm_tool import set_layer_downstreams
+    downstream_map = {}
+    node = chain
+    while node is not None:
+        if node.name == "l0_5_1" and node._downstream:
+            downstream_map["l1_query"] = node._downstream
+        if node.name == "l2" and node._downstream:
+            downstream_map["l2_query"] = node._downstream
+        node = node._downstream
+    set_layer_downstreams(downstream_map)
 
     cap_registry = CapabilityRegistry()
     cap_registry.register(ToolCapability(registry))

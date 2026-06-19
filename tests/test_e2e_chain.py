@@ -199,10 +199,9 @@ class TestToolDispatch:
     def test_l3_has_consolidation_tools(self, wired_chain):
         """L3 consolidation tools are registered via ToolRegistry."""
         from core.tools.registry import ToolRegistry
-        from core.tools.consolidation_tools import register_consolidation_tools, ConsolidationContext
-        # Register consolidation tools (separate from core tools to avoid conflicts)
+        from core.tools.consolidation_tools import register_consolidation_tools
         reg = ToolRegistry()
-        register_consolidation_tools(reg, ctx=ConsolidationContext())
+        register_consolidation_tools(reg)
         defs = reg.get_definitions({"deprecate_l3_skill", "create_l3_skill",
                                       "modify_l3_skill"})
         names = [d["function"]["name"] for d in defs]
@@ -239,22 +238,22 @@ class TestToolDispatch:
         assert "task_id" in defs[0]["function"]["parameters"]["properties"]
 
     def test_consolidation_handler_factory(self, wired_chain):
-        """Verify consolidation handler records mods via ConsolidationContext."""
+        """Verify consolidation handler directly modifies store (no pending_mods)."""
         from core.tools.registry import ToolRegistry
-        from core.tools.consolidation_tools import register_consolidation_tools, ConsolidationContext
+        from core.tools.consolidation_tools import register_consolidation_tools
+        from core.tools.consolidation_injection import set_consolidation_stores
+        from unittest.mock import MagicMock
         reg = ToolRegistry()
-        ctx = ConsolidationContext()
-        register_consolidation_tools(reg, ctx=ctx)
+        mock_l1 = MagicMock()
+        set_consolidation_stores({"l1": mock_l1})
+        register_consolidation_tools(reg)
 
         result = reg.dispatch("deprecate_l1_rule",
                               {"rule_id": "r1", "reason": "test"}, timeout=10)
         parsed = json.loads(result)
-        assert parsed["recorded"] is True
-        mods = ctx.drain_mods()
-        assert len(mods) == 1
-        assert mods[0]["type"] == "deprecate"
-        assert mods[0]["target"] == "r1"
-        assert mods[0]["layer"] == "l1"
+        assert parsed["success"] is True
+        mock_l1.remove_rule.assert_called_once_with("r1")
+        set_consolidation_stores({})
 
 
 # ── Domain Routing Tests ──
@@ -279,56 +278,42 @@ class TestDomainRouting:
         assert nodes[0]["name"] == "game/leduc"
 
     def test_l2_to_l3_propagation_state(self, wired_chain):
-        """L2._propagate enriches L3 state with l3_task and selected_nodes."""
+        """L2.query propagates to L3 via l2_query tool (downward_comm_tool), not _propagate.
+        _propagate removed in decide-once model. L3 receives state through l2_query handler."""
         chain, _ = wired_chain
         l2 = chain._downstream
-        src_obs = TaskObservation(meta="test", state={"key": "val"},
-                                  session={"domain": "general"})
-        l2._downstream = Mock()  # intercept propagation
-
-        l2._propagate(src_obs, "tr", l3_task="do_x",
-                      selected_nodes=[{"name": "general", "score": 1.0}])
-
-        l2._downstream.query.assert_called_once()
-        call_obs = l2._downstream.query.call_args[0][0]
-        assert call_obs.state["l3_task"] == "do_x"
-        assert call_obs.state["selected_nodes"] == [{"name": "general", "score": 1.0}]
-        # original state preserved
-        assert call_obs.state["key"] == "val"
+        # _propagate no longer exists; l2_query tool handler calls downstream.query directly
+        assert not hasattr(l2, "_propagate")
 
 
 # ── Capture Tool Tests ──
 
 class TestCaptureTools:
     def test_l1_capture_tool_schemas(self):
-        from core.layers.l0_5_1.manager import L1_QUERY_TOOL, L1_REPORT_TOOL
-        t = L1_QUERY_TOOL.to_openai_tool()
-        assert t["function"]["name"] == "l1_query"
-        assert t["function"]["parameters"]["properties"]["done"]["const"] == False
+        from core.layers.l0_5_1.manager import L1_REPORT_TOOL
+        # L1_QUERY_TOOL removed — l1_query is now a regular ToolRegistry tool
         t = L1_REPORT_TOOL.to_openai_tool()
         assert t["function"]["name"] == "l1_report"
         assert t["function"]["parameters"]["properties"]["done"]["const"] == True
 
     def test_l2_capture_tool_schemas(self):
-        from core.layers.l2.manager import L2_QUERY_TOOL, L2_REPORT_TOOL
-        t = L2_QUERY_TOOL.to_openai_tool()
-        assert t["function"]["name"] == "l2_query"
-        assert "selected_nodes" in t["function"]["parameters"]["properties"]
+        from core.layers.l2.manager import L2_REPORT_TOOL
+        # L2_QUERY_TOOL removed — l2_query is now a regular ToolRegistry tool
         t = L2_REPORT_TOOL.to_openai_tool()
         assert t["function"]["name"] == "l2_report"
         assert "selected_cards" in t["function"]["parameters"]["properties"]
 
     def test_l3_capture_tool_schemas(self):
-        from core.layers.l3.manager import L3_CONTINUE_TOOL, L3_REPORT_TOOL
-        t = L3_CONTINUE_TOOL.to_openai_tool()
-        assert t["function"]["name"] == "l3_continue"
+        from core.layers.l3.manager import L3_REPORT_TOOL
+        # L3_CONTINUE_TOOL removed — multi-turn via tool loop, l3_report is sole exit
         t = L3_REPORT_TOOL.to_openai_tool()
         assert t["function"]["name"] == "l3_report"
         assert "skills_used" in t["function"]["parameters"]["properties"]
 
     def test_consolidation_strategy_l1(self):
         from core.layers.l0_5_1.manager import L1_CONSOLIDATION_STRATEGY
-        assert L1_CONSOLIDATION_STRATEGY.allowed_base_tools == {"kb_query", "ask_user"}
+        # l1_query added to allowed_base_tools for consolidation downward comm
+        assert L1_CONSOLIDATION_STRATEGY.allowed_base_tools == {"kb_query", "ask_user", "l1_query"}
         assert L1_CONSOLIDATION_STRATEGY.report_tool.name == "l1_report"
 
     def test_consolidation_strategy_l2(self):
@@ -343,32 +328,11 @@ class TestCaptureTools:
 # ── ConsolidationContext Tests ──
 
 class TestConsolidationContext:
-    def test_record_and_drain(self):
-        from core.tools.consolidation_tools import ConsolidationContext
-        ctx = ConsolidationContext()
-        ctx.record_mod({"type": "create", "target": "x", "layer": "l1"})
-        ctx.record_mod({"type": "deprecate", "target": "y", "layer": "l2"})
-        mods = ctx.drain_mods()
-        assert len(mods) == 2
-        assert mods[0]["type"] == "create"
-        assert mods[1]["type"] == "deprecate"
-        assert len(ctx.pending_mods) == 0, "drain should clear"
-
-    def test_drain_returns_copy(self):
-        from core.tools.consolidation_tools import ConsolidationContext
-        ctx = ConsolidationContext()
-        ctx.record_mod({"type": "create"})
-        mods = ctx.drain_mods()
-        mods.clear()
-        ctx.record_mod({"type": "deprecate"})
-        assert len(ctx.pending_mods) == 1, "drain returned reference that modified original"
-
-    def test_knowledge_stores(self):
-        from core.tools.consolidation_tools import ConsolidationContext
-        mock = Mock()
-        ctx = ConsolidationContext(philosophy=mock, knowledge_stores={"l1": mock})
-        assert ctx.philosophy is mock
-        assert ctx.knowledge_stores["l1"] is mock
+    """ConsolidationContext removed in A-4 — handlers now directly modify stores
+    via consolidation_injection. pending_mods side-channel deleted."""
+    def test_consolidation_context_removed(self):
+        from core.tools import consolidation_tools
+        assert not hasattr(consolidation_tools, "ConsolidationContext")
 
 
 # ── TODO: Real LLM Tests ──
