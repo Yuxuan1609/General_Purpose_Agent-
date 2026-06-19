@@ -231,7 +231,7 @@ def main():
         return gr.update(value=log_tail(log_dir, layer_choice, lines=50))
 
     # ── UI Layout ──
-    with gr.Blocks(title="Cognitive Agent", theme=gr.themes.Soft()) as app:
+    with gr.Blocks(title="Cognitive Agent") as app:
         session_state = gr.State(SessionState())
 
         gr.Markdown("# Cognitive Agent — 多 Session + 并行任务追踪")
@@ -338,14 +338,14 @@ def main():
         )
 
         # 定时刷新任务列表（每 3s）
-        app.load(
+        timer = gr.Timer(3.0)
+        timer.tick(
             lambda s: _refresh_task_list(s.session_id) if s.session_id else gr.update(),
             [session_state],
             [task_table],
-            every=3,
         )
 
-    app.launch(server_name="127.0.0.1", server_port=7860)
+    app.launch(server_name="127.0.0.1", server_port=7860, theme=gr.themes.Soft())
 
 
 if __name__ == "__main__":
