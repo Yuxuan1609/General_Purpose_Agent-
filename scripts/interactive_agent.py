@@ -35,23 +35,8 @@ def _setup_logging(log_dir: Path):
 
 
 def _setup_executor():
-    from core.env_loader import load_env
-    load_env(PROJECT_ROOT)
-
-    from core.llm_factory import build_llm_client
-    llm = build_llm_client(PROJECT_ROOT / "config.yaml")
-
-    from core.chain_factory import build_default_chain
-    chain = build_default_chain(PROJECT_ROOT, auxiliary_llm=llm, seed=False)
-
-    from core.executor import Executor
-    executor = Executor(
-        layer_root=chain,
-        llm_client=llm,
-        learning_dir=PROJECT_ROOT / "data" / "learning",
-    )
-    from core.runtime_registry import register_runtime
-    register_runtime(chain, executor)
+    from core.setup import setup_executor
+    chain, executor = setup_executor(PROJECT_ROOT)
     return executor
 
 

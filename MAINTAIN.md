@@ -85,6 +85,12 @@
 |----------|------|------|-----------|---------|
 | `build_llm_client` | `(config_path=None, model=None, temperature=0.1) → LLMClient` | 从 config.yaml + .env 构建 LLMClient。支持 thinking/thinking_effort 配置 | 脚本入口, record_learning_tool._fill_observations_llm | env_loader.load_env, LLMClient() |
 
+## core/setup.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `setup_executor` | `(project_root: Path\|None = None) → (chain, executor)` | 共享 setup：load_env → build_llm_client → build_default_chain(seed=False) → Executor → register_runtime。返回 (chain, executor)。project_root 缺省为 setup.py 所在目录的 parent | scripts/interactive_agent._setup_executor, scripts/gradio_app | load_env, build_llm_client, build_default_chain, Executor, register_runtime |
+
 ## core/config_loader.py
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
@@ -552,7 +558,7 @@
 |----------|------|------|-----------|---------|
 | `DEFAULT_SYSTEM_PROMPT` | `str` | 默认 system_prompt："你是一个智能助手…" | InteractionEnv 构造 | — |
 | `main` | `() → None` | CLI 交互式认知 Agent 入口（/new, /info, /quit） | 直接运行 | _setup_executor, InteractionEnv, Executor.execute |
-| `_setup_executor` | `() → Executor` | 构建 llm → chain → executor 并 register_runtime | main | build_llm_client, build_default_chain, register_runtime |
+| `_setup_executor` | `() → Executor` | 委托 `core.setup.setup_executor(PROJECT_ROOT)` 并返回 executor（chain 丢弃） | main | setup_executor |
 | `_show_notifies` | `(notify_layers: dict) → None` | 打印三层 NOTIFY payload（debug 模式） | main | — |
 
 ## capability/ — Phase 3 能力系统
