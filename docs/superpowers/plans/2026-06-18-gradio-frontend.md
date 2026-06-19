@@ -1,5 +1,9 @@
 # Gradio Frontend — Design Spec (v2)
 
+> **SUPERSEDED by v2:** 本文档已被 `docs/superpowers/specs/2026-06-19-gradio-frontend-v2-design.md` + `docs/superpowers/plans/2026-06-19-gradio-frontend-v2.md` 取代。
+> v2 增加多 session 持久化 + 单 session 多 task 并行追踪 + sub-agent 任务可见性 + SQLite store 线程安全修复。
+> 本文档保留作历史参考，请勿据此实现。
+
 > **For agentic workers:** Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
 **Goal:** 为 cognitive agent 添加 Gradio Web UI，提供交互式对话 + **三层决策循环实时可视化**。不改动核心 agent 逻辑，通过 `core/monitor.py`（新增聚合模块）统一读取各组件状态。
