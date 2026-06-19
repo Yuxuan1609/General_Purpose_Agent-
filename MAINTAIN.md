@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-20 | **Gradio App（Gradio v2 Task 7）**：新增 `scripts/gradio_app.py` — Gradio Web UI 入口，三栏布局（左：Session 列表持久化创建/切换/删除；中：当前 session 的任务列表+对话输入；右：选中 task 的 trace 详情 L1/L2/L3 决策树+子任务+层日志）。`SessionState` dataclass 持每浏览器会话 env/session_id/current_task_id/chat_history。`_setup_task_tracking` 订阅 TaskRunner 事件自动回写 SessionStore（sub-agent 完成无需轮询）。`chat()` 用 `set_task_context`/`clear_task_context`（try/finally）绑定 thread-local context 供 dispatch handler 关联子任务。`app.load(every=3)` 定时刷新任务列表。Gradio 4.x API（gr.Blocks/gr.State/gr.Dataframe）。无自动测试，仅 import + py_compile 验证。 |
 | 2026-06-20 | **Monitor 模块（Gradio v2 Task 6）**：新增 `core/monitor.py`——纯查询聚合模块，供 Gradio 前端展示。5 个公开函数 `snapshot`/`task_list`/`task_detail`/`log_tail`/`decision_tree` + 4 个内部 helper `_task_list`/`_capacity_snapshot`/`_learning_snapshot`/`_session_summary`。数据源：SessionStore（session/task 元数据）、per-layer 日志文件（`logs/interaction/{ts}/*.log`）、RoundTree.snapshot()（决策树）、chain 内部（L2/L3 capacity）。不修改任何状态，函数内 lazy import 避免循环依赖。MAINTAIN.md 中原计划版 monitor 章节（`StepTrace`/`_task_snapshot`/`_log_snapshot`）替换为实际实现（`StepTrace` 归属 gradio_app，由 Task 7 处理）。 |
 | 2026-06-20 | **SessionStore（Gradio v2 Task 4）**：新增 `core/session.py` — `SessionStore`（SQLite WAL 持久化 sessions + tasks 元数据）+ thread-local task context（`set_task_context`/`get_task_context`/`clear_task_context`）+ `get_session_store` 单例。sessions 表（id/name/created_at/status/log_dir/last_active_at），tasks 表（id/session_id/parent_task_id/type/tool_name/status/progress/trace_id/result_summary/created_at/updated_at，FK→sessions，idx_tasks_session/idx_tasks_parent 索引）。`mark_interrupted_on_startup` 崩溃恢复：status='running' 且 updated_at 超阈值的 task 标记为 'interrupted'。Gradio 前端用 sessions 管理用户工作区、用 tasks 关联顶层对话与子 agent dispatch。dispatch handler 通过 thread-local context 读取当前 session/task 无需参数透传。 |
 | 2026-06-20 | **TaskRunner 增强（Gradio v2 Task 3）**：`TaskState` 新增 `progress`/`metadata`/`cancelled` 字段。`TaskRunner.submit` 加 `metadata` 参数（可含 session_id/parent_task_id 供前端关联）。`TaskRunner.collect` 加 `keep_history=True` 默认值——默认保留历史不删除（旧行为 auto-remove 改由 `keep_history=False` 触发）。新增 `update_progress`/`subscribe`/`unsubscribe`/`list_tasks`/`cancel`（协作式取消）+ `_notify` 事件分发。`status()` 加 `cancelled` 计数。`get_task_runner` 标记 DEPRECATED（dispatch 改用 `get_shared_runner`，仅留测试隔离实例）。 |
@@ -847,3 +848,22 @@
 |-------|-------------|
 | `domain` (modify_l2_card) | Change card's domain assignment |
 | `domain` (modify_l3_skill) | Change skill's domain assignment |
+
+## scripts/gradio_app.py (Gradio v2 Task 7)
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `SessionState` | `@dataclass(env, session_id, session_name, current_task_id, chat_history)` | 每浏览器会话状态（Gradio State 每用户一份） | gr.State | — |
+| `DEFAULT_SYSTEM_PROMPT` | `str` | 默认 system_prompt（与 interactive_agent 同） | _create_env | — |
+| `main` | `() → None` | Gradio 入口：setup_executor → _setup_task_tracking → 构建 Blocks 三栏 UI → launch(127.0.0.1:7860) | 直接运行 | setup_executor, _setup_task_tracking, gr.Blocks, create_session/switch_session/delete_session/chat/select_task/refresh_log (closures) |
+| `_create_env` | `(system_prompt=DEFAULT_SYSTEM_PROMPT) → InteractionEnv` | 新建 InteractionEnv(debug=True, enable_learning=True) + reset("interaction") | create_session, switch_session | InteractionEnv |
+| `_setup_task_tracking` | `() → None` | 订阅 TaskRunner 事件 → SessionStore.update_task（sub-agent 完成自动回写，无需轮询）；启动时 mark_interrupted_on_startup 崩溃恢复 | main | get_session_store, get_shared_runner, SessionStore.mark_interrupted_on_startup/subscribe |
+| `_refresh_session_list` | `() → gr.update` | 查询 SessionStore.list_sessions → Dataframe rows [id,name,status,last_active] | create/switch/delete_session | SessionStore.list_sessions |
+| `_refresh_task_list` | `(session_id: str) → gr.update` | 查询 monitor.task_list → Dataframe rows [id前8,type标签,status,progress%,created_at] | create/switch/delete_session/chat, app.load | monitor.task_list |
+| `_refresh_trace` | `(session_id, task_id, log_dir="") → (gr.update, gr.update, gr.update)` | 构建 trace 面板：task_detail + 子任务列表 + 决策树轮数 + 层日志尾部 50 行 | create/switch/delete_session/chat/select_task | monitor.task_detail/task_list/decision_tree/log_tail |
+| `create_session` | `(name: str) → (state, session_df, task_df, trace_md, trace_json, log)` closure | 新建 SessionStore 记录 + per-layer logging + InteractionEnv → 返回新 SessionState | create_btn.click | SessionStore.create_session, setup_layer_logging, _create_env, _refresh_* |
+| `switch_session` | `(evt: SelectData, session_table, current_state) → 6-tuple` closure | 点击 session 行切换：重建 env + 刷新 task/trace | session_table.select | SessionStore.get_session, _create_env, _refresh_* |
+| `delete_session` | `(session_table, current_state) → 6-tuple` closure | 删除当前 session + 重置 state | delete_btn.click | SessionStore.delete_session, _refresh_* |
+| `chat` | `(user_input, state) → (state, msg, task_df, trace_md, trace_json, log)` closure | 注册 top task → set_task_context → executor.execute → clear_task_context(try/finally) → update_task done/error → env.step | msg.submit, send_btn.click | SessionStore.register_task/update_task/get_session, set_task_context/clear_task_context, executor.execute, env.receive_input/build_task_observation/step, _refresh_* |
+| `select_task` | `(evt: SelectData, task_table, state) → (state, trace_md, trace_json, log)` closure | 点击 task 行：短 id 匹配全 id → 刷新 trace | task_table.select | SessionStore.list_tasks/get_session, _refresh_trace |
+| `refresh_log` | `(log_dir, layer_choice) → gr.update` closure | 按选中层重读日志尾部 50 行 | log_refresh_btn.click | monitor.log_tail |
