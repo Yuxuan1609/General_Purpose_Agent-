@@ -98,8 +98,8 @@ class LayerAgent(ABC):
         after the layer's final answer has been produced.
         """
         try:
-            from core.task_runner import get_task_runner
-            runner = get_task_runner()
+            from core.task_runner import get_shared_runner
+            runner = get_shared_runner()
             pending = runner.pending_tasks()
             if not pending:
                 return
@@ -288,8 +288,8 @@ class LayerAgent(ABC):
                         else:
                             async_calls.append(tc)
                 if async_calls:
-                    from core.task_runner import get_task_runner
-                    runner = get_task_runner()
+                    from core.task_runner import get_shared_runner
+                    runner = get_shared_runner()
                     for tc in async_calls:
                         name = tc.function.name
                         args_json = tc.function.arguments
@@ -309,8 +309,8 @@ class LayerAgent(ABC):
 
                 # Process sync calls — parallel batch
                 if sync_batch:
-                    from core.task_runner import get_task_runner
-                    runner = get_task_runner()
+                    from core.task_runner import get_shared_runner
+                    runner = get_shared_runner()
                     batch = []
                     batch_timeout = 300
                     for tc in sync_batch:

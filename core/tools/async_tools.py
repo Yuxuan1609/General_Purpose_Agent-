@@ -45,8 +45,8 @@ def _check_task_handler(args: dict | None = None, **kwargs) -> str:
     task_id = (args or {}).get("task_id", "")
     if not task_id:
         return json.dumps({"error": "task_id required"})
-    from core.task_runner import get_task_runner
-    task = get_task_runner().check(task_id)
+    from core.task_runner import get_shared_runner
+    task = get_shared_runner().check(task_id)
     if task is None:
         return json.dumps({"error": f"Task not found: {task_id}"})
     return json.dumps({
@@ -60,8 +60,8 @@ def _collect_tasks_handler(args: dict | None = None, **kwargs) -> str:
     task_ids = (args or {}).get("task_ids", [])
     if not task_ids:
         return json.dumps({"results": [], "pending": []})
-    from core.task_runner import get_task_runner
-    runner = get_task_runner()
+    from core.task_runner import get_shared_runner
+    runner = get_shared_runner()
     results = runner.collect(task_ids)
     pending = runner.pending_tasks()
     return json.dumps({"results": results, "pending": pending})

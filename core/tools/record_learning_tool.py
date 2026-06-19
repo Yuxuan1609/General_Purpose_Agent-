@@ -53,8 +53,8 @@ def _record_learning_handler(args=None, **kwargs):
     def _run():
         return _build_and_save(domain, target, importance, reasoning)
 
-    from core.task_runner import get_task_runner
-    tid = get_task_runner().submit("record_learning", _run)
+    from core.task_runner import get_shared_runner
+    tid = get_shared_runner().submit("record_learning", _run)
     return json.dumps({"task_id": tid, "status": "running"})
 
 
@@ -98,8 +98,8 @@ def _check_auto_trigger(pending_path: Path, domain: str):
     if len(json_files) < 5:
         return
 
-    from core.task_runner import get_task_runner
-    get_task_runner().submit(
+    from core.task_runner import get_shared_runner
+    get_shared_runner().submit(
         "auto_learning", lambda d=domain, p=pending_path, files=json_files:
         _dispatch_learning(d, p, files))
 
