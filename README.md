@@ -435,6 +435,10 @@ cognitive-agent/
     seed_knowledge.py    # init_registry + seed_knowledge 初始数据
     domain_registry.py   # DomainNode + DomainRegistry（反向索引+embedding）
     task_runner.py       # 异步任务调度（ThreadPool + stats）
+    session.py           # SessionStore + thread-local task context
+    setup.py             # setup_executor 共享入口（CLI/Gradio 共用）
+    monitor.py           # 纯查询聚合模块（供 Gradio 前端展示）
+    runtime_registry.py  # 全局 chain+executor 注册
     json_repair.py       # robust_parse 多层容错 JSON 解析
     round_tree.py        # DecisionNode + RoundHistory 决策树快照
     env/                 # 环境抽象 (base.py, learning_env.py, interaction_env.py, threshold_scorer.py)
@@ -467,8 +471,9 @@ cognitive-agent/
     test_e2e_full.py          # E2E 全量测试（async dispatch + KB + learning）
     test_auto_learning.py     # auto-learning 管线测试
     test_consolidation_real.py# 真实 LLM consolidation 测试
+    gradio_app.py            # Gradio Web UI（多 session + 并行任务追踪）
   data/                  # 运行时数据
-  tests/                 # pytest (229 tests, 27 files)
+  tests/                 # pytest (289 tests, 37 files)
     fixtures/              #   Consolidation 测试数据
   docs/                  # 设计文档
 ```

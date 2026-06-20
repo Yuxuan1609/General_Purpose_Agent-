@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-20 | **测试覆盖评估**：新增 `TEST_COVERAGE.md` — 全量测试覆盖报告（pytest 289 tests + 15 E2E 脚本），记录模块-测试映射、覆盖缺口、多并发/异步/E2E 场景缺失。MAINTAIN.md 补：`LayerAgent.set_context`/`_drain_pending_async`、`TaskRunner.wait_all`/`shutdown`、修正 `_call_llm` 中 `MAX_TOOL_TURNS` 为 config 可配。README.md 补：`core/session|monitor|setup|runtime_registry.py` + `scripts/gradio_app.py`；更新测试数 (229→289)。
 | 2026-06-20 | **Gradio App（Gradio v2 Task 7）**：新增 `scripts/gradio_app.py` — Gradio Web UI 入口，三栏布局（左：Session 列表持久化创建/切换/删除；中：当前 session 的任务列表+对话输入；右：选中 task 的 trace 详情 L1/L2/L3 决策树+子任务+层日志）。`SessionState` dataclass 持每浏览器会话 env/session_id/current_task_id/chat_history。`_setup_task_tracking` 订阅 TaskRunner 事件自动回写 SessionStore（sub-agent 完成无需轮询）。`chat()` 用 `set_task_context`/`clear_task_context`（try/finally）绑定 thread-local context 供 dispatch handler 关联子任务。`app.load(every=3)` 定时刷新任务列表。Gradio 4.x API（gr.Blocks/gr.State/gr.Dataframe）。无自动测试，仅 import + py_compile 验证。 |
 | 2026-06-20 | **Monitor 模块（Gradio v2 Task 6）**：新增 `core/monitor.py`——纯查询聚合模块，供 Gradio 前端展示。5 个公开函数 `snapshot`/`task_list`/`task_detail`/`log_tail`/`decision_tree` + 4 个内部 helper `_task_list`/`_capacity_snapshot`/`_learning_snapshot`/`_session_summary`。数据源：SessionStore（session/task 元数据）、per-layer 日志文件（`logs/interaction/{ts}/*.log`）、RoundTree.snapshot()（决策树）、chain 内部（L2/L3 capacity）。不修改任何状态，函数内 lazy import 避免循环依赖。MAINTAIN.md 中原计划版 monitor 章节（`StepTrace`/`_task_snapshot`/`_log_snapshot`）替换为实际实现（`StepTrace` 归属 gradio_app，由 Task 7 处理）。 |
 | 2026-06-20 | **SessionStore（Gradio v2 Task 4）**：新增 `core/session.py` — `SessionStore`（SQLite WAL 持久化 sessions + tasks 元数据）+ thread-local task context（`set_task_context`/`get_task_context`/`clear_task_context`）+ `get_session_store` 单例。sessions 表（id/name/created_at/status/log_dir/last_active_at），tasks 表（id/session_id/parent_task_id/type/tool_name/status/progress/trace_id/result_summary/created_at/updated_at，FK→sessions，idx_tasks_session/idx_tasks_parent 索引）。`mark_interrupted_on_startup` 崩溃恢复：status='running' 且 updated_at 超阈值的 task 标记为 'interrupted'。Gradio 前端用 sessions 管理用户工作区、用 tasks 关联顶层对话与子 agent dispatch。dispatch handler 通过 thread-local context 读取当前 session/task 无需参数透传。 |
@@ -84,6 +85,8 @@
 | `TaskRunner.pending_tasks` | `() → list[str]` | List running task IDs | collect_tasks handler, _drain_async | — |
 | `TaskRunner.stats` | `() → dict` | Running statistics (count/success/error/duration) | — | — |
 | `TaskRunner.status` | `() → dict` | running/done/error/cancelled 计数 + by_tool 统计 | snapshot | — |
+| `TaskRunner.wait_all` | `(timeout=None) → None` | 阻塞等待所有 running 任务完成，超时抛 TimeoutError | test fixtures, E2E 脚本 | — |
+| `TaskRunner.shutdown` | `(wait=True) → None` | 关闭线程池 | 进程退出前 | ThreadPoolExecutor.shutdown() |
 | `get_shared_runner` | `() → TaskRunner` | 全局单例（复用同一 runner） | _call_llm, tool handlers, Gradio frontend | — |
 | `get_task_runner` | `() → TaskRunner` | 每次新建；dispatch 已弃用改用 get_shared_runner，仅留测试隔离实例 | test fixtures | — |
 
@@ -269,6 +272,8 @@
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义（已少用，CaptureToolDef.to_openai_tool() 替代） | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
 | `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
+| `LayerAgent.set_context` | `(ctx) → None` | 设置 AgentContext 用于 per-env 工具过滤（tool_policy） | chain_factory._mount_tools() | — |
+| `LayerAgent._drain_pending_async` | `(grace_seconds=5.0) → None` | 等待 pending async 任务完成再退出 decide，防止后台任务 produce 孤儿输出 | decide()（_call_llm 返回前调用） | TaskRunner.pending_tasks(), TaskRunner.collect() |
 | `LayerAgent.decide` | `(**kwargs) → dict` (abstract) | 单步决策，各层自行实现。Manager while 循环调用。 | Manager query() while 循环 | _call_llm(), CaptureToolDef.to_openai_tool() |
 | `CaptureToolDef` | `@dataclass(name, description, done, schema)` | 声明式 capture tool 定义。`to_openai_tool()` 转为 OpenAI 格式。 | L1/L2/L3 decide() (模块常量) | — |
 | `ConsolidationStrategy` | `__init__(consolidation_tool_names, allowed_base_tools, report_tool)` | 封装 consolidation 模式 tool 构建。`build_tools(agent, layer)` 返回 (all_tools, capture_set)。 | L1/L2/L3 decide() (模块常量) | ToolRegistry.get_definitions() |
@@ -630,7 +635,7 @@
 | 函数/类 | 签名 | 变化 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent.set_injector` | `(injector) → None` | **新增**，注入 LayerInjector | chain_factory._mount_tools() | — |
-| `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（MAX_TOOL_TURNS=5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id；async 分支有 thread-local context 时登记到 SessionStore | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), SessionStore.register_task (async branch, via get_task_context) |
+| `LayerAgent._call_llm` | `(system, user, schema, tools, layer, capture_tools) → dict` | **增强**：新增 `capture_tools` 参数；多轮 tool call 循环（`self._max_tool_turns`，从 config.yaml runtime.max_tool_turns 读取，默认 5）；tools 存在时自动禁用 json_mode；**sync/async dispatch**：按 tool_call args 中 `sync` 参数拆分为 sync_batch（run_sync_batch）和 async_calls（TaskRunner.submit），async 立即返回 task_id；async 分支有 thread-local context 时登记到 SessionStore | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), SessionStore.register_task (async branch, via get_task_context) |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | **新增**：JSON Schema → OpenAI function-calling tool 定义，供 capture_tools 模式使用。 | decide() | — |
 
 ## core/env/learning_env.py — Phase 3 更新
