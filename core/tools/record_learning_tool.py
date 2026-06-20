@@ -42,9 +42,7 @@ def _record_learning_handler(args=None, **kwargs):
     if not target:
         return json.dumps({"error": "learning_target required"})
 
-    from core.session import get_task_context
-    session_id, _ = get_task_context()
-    domain = session_id or "general"
+    domain = "interaction"
 
     if d.get("sync", False):
         record = _build_and_save(domain, target, importance, reasoning)
@@ -54,7 +52,7 @@ def _record_learning_handler(args=None, **kwargs):
         return _build_and_save(domain, target, importance, reasoning)
 
     from core.task_runner import get_shared_runner
-    from core.session import get_session_store
+    from core.session import get_task_context, get_session_store
     session_id, parent_task_id = get_task_context()
     metadata = {"session_id": session_id, "parent_task_id": parent_task_id}
     tid = get_shared_runner().submit("record_learning", _run, metadata=metadata)
