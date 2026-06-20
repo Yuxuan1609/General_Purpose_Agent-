@@ -271,36 +271,13 @@ def _kb_fill_gap_handler(args: dict | None = None, **kwargs) -> str:
         return json.dumps({"error": "domain and topic required"})
     try:
         from scripts.interactive_kb_agent import FillGapLoop
-        from core.knowledge.models import KnowledgeDoc
         kb = _get_kb()
         kb.load()
         llm = _get_llm()
         agent = FillGapLoop(llm, kb, trace=False)
         result = agent.run(suggestion)
-        proposals = result.get("proposals", [])
-        saved = []
-        for p in proposals:
-            try:
-                doc = KnowledgeDoc(
-                    domain=p.get("domain", domain),
-                    title=p.get("title", topic),
-                    content=p.get("content", ""),
-                    source="agent",
-                    meta={**(p.get("meta") or {}), "confidence": p.get("confidence", "low"),
-                          "sources": p.get("sources", [])},
-                )
-                ids = kb.add(doc)
-                saved.append({"title": doc.title, "ids": ids, "confidence": p.get("confidence")})
-            except Exception as e:
-                saved.append({"title": p.get("title", ""), "error": str(e)})
-        kb.save()
         kb.close()
-        return json.dumps({
-            "proposals": len(proposals),
-            "saved": len(saved),
-            "results": saved,
-            "raw": result,
-        }, ensure_ascii=False, default=str)
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         logger.exception("kb_fill_gap failed")
         return json.dumps({"error": str(e)})

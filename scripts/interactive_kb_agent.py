@@ -582,6 +582,24 @@ class FillGapLoop:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "kb_add",
+                "description": "Add a document to the knowledge base. Call this after researching and validating content.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {"type": "string"},
+                        "title": {"type": "string"},
+                        "content": {"type": "string"},
+                        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                        "meta": {"type": "object"},
+                    },
+                    "required": ["domain", "title", "content"],
+                },
+            },
+        },
         # ── External tools ──
         {
             "type": "function",
@@ -708,11 +726,12 @@ Step 2: 外部工具补充（**硬上限 5 轮**，每轮可多次调用 web_sea
 Step 3: 保底（仅 Step 2 仍不足时）
   ask_user(question) → 等待主 agent 收集用户回复后继续
 
-Step 4: 提案
-  调用 kb_fill_propose 提交研究结果
-  - 信息充足 → proposals 含 title/content/meta/confidence/sources
+Step 4: 提案 & 入库
+  研究完成后：
+  - 内容质量过关 → **直接调用 kb_add(domain, title, content, confidence, meta) 入库**
+  - 内容不确定 → 调用 kb_fill_propose 提交提案给主 agent 审查
   - 信息不够 → skipped 列出缺失项 + needs_ask_user 设置问题
-  - 你不会自动保存文档，主 agent 会审查提案后决定
+  - 也可以同时用 kb_add 存确信的 + kb_fill_propose 报不确定的
 
 规则：
 - 不确定的信息宁可 skipped 也不编造
@@ -816,6 +835,19 @@ Step 4: 提案
         if name == "kb_get":
             doc = self._kb.get(args.get("doc_id", ""))
             return {"status": "ok", "doc": doc.to_dict()} if doc else {"status": "not_found"}
+        if name == "kb_add":
+            from core.knowledge.models import KnowledgeDoc
+            doc = KnowledgeDoc(
+                domain=args.get("domain", ""),
+                title=args.get("title", ""),
+                content=args.get("content", ""),
+                source="agent",
+                meta={**(args.get("meta") or {}),
+                      "confidence": args.get("confidence", "low")},
+            )
+            ids = self._kb.add(doc)
+            self._kb.save()
+            return {"status": "ok", "ids": ids, "title": doc.title}
         if name == "web_search":
             from core.tools.web_search_tool import _search_searxng, _search_ddgs
             r = _search_searxng(**args)
