@@ -665,7 +665,7 @@ class FillGapLoop:
             "type": "function",
             "function": {
                 "name": "kb_fill_propose",
-                "description": "Submit fill proposals. Does NOT save anything — the main agent reviews and calls kb_add separately.",
+                "description": "Exit signal. Submit remaining unsaved proposals + skipped items. Use AFTER calling kb_add for quality content.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -714,39 +714,45 @@ class FillGapLoop:
 正例：成熟框架 API 用法、法律条文、已发布标准。
 反例：新闻、开发中项目信息、个人观点。
 
-4 步操作流程：
+操作流程：
 
 Step 1: KB 确认（≤2 轮）
   kb_search(topic) → kb_get(相关文档) → 准确理解缺口范围
 
-Step 2: 外部工具补充（**硬上限 5 轮**，每轮可多次调用 web_search/tavily_search/terminal）
+Step 2: 外部工具研究（**硬上限 5 轮**，每轮可多次调用 web_search/tavily_search/terminal）
   优先级：web_search > tavily_search > terminal
-  达到 5 轮上限后**必须**立即调用 kb_fill_propose，不得继续搜索
+  达到 5 轮上限后禁止继续搜索
 
-Step 3: 保底（仅 Step 2 仍不足时）
-  ask_user(question) → 等待主 agent 收集用户回复后继续
+Step 3: 存档
+  研究结果确认质量后 **必须调用 kb_add(domain, title, content, confidence, meta) 直接入库**
+  - 高置信度、有可靠来源 → kb_add
+  - 不确定或信息不足 → 不要调用 kb_add，改用 kb_fill_propose 的 proposals 或 skipped 报告
 
-Step 4: 提案 & 入库
-  研究完成后：
-  - 内容质量过关 → **直接调用 kb_add(domain, title, content, confidence, meta) 入库**
-  - 内容不确定 → 调用 kb_fill_propose 提交提案给主 agent 审查
-  - 信息不够 → skipped 列出缺失项 + needs_ask_user 设置问题
-  - 也可以同时用 kb_add 存确信的 + kb_fill_propose 报不确定的
+Step 4: 退出
+  **必须调用 kb_fill_propose 退出循环**
+  - proposals：无法直接 kb_add 的建议（低置信度/需审查）
+  - skipped：信息不足无法完成的研究项
+  - 不需要在 proposals 中重复已在 kb_add 中入库的内容
 
 规则：
-- 不确定的信息宁可 skipped 也不编造
-- 每个 proposal 必须标明 sources（来源 URL 或命令输出）
-- meta(type/level/tags) 必须完整
-- 外部工具调用次数在返回结果中标注，达到上限后禁止继续调用"""
+- 不确定的信息宁可 skipped 也不编造也不入库
+- kb_add 的 content 必须是完整可用的文档内容（markdown 格式）
+- meta 必须包含 type/tags/confidence/sources
+- 达到外部工具上限后禁止继续搜索，立即存档并退出
+- 禁止连续 2 轮以上纯文本回复（无 tool_call）——必须用工具"""
 
     def __init__(self, llm: LLMClient, kb: KnowledgeBase, trace: bool = False):
         self._llm = llm
         self._kb = kb
         self._trace = trace
         self._external_turns = 0
+        self._saved_count = 0
+        self._saved_titles: list[str] = []
 
     def run(self, suggestion: dict, user_context: str = "") -> dict:
         self._external_turns = 0
+        self._saved_count = 0
+        self._saved_titles = []
         domain = suggestion.get("domain", "")
         topic = suggestion.get("topic", "")
         reason = suggestion.get("reason", "")
@@ -804,7 +810,11 @@ Step 4: 提案 & 入库
                     print(f"  [fill turn {turn}] {name}(...)")
 
                 if name == "kb_fill_propose":
-                    return args
+                    return {
+                        **args,
+                        "saved_count": self._saved_count,
+                        "saved_titles": self._saved_titles,
+                    }
 
                 result = self._dispatch(name, args)
                 tool_results.append({
@@ -823,7 +833,8 @@ Step 4: 提案 & 入库
             })
             messages.extend(tool_results)
 
-        return {"proposals": [], "skipped": [{"topic": suggestion.get("topic", ""), "reason": "max_turns_exceeded"}]}
+        return {"proposals": [], "skipped": [{"topic": suggestion.get("topic", ""), "reason": "max_turns_exceeded"}],
+                "saved_count": self._saved_count, "saved_titles": self._saved_titles}
 
     def _dispatch(self, name: str, args: dict) -> dict:
         if name == "kb_search":
@@ -847,6 +858,8 @@ Step 4: 提案 & 入库
             )
             ids = self._kb.add(doc)
             self._kb.save()
+            self._saved_count += 1
+            self._saved_titles.append(doc.title)
             return {"status": "ok", "ids": ids, "title": doc.title}
         if name == "web_search":
             from core.tools.web_search_tool import _search_searxng, _search_ddgs
