@@ -239,7 +239,9 @@ class LayerAgent(ABC):
 
                 if has_downward:
                     # Serial inline — sync tools run one-by-one on main thread;
-                    # async tools dispatched to TaskRunner
+                    # async tools dispatched to TaskRunner.
+                    # Registry sync=True: always sync (agent override ignored).
+                    # Registry sync=False: agent's choice, default async.
                     from core.tools.registry import ToolRegistry as _ToolReg
                     for tc in executable_calls:
                         try:
@@ -247,7 +249,8 @@ class LayerAgent(ABC):
                         except json.JSONDecodeError:
                             raw_args = {}
                         _entry = _ToolReg()._entries.get(tc.function.name)
-                        if raw_args.get("sync", _entry.sync if _entry else True):
+                        _reg_sync = _entry.sync if _entry else True
+                        if _reg_sync or raw_args.get("sync", False):
                             name = tc.function.name
                             a = tc.function.arguments
                             self._log.debug("  ├─ inline: %s(%s) id=%s", name, a[:400], tc.id)
@@ -292,6 +295,8 @@ class LayerAgent(ABC):
                             })
 
                 # No downward comm — normal flow: split sync/async
+                # Registry sync=True: always sync (agent override ignored).
+                # Registry sync=False: agent's choice, default async.
                 sync_batch = []
                 async_calls = []
                 if not has_downward:
@@ -302,7 +307,8 @@ class LayerAgent(ABC):
                         except json.JSONDecodeError:
                             raw_args = {}
                         _entry = _ToolReg2()._entries.get(tc.function.name)
-                        if raw_args.get("sync", _entry.sync if _entry else True):
+                        _reg_sync = _entry.sync if _entry else True
+                        if _reg_sync or raw_args.get("sync", False):
                             sync_batch.append(tc)
                         else:
                             async_calls.append(tc)
