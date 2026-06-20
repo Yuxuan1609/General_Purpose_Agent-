@@ -204,7 +204,8 @@ def main():
             clear_task_context()
 
         env.step(reply)
-        state.chat_history.append((user_input, reply))
+        state.chat_history.append({"role": "user", "content": user_input})
+        state.chat_history.append({"role": "assistant", "content": reply})
         state.current_task_id = top_tid
 
         session = store.get_session(state.session_id) or {}
