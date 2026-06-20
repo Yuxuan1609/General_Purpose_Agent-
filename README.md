@@ -362,6 +362,8 @@ sync 是所有工具的通用参数（Agent 可逐次覆盖）：
 后端：TaskRunner（core/task_runner.py）— 线程池 + WAL 安全 task store + 运行统计。
 
 > **潜在升级点：** `TaskState.progress` 字段和 `check_task` 的 `progress` 返回值已就绪，但目前没有 handler 调用 `update_progress()`，运行中 task 始终显示 0%。后续可在 terminal（Popen 轮询中）、kb_fill_gap 等长耗时 handler 内定期上报进度，前端即可显示实时进度条。
+>
+> **潜在升级点：并行层链遍历（l1_query/l2_query）。** 当前 `_call_llm` 中 `has_downward` 分支强制串行执行所有工具调用——根因是三层 Manager（L0_5_1/L2/L3）的 `_notify` 状态存储在实例变量上（`self._l1_notify`/`_l2_notify`/`_l3_notify`），多线程并发 `query()` 会互相覆盖。建议方案：将 notify 状态改为 per-trace_id 存储（thread-local dict `{trace_id: notify_dict}`），`query()` 写、`notify()` 读用 trace_id 索引。改动涉及三层 Manager + LayerManager ABC + downward_comm handler。改完后多个 `l1_query` 可在 TaskRunner 池中并行执行，显著减少 L1→L2→L3 链式查询延迟。
 
 ## 学习记录（record_learning）
 
