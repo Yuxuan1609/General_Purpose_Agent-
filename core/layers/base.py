@@ -21,7 +21,6 @@ _TOOL_RULES = (
     "- check_task(task_id) 可查单个任务状态\n"
     "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
     "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
-    "- 必须立即拿到结果才能继续推理的工具（如 kb_query）必须 sync=true\n"
 )
 
 
@@ -248,7 +247,7 @@ class LayerAgent(ABC):
                         except json.JSONDecodeError:
                             raw_args = {}
                         _entry = _ToolReg()._entries.get(tc.function.name)
-                        if raw_args.get("sync", _entry.sync if _entry else True):
+                        if _entry and _entry.force_sync or raw_args.get("sync", _entry.sync if _entry else True):
                             name = tc.function.name
                             a = tc.function.arguments
                             self._log.debug("  ├─ inline: %s(%s) id=%s", name, a[:400], tc.id)
@@ -303,7 +302,7 @@ class LayerAgent(ABC):
                         except json.JSONDecodeError:
                             raw_args = {}
                         _entry = _ToolReg2()._entries.get(tc.function.name)
-                        if raw_args.get("sync", _entry.sync if _entry else True):
+                        if _entry and _entry.force_sync or raw_args.get("sync", _entry.sync if _entry else True):
                             sync_batch.append(tc)
                         else:
                             async_calls.append(tc)

@@ -11,6 +11,7 @@ class ToolEntry:
     schema: dict
     handler: Callable
     sync: bool = True
+    force_sync: bool = False
     check_fn: Callable | None = None
     toolset: str = "core"
     available_domains: list[str] = field(default_factory=list)
@@ -35,7 +36,8 @@ class ToolRegistry:
     def register(self, name: str, schema: dict, handler: Callable,
                  check_fn: Callable | None = None, toolset: str = "core",
                  available_domains: list[str] | None = None,
-                 override: bool = False, sync: bool = True):
+                 override: bool = False, sync: bool = True,
+                 force_sync: bool = False):
         if available_domains is None:
             available_domains = ["general"]
         with self._lock:
@@ -47,7 +49,7 @@ class ToolRegistry:
                 )
             tool = ToolEntry(
                 name=name, schema=schema, handler=handler,
-                sync=sync, check_fn=check_fn, toolset=toolset,
+                sync=sync, force_sync=force_sync, check_fn=check_fn, toolset=toolset,
                 available_domains=available_domains,
             )
             self._entries[name] = tool
