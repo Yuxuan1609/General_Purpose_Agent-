@@ -43,6 +43,16 @@ def clear_task_context() -> None:
     _context.task_id = None
 
 
+def set_running_task_id(task_id: str) -> None:
+    """Set the ID of the async task currently executing in this thread (for cancel polling)."""
+    _context.running_task_id = task_id
+
+
+def get_running_task_id() -> str | None:
+    """Return the ID of the currently executing async task, or None."""
+    return getattr(_context, 'running_task_id', None)
+
+
 # ── SessionStore ──
 class SessionStore:
     def __init__(self, db_path: Path | str = "data/cognitive/sessions.db"):

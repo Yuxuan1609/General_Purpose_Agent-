@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +40,41 @@ def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
         try:
             shell = _get_shell()
             if shell != "cmd":
-                cmd = f'"{shell}" -Command "{command}"'
-                result = subprocess.run(cmd, shell=False,
-                                        capture_output=True, text=True, timeout=effective_timeout)
+                cmd_list = [shell, "-Command", command]
+                proc = subprocess.Popen(
+                    cmd_list, shell=False,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
             else:
-                result = subprocess.run(command, shell=True,
-                                        capture_output=True, text=True, timeout=effective_timeout)
-            return json.dumps({
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "returncode": result.returncode,
-            })
+                proc = subprocess.Popen(
+                    command, shell=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                )
+
+            from core.task_runner import get_shared_runner
+            from core.session import get_running_task_id
+            task_id = get_running_task_id()
+            deadline = time.time() + effective_timeout
+
+            while True:
+                try:
+                    stdout, stderr = proc.communicate(timeout=0.5)
+                    return json.dumps({
+                        "stdout": stdout or "",
+                        "stderr": stderr or "",
+                        "returncode": proc.returncode,
+                    })
+                except subprocess.TimeoutExpired:
+                    if time.time() > deadline:
+                        proc.kill()
+                        proc.communicate(timeout=1)
+                        return json.dumps({"error": f"Command timed out ({effective_timeout}s)"})
+                    if task_id:
+                        task = get_shared_runner().check(task_id)
+                        if task and task.cancelled:
+                            proc.kill()
+                            proc.communicate(timeout=1)
+                            return json.dumps({"error": "cancelled"})
         except subprocess.TimeoutExpired:
             return json.dumps({"error": f"Command timed out ({effective_timeout}s)"})
         except Exception as e:
@@ -64,7 +89,7 @@ def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "Shell command to execute"},
-                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
+                    "sync": {"type": "boolean", "description": "false=fire-and-forget(default, returns task_id to collect later), true=blocking"},
                 },
                 "required": ["command"]
             }

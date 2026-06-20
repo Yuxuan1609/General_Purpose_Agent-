@@ -89,7 +89,7 @@ def register_kb_tools(registry):
                         "description": "Phase 1 已检索到的相关文档 ID",
                     },
                     "user_context": {"type": "string", "description": "用户补充的信息（仅在 ask_user 后重新调用时填写）"},
-                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
+                    "sync": {"type": "boolean", "description": "false=fire-and-forget(default, returns task_id to collect later), true=blocking"},
                 },
                 "required": ["domain", "topic"],
             },

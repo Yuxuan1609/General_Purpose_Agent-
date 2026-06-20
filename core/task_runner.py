@@ -48,6 +48,8 @@ class TaskRunner:
             if _ctx_session_id:
                 from core.session import set_task_context, clear_task_context
                 set_task_context(_ctx_session_id, _ctx_parent_task_id or "")
+            from core.session import set_running_task_id
+            set_running_task_id(task_id)
             start = time.time()
             try:
                 result = fn()

@@ -49,10 +49,19 @@ def _check_task_handler(args: dict | None = None, **kwargs) -> str:
     task = get_shared_runner().check(task_id)
     if task is None:
         return json.dumps({"error": f"Task not found: {task_id}"})
+    result_summary = None
+    if task.result is not None:
+        if hasattr(task.result, 'data') and task.result.data is not None:
+            data = task.result.data
+            result_summary = str(data)[:300] if data else None
+        else:
+            result_summary = str(task.result)[:300]
     return json.dumps({
         "task_id": task.task_id,
         "tool_name": task.tool_name,
         "status": task.status,
+        "progress": task.progress,
+        "result_summary": result_summary,
     })
 
 
