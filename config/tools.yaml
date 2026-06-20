@@ -222,7 +222,7 @@ tools:
   tool_proposal:
     sync: true
     timeout: 10
-    allowlist: [l2, l3]
+    allowlist: [l1, l2, l3]
     fallback:
       max_retries: 0
       degrade: []

@@ -227,7 +227,7 @@ python scripts/test_kb_io.py
 
 | 层 | 可见工具类别 |
 |----|---------|
-| L1 | terminal, kb_query, ask_user, create_domain, record_learning, l1 consolidation (3), query_domain, deprecate_domain, merge_domain, sysinfo, check_task, collect_tasks |
+| L1 | terminal, kb_query, ask_user, create_domain, record_learning, l1 consolidation (3), query_domain, deprecate_domain, merge_domain, tool_proposal, sysinfo, check_task, collect_tasks |
 | L2 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_fill_gap, l2 consolidation (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
 | L3 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_fill_gap, l3 consolidation (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
 
@@ -249,14 +249,9 @@ python scripts/test_kb_io.py
 - 实现方式：利用 `ToolRegistry.get_definitions()` + `AgentContext` 的 allowlist 过滤
 - 帮助 Agent 在 while-loop 中动态了解自身能力边界
 
-### 2. `tool_proposal` 改由 L1 接收
+### 2. `tool_proposal` 改由 L1 也可用
 
-**现状**：`tool_proposal` 在 `config/tools.yaml:225` 的 allowlist 为 `[l2, l3]`。
-
-**计划**：
-- 将 allowlist 改为 `[l1]`，使 L1 Agent 成为工具提案的唯一入口
-- L1 作为行为准则层，能从全局视角判断工具缺口，避免 L2/L3 各自提案导致碎片化
-- 提案结果仍为 `_proposal_dir` 持久化，人工审核流程不变
+**已完成**：allowlist 已改为 `[l1, l2, l3]`，L1/L2/L3 均可提案新工具。
 
 ### 3. 简化文件操作工具，改用 `terminal`
 
