@@ -4,8 +4,6 @@ import json, uuid, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.llm_factory import build_llm_client
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -19,19 +17,18 @@ def register_record_learning(registry, pending_dir: str = "data/learning/pending
         "function": {
             "name": "record_learning",
             "description": (
-                "记录值得学习的内容（仅L1可用）。提供 domain + learning_target + importance + reasoning。"
+                "记录值得学习的内容（仅L1可用）。提供 learning_target + importance + reasoning。"
                 "L2/L3的详细evidence由后台 sub-agent 自动补充后写入pending文件夹。默认异步(sync=false)，返回task_id。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "domain": {"type": "string", "description": "学习域，如'interaction'"},
                     "learning_target": {"type": "string", "description": "这次要学什么（一句话）"},
                     "importance": {"type": "string", "enum": ["high", "medium", "low"]},
                     "reasoning": {"type": "string", "description": "为什么认为这值得学习"},
                     "sync": {"type": "boolean", "description": "true=blocking, false=fire-and-forget(default)"},
                 },
-                "required": ["domain", "learning_target", "importance", "reasoning"],
+                "required": ["learning_target", "importance", "reasoning"],
             },
         },
     }, _record_learning_handler, toolset="core", sync=False)
@@ -39,12 +36,15 @@ def register_record_learning(registry, pending_dir: str = "data/learning/pending
 
 def _record_learning_handler(args=None, **kwargs):
     d = args or {}
-    domain = d.get("domain", "")
     target = d.get("learning_target", "")
     importance = d.get("importance", "medium")
     reasoning = d.get("reasoning", "")
-    if not domain or not target:
-        return json.dumps({"error": "domain and learning_target required"})
+    if not target:
+        return json.dumps({"error": "learning_target required"})
+
+    from core.session import get_task_context
+    session_id, _ = get_task_context()
+    domain = session_id or "general"
 
     if d.get("sync", False):
         record = _build_and_save(domain, target, importance, reasoning)
@@ -54,7 +54,7 @@ def _record_learning_handler(args=None, **kwargs):
         return _build_and_save(domain, target, importance, reasoning)
 
     from core.task_runner import get_shared_runner
-    from core.session import get_task_context, get_session_store
+    from core.session import get_session_store
     session_id, parent_task_id = get_task_context()
     metadata = {"session_id": session_id, "parent_task_id": parent_task_id}
     tid = get_shared_runner().submit("record_learning", _run, metadata=metadata)
@@ -86,10 +86,9 @@ def _build_and_save(domain, target, importance, reasoning):
         "recorded_at": _now(),
     }
 
-    # Fill L2/L3 via LLM sub-agent
     _fill_observations_llm(record, tree_nodes, target)
 
-    pending_path = Path("data/learning/pending") / domain.replace("/", "_")
+    pending_path = Path("data/learning/pending") / domain
     pending_path.mkdir(parents=True, exist_ok=True)
     stamp = _now().replace(":", "-")
     filepath = pending_path / f"{record['id']}_{stamp}.json"
@@ -287,7 +286,9 @@ def _format_tree_for_llm(nodes: list) -> str:
 
 
 def _fill_observations_llm(record: dict, tree_nodes: list, target: str):
-    """Use LLM to extract L2/L3 observations from RoundTree, with strict JSON mode."""
+    """Use LLM to extract L2/L3 observations from RoundTree, with strict JSON mode.
+    Reuses the executor's existing LLM client — no new client creation per call.
+    Raises on failure instead of silently writing empty record."""
     tree_text = _format_tree_for_llm(tree_nodes)
     if not tree_text.strip():
         return
@@ -299,22 +300,17 @@ def _fill_observations_llm(record: dict, tree_nodes: list, target: str):
         f"decision_tree:\n{tree_text}"
     )
 
-    try:
-        llm = build_llm_client(temperature=0.1)
-        messages = [
-            {"role": "system", "content": SUB_AGENT_PROMPT},
-            {"role": "user", "content": prompt},
-        ]
-        resp = llm.chat(messages=messages, json_mode=True)
-        text = resp.text if hasattr(resp, 'text') else str(resp)
-
-        try:
-            filled = json.loads(text)
-        except json.JSONDecodeError:
-            filled = {}
-
-        record["l2_observations"] = filled.get("l2_observations", [])
-        record["l3_observations"] = filled.get("l3_observations", [])
-    except Exception as e:
-        _log.warning("LLM unavailable for observation fill: %s", e)
-        record["_error"] = f"observation fill failed: {e}"
+    from core.runtime_registry import get_executor
+    executor = get_executor()
+    if executor is None:
+        raise RuntimeError("Executor not registered — cannot fill observations")
+    llm = executor._llm
+    messages = [
+        {"role": "system", "content": SUB_AGENT_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+    resp = llm.chat(messages=messages, json_mode=True)
+    text = resp.text if hasattr(resp, 'text') else str(resp)
+    filled = json.loads(text)
+    record["l2_observations"] = filled.get("l2_observations", [])
+    record["l3_observations"] = filled.get("l3_observations", [])
