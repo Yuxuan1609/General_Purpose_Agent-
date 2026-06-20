@@ -238,13 +238,16 @@ class LayerAgent(ABC):
                 has_downward = any(tc.function.name in _DOWNWARD_TOOLS for tc in executable_calls)
 
                 if has_downward:
-                    # Serial inline — all tools run one-by-one on main thread
+                    # Serial inline — sync tools run one-by-one on main thread;
+                    # async tools dispatched to TaskRunner
+                    from core.tools.registry import ToolRegistry as _ToolReg
                     for tc in executable_calls:
                         try:
                             raw_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                         except json.JSONDecodeError:
                             raw_args = {}
-                        if raw_args.get("sync", True):
+                        _entry = _ToolReg()._entries.get(tc.function.name)
+                        if raw_args.get("sync", _entry.sync if _entry else True):
                             name = tc.function.name
                             a = tc.function.arguments
                             self._log.debug("  ├─ inline: %s(%s) id=%s", name, a[:400], tc.id)
@@ -263,27 +266,43 @@ class LayerAgent(ABC):
                         else:
                             name = tc.function.name
                             args_json = tc.function.arguments
-                            self._log.debug("  ├─ async (deferred): %s(%s) id=%s",
+                            self._log.debug("  ├─ async (downward): %s(%s) id=%s",
                                            name, args_json[:400], tc.id)
+                            from core.task_runner import get_shared_runner
+                            from core.session import get_task_context, get_session_store
+                            _runner = get_shared_runner()
+                            _sid, _ptid = get_task_context()
+                            def _make_async_exec(_inj, _l, _n, _a):
+                                def _exec():
+                                    return _inj.execute_tool_call(_l, _n, _a)
+                                return _exec
+                            _exec_fn = _make_async_exec(self._injector, layer, name, args_json)
+                            _meta = {"session_id": _sid, "parent_task_id": _ptid}
+                            _tid = _runner.submit(name, _exec_fn, metadata=_meta)
+                            if _sid:
+                                try:
+                                    get_session_store().register_task(
+                                        _tid, _sid, name, parent_task_id=_ptid, tool_name=name)
+                                except Exception:
+                                    pass
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": json.dumps({
-                                    "task_id": "deferred", "status": "queued",
-                                    "note": "deferred until after chain call; use collect_tasks",
-                                }),
+                                "content": json.dumps({"task_id": _tid, "status": "running"}),
                             })
 
                 # No downward comm — normal flow: split sync/async
                 sync_batch = []
                 async_calls = []
                 if not has_downward:
+                    from core.tools.registry import ToolRegistry as _ToolReg2
                     for tc in executable_calls:
                         try:
                             raw_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                         except json.JSONDecodeError:
                             raw_args = {}
-                        if raw_args.get("sync", True):
+                        _entry = _ToolReg2()._entries.get(tc.function.name)
+                        if raw_args.get("sync", _entry.sync if _entry else True):
                             sync_batch.append(tc)
                         else:
                             async_calls.append(tc)

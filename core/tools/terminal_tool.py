@@ -69,4 +69,4 @@ def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
                 "required": ["command"]
             }
         }
-    }, handler, toolset="core")
+    }, handler, toolset="core", sync=False)

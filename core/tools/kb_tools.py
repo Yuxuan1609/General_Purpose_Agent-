@@ -98,7 +98,7 @@ def register_kb_tools(registry):
 
     registry.register("kb_query", _schema("kb_query"), _kb_query_handler, toolset="core")
     registry.register("kb_delete", _schema("kb_delete"), _kb_delete_handler, toolset="core")
-    registry.register("kb_fill_gap", _schema("kb_fill_gap"), _kb_fill_gap_handler, toolset="core")
+    registry.register("kb_fill_gap", _schema("kb_fill_gap"), _kb_fill_gap_handler, toolset="core", sync=False)
 
     _KB_SCHEMAS["ask_user"] = {
         "type": "function",
