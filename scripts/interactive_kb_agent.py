@@ -857,7 +857,6 @@ Step 4: 退出
                       "confidence": args.get("confidence", "low")},
             )
             ids = self._kb.add(doc)
-            self._kb.save()
             self._saved_count += 1
             self._saved_titles.append(doc.title)
             return {"status": "ok", "ids": ids, "title": doc.title}

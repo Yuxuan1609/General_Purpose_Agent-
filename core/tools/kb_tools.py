@@ -25,6 +25,9 @@ KB_STORAGE = "data/knowledge"
 
 _KB_SCHEMAS: dict[str, dict] = {}
 
+_kb_instance = None
+_kb_lock = __import__("threading").Lock()
+
 
 def _schema(name: str) -> dict:
     return _KB_SCHEMAS.get(name, {})
@@ -213,8 +216,14 @@ def _ask_user_console(question: str, timeout_msg: str) -> str:
 
 
 def _get_kb():
-    from core.knowledge.knowledge_base import KnowledgeBase
-    return KnowledgeBase(KB_STORAGE)
+    global _kb_instance
+    if _kb_instance is None:
+        with _kb_lock:
+            if _kb_instance is None:
+                from core.knowledge.knowledge_base import KnowledgeBase
+                _kb_instance = KnowledgeBase(KB_STORAGE)
+                _kb_instance.load()
+    return _kb_instance
 
 
 def _get_llm():
@@ -231,11 +240,9 @@ def _kb_query_handler(args: dict | None = None, **kwargs) -> str:
     try:
         from scripts.interactive_kb_agent import SubAgentLoop
         kb = _get_kb()
-        kb.load()
         llm = _get_llm()
         agent = SubAgentLoop(llm, kb, trace=False)
         result = agent.run(query, domain)
-        kb.close()
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         logger.exception("kb_query failed")
@@ -248,15 +255,13 @@ def _kb_delete_handler(args: dict | None = None, **kwargs) -> str:
         return json.dumps({"status": "error", "reason": "empty doc_id"})
     try:
         kb = _get_kb()
-        kb.load()
         doc = kb.get(doc_id)
         if doc is None:
-            kb.close()
             return json.dumps({"status": "not_found", "doc_id": doc_id})
         title = doc.title
         kb.delete(doc_id)
-        kb.save()
-        kb.close()
+        with _kb_lock:
+            kb.save()
         return json.dumps({"status": "ok", "doc_id": doc_id, "title": title}, ensure_ascii=False)
     except Exception as e:
         logger.exception("kb_delete failed")
@@ -272,11 +277,11 @@ def _kb_fill_gap_handler(args: dict | None = None, **kwargs) -> str:
     try:
         from scripts.interactive_kb_agent import FillGapLoop
         kb = _get_kb()
-        kb.load()
         llm = _get_llm()
         agent = FillGapLoop(llm, kb, trace=False)
         result = agent.run(suggestion)
-        kb.close()
+        with _kb_lock:
+            kb.save()
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         logger.exception("kb_fill_gap failed")
