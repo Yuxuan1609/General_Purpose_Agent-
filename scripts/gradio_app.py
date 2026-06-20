@@ -151,13 +151,15 @@ def main():
         return state, [], _refresh_session_list(), _refresh_task_list(s["id"]), *_refresh_trace(s["id"], "", log_dir)
 
     def switch_session(evt: gr.SelectData, session_table, current_state):
-        if evt.index[0] < 0 or not session_table:
+        if evt.index[0] < 0:
             return current_state, [], gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
-        row = session_table[evt.index[0]]
-        session_id = row[0]
         store = get_session_store()
+        sessions = store.list_sessions(include_closed=False)
+        if evt.index[0] >= len(sessions):
+            return current_state, [], gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        session_id = sessions[evt.index[0]]["id"]
         s = store.get_session(session_id)
-        if not s:
+        if s is None:
             return current_state, [], gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
         env = _create_env()
         new_state = SessionState(env=env, session_id=s["id"], session_name=s["name"])
@@ -214,16 +216,13 @@ def main():
                 *_refresh_trace(state.session_id, top_tid, log_dir))
 
     def select_task(evt: gr.SelectData, task_table, state: SessionState):
-        if evt.index[0] < 0 or not task_table:
+        if evt.index[0] < 0:
             return state, *_refresh_trace(state.session_id, "", "")
-        row = task_table[evt.index[0]]
-        task_id_short = row[0]
         store = get_session_store()
-        all_tasks = store.list_tasks(state.session_id)
-        matched = [t for t in all_tasks if t["id"].startswith(task_id_short)]
-        if not matched:
+        tasks = store.list_tasks(state.session_id)
+        if evt.index[0] >= len(tasks):
             return state, *_refresh_trace(state.session_id, "", "")
-        state.current_task_id = matched[0]["id"]
+        state.current_task_id = tasks[evt.index[0]]["id"]
         session = store.get_session(state.session_id) or {}
         return state, *_refresh_trace(state.session_id, state.current_task_id,
                                       session.get("log_dir", ""))
