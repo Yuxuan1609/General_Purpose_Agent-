@@ -216,6 +216,14 @@ def main():
             return state, state.chat_history, "", gr.update(), *_refresh_trace(
                 state.session_id, state.current_task_id,
                 (session or {}).get("log_dir", ""))
+        if user_input.strip() == "/quit":
+            state.chat_history.append({"role": "user", "content": "/quit"})
+            state.chat_history.append({"role": "assistant", "content": "会话已保存，Goodbye!"})
+            if state.session_id:
+                session = get_session_store().get_session(state.session_id) or {}
+                _save_chat_history(session.get("log_dir", ""), state.chat_history)
+            return state, state.chat_history, "", gr.update(), *_refresh_trace(
+                state.session_id, state.current_task_id, "")
         if not state.session_id:
             state, *_ = create_session("默认 Session")
 
