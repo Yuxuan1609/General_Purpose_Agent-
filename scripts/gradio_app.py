@@ -69,8 +69,32 @@ def _setup_task_tracking():
             )
         except Exception:
             pass
-
     get_shared_runner().subscribe(on_task_change)
+
+
+def _save_chat_history(log_dir: str, history: list) -> None:
+    if not log_dir or not history:
+        return
+    import json as _json
+    path = Path(log_dir) / "chat_history.json"
+    try:
+        path.write_text(_json.dumps(history, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _load_chat_history(log_dir: str) -> list:
+    if not log_dir:
+        return []
+    import json as _json
+    path = Path(log_dir) / "chat_history.json"
+    if not path.exists():
+        return []
+    try:
+        return _json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
 
 
 def _refresh_session_list():
@@ -169,7 +193,9 @@ def main():
             return current_state, [], gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
         env = _create_env()
         new_state = SessionState(env=env, session_id=s["id"], session_name=s["name"])
-        return (new_state, [], _refresh_session_list(), _refresh_task_list(s["id"]),
+        history = _load_chat_history(s.get("log_dir", ""))
+        new_state.chat_history = history
+        return (new_state, history, _refresh_session_list(), _refresh_task_list(s["id"]),
                 *_refresh_trace(s["id"], "", s.get("log_dir", "")))
 
     def delete_session(session_table, current_state):
@@ -218,6 +244,7 @@ def main():
 
         session = store.get_session(state.session_id) or {}
         log_dir = session.get("log_dir", "")
+        _save_chat_history(log_dir, state.chat_history)
         return (state, state.chat_history, "", _refresh_task_list(state.session_id),
                 *_refresh_trace(state.session_id, top_tid, log_dir))
 
@@ -342,6 +369,10 @@ def main():
             [session_state, layer_choice],
             [log_content],
         )
+
+        # 启动加载 session 列表 + 定时刷新
+        app.load(_refresh_session_list, None, [session_table])
+        gr.Timer(10.0).tick(_refresh_session_list, None, [session_table])
 
         # 定时刷新任务列表（每 3s）
         timer = gr.Timer(3.0)
