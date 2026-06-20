@@ -39,6 +39,11 @@ def setup_layer_logging(log_dir: Path):
         lg = logging.getLogger(lg_name)
         lg.setLevel(logging.DEBUG)
         lg.propagate = False
+        # Clear existing FileHandlers to avoid accumulation across session switches
+        for h in list(lg.handlers):
+            if isinstance(h, logging.FileHandler):
+                h.close()
+                lg.removeHandler(h)
         fh = logging.FileHandler(str(log_dir / f"{lg_name.replace('core.', '')}.log"),
                                  encoding="utf-8")
         fh.setLevel(logging.DEBUG)

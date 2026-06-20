@@ -191,6 +191,10 @@ def main():
         s = store.get_session(session_id)
         if s is None:
             return current_state, [], gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        log_dir = s.get("log_dir", "")
+        if log_dir:
+            from core.layers.logging_setup import setup_layer_logging
+            setup_layer_logging(Path(log_dir))
         env = _create_env()
         new_state = SessionState(env=env, session_id=s["id"], session_name=s["name"])
         history = _load_chat_history(s.get("log_dir", ""))
