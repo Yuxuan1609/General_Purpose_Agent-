@@ -366,6 +366,8 @@ sync 是所有工具的通用参数（Agent 可逐次覆盖）：
 
 后端：TaskRunner（core/task_runner.py）— 线程池 + WAL 安全 task store + 运行统计。
 
+> **潜在升级点：** `TaskState.progress` 字段和 `check_task` 的 `progress` 返回值已就绪，但目前没有 handler 调用 `update_progress()`，运行中 task 始终显示 0%。后续可在 terminal（Popen 轮询中）、kb_fill_gap 等长耗时 handler 内定期上报进度，前端即可显示实时进度条。
+
 ## 学习记录（record_learning）
 
 Agent 通过 record_learning 工具主动提案学习内容：
