@@ -55,11 +55,17 @@ def _setup_task_tracking():
 
     def on_task_change(task):
         try:
+            result_summary = None
+            if task.result is not None:
+                if hasattr(task.result, 'data') and task.result.data is not None:
+                    result_summary = str(task.result.data)[:500]
+                else:
+                    result_summary = str(task.result)[:500]
             store.update_task(
                 task.task_id,
                 status=task.status,
                 progress=task.progress,
-                result_summary=(str(task.result)[:500] if task.result else None),
+                result_summary=result_summary,
             )
         except Exception:
             pass
