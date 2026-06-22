@@ -8,9 +8,12 @@ Three-column layout:
 from __future__ import annotations
 import sys
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+warnings.filterwarnings("ignore", message=".*HTTP_422_UNPROCESSABLE_ENTITY.*", module="gradio.*")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
