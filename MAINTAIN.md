@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-22 | **次工具系统**：新增 `core/tools/secondary_tool.py` — `activate_secondary_tools` 工具（LLM subagent 筛选次工具池的 `semantic_description` → `ToolRegistry.enable_secondary()` 启用当前线程）。ToolEntry 新增 `tool_spec`（"primary"/"secondary"）+ `semantic_description` 字段；ToolRegistry 新增 thread-local `_enabled_secondary` + `enable_secondary`/`clear_secondary`/`_get_enabled_secondary` 方法；`get_definitions()` 按确定性逻辑过滤次工具（仅已启用返回）。删除死代码：`ToolEntry.available_domains` 字段、`register()` 中 DomainRegistry 索引块、`get_tools_for_domain()` 方法、`core/tools/domain_tool.py` 整个文件、`chain_factory.py` 中 `set_domain_registry` block。config/tools.yaml 新增 `activate_secondary_tools` 条目（allowlist [l1,l2,l3]）。 |
 | 2026-06-20 | **测试覆盖评估**：新增 `TEST_COVERAGE.md` — 全量测试覆盖报告（pytest 289 tests + 15 E2E 脚本），记录模块-测试映射、覆盖缺口、多并发/异步/E2E 场景缺失。MAINTAIN.md 补：`LayerAgent.set_context`/`_drain_pending_async`、`TaskRunner.wait_all`/`shutdown`、修正 `_call_llm` 中 `MAX_TOOL_TURNS` 为 config 可配。README.md 补：`core/session|monitor|setup|runtime_registry.py` + `scripts/gradio_app.py`；更新测试数 (229→289)。
 | 2026-06-20 | **Gradio App（Gradio v2 Task 7）**：新增 `scripts/gradio_app.py` — Gradio Web UI 入口，三栏布局（左：Session 列表持久化创建/切换/删除；中：当前 session 的任务列表+对话输入；右：选中 task 的 trace 详情 L1/L2/L3 决策树+子任务+层日志）。`SessionState` dataclass 持每浏览器会话 env/session_id/current_task_id/chat_history。`_setup_task_tracking` 订阅 TaskRunner 事件自动回写 SessionStore（sub-agent 完成无需轮询）。`chat()` 用 `set_task_context`/`clear_task_context`（try/finally）绑定 thread-local context 供 dispatch handler 关联子任务。`app.load(every=3)` 定时刷新任务列表。Gradio 4.x API（gr.Blocks/gr.State/gr.Dataframe）。无自动测试，仅 import + py_compile 验证。 |
 | 2026-06-20 | **Monitor 模块（Gradio v2 Task 6）**：新增 `core/monitor.py`——纯查询聚合模块，供 Gradio 前端展示。5 个公开函数 `snapshot`/`task_list`/`task_detail`/`log_tail`/`decision_tree` + 4 个内部 helper `_task_list`/`_capacity_snapshot`/`_learning_snapshot`/`_session_summary`。数据源：SessionStore（session/task 元数据）、per-layer 日志文件（`logs/interaction/{ts}/*.log`）、RoundTree.snapshot()（决策树）、chain 内部（L2/L3 capacity）。不修改任何状态，函数内 lazy import 避免循环依赖。MAINTAIN.md 中原计划版 monitor 章节（`StepTrace`/`_task_snapshot`/`_log_snapshot`）替换为实际实现（`StepTrace` 归属 gradio_app，由 Task 7 处理）。 |
@@ -46,13 +47,24 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `ToolEntry` | `@dataclass(name, schema, handler, tool_spec, semantic_description, sync, force_sync, check_fn, toolset)` | 工具条目数据类，含同步/异步标记及主/次工具规格 | ToolRegistry | — |
-| `ToolRegistry` | `__init__(domain_registry=None)` → singleton | 线程安全工具注册中心 | setup scripts, LayerAgent | — |
-| `ToolRegistry.register` | `(name, schema, handler, check_fn, toolset, override, sync, force_sync, tool_spec, semantic_description)` | 注册工具 | setup scripts | — |
-| `ToolRegistry.get_definitions` | `(requested=None) → list[dict]` | 获取所有可见工具的 OpenAI schema 列表 | Executor, LayerInjector | — |
+| `ToolEntry` | `@dataclass(name, schema, handler, tool_spec, semantic_description, sync, force_sync, check_fn, toolset)` | 工具条目数据类，含主/次标记及次工具语义描述 | ToolRegistry | — |
+| `ToolRegistry` | `__init__(domain_registry=None)` → singleton | 线程安全工具注册中心，支持主/次工具区分 + thread-local 次工具启用 | setup scripts, LayerAgent | — |
+| `ToolRegistry.register` | `(name, schema, handler, check_fn, toolset, override, sync, force_sync, tool_spec, semantic_description)` | 注册工具（主/次统一），次工具默认不可见 | setup scripts | — |
+| `ToolRegistry.get_definitions` | `(requested=None) → list[dict]` | 获取可见工具的 OpenAI schema 列表；次工具仅在当前线程已启用时返回 | Executor, LayerInjector | — |
 | `ToolRegistry.dispatch` | `(name, args, context=None, timeout=None) → str` | 按名分发工具调用 | ToolCapability | entry.handler() |
 | `ToolRegistry.deregister` | `(name)` | 注销工具 | — | — |
+| `ToolRegistry.enable_secondary` | `(names: list[str]) → int` | 将次工具加入当前线程的可用集，返回成功数 | activate_secondary_tools handler | — |
+| `ToolRegistry.clear_secondary` | `() → None` | 清空当前线程的次工具可用集（Gradio session 切换时调用） | session teardown | — |
 | `ToolRegistry.clear` | `()` | 重置所有条目（仅测试用） | test fixtures | — |
+
+## core/tools/secondary_tool.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_secondary_tool` | `(registry)` | 注册 activate_secondary_tools 工具（tool_spec="primary"，所有层可见） | register_all_tools() | ToolRegistry.register() |
+| `_activate_secondary_tools_handler` | `(args) → str` | 收集次工具 semantic_description → LLM subagent 筛选 → enable_secondary() → 返回启用列表 | ToolRegistry.dispatch | ToolRegistry.enable_secondary(), LLM.chat() |
+| `_get_llm` | `() → LLMClient` | 获取 LLM 实例（优先用 test 注入，其次 executor 的 llm，最后 build_llm_client） | _activate_secondary_tools_handler | runtime_registry.get_executor / build_llm_client |
+| `_set_llm_for_test` | `(llm) → None` | 测试用：注入 fake LLM 客户端 | test fixtures | — |
 
 ## core/tools/kb_tools.py
 

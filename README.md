@@ -224,6 +224,7 @@ python scripts/test_kb_io.py
 | `check_task`/`collect_tasks` | 异步任务状态查询/收割 | `core/tools/async_tools.py` |
 | `record_learning` | Agent 主动提案学习内容 | `core/tools/record_learning_tool.py` |
 | `l1_query`/`l2_query` | L1↔L2 / L2↔L3 向下通信 | `core/tools/downward_comm_tool.py` |
+| `activate_secondary_tools` | 搜索并激活次级工具（LLM subagent 筛选 + thread-local 启用） | `core/tools/secondary_tool.py` |
 | `consolidation CRUD` (9) | L1/L2/L3 知识整理 deprecate/create/modify | `core/tools/consolidation_tools.py` |
 | `knowledge_query` | 静态知识库语义搜索（KnowledgeCapability，需手动注册到 CapabilityRegistry） | `capability/knowledge_capability.py` |
 
@@ -231,11 +232,25 @@ python scripts/test_kb_io.py
 
 | 层 | 可见工具 |
 |----|---------|
-| L1 | terminal, kb_query, ask_user, create_domain, record_learning, deprecate/create/modify l1 rule (3), query_domain, deprecate_domain, merge_domain, tool_proposal, sysinfo, check_task, collect_tasks, l1_query |
-| L2 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_modify, kb_fill_gap, ask_user, record_learning, deprecate/create/modify l2 card (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks, l2_query |
-| L3 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_modify, kb_fill_gap, ask_user, deprecate/create/modify l3 skill (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
+| L1 | terminal, kb_query, ask_user, create_domain, record_learning, deprecate/create/modify l1 rule (3), query_domain, deprecate_domain, merge_domain, tool_proposal, sysinfo, check_task, collect_tasks, l1_query, activate_secondary_tools |
+| L2 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_modify, kb_fill_gap, ask_user, record_learning, deprecate/create/modify l2 card (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks, l2_query, activate_secondary_tools |
+| L3 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_modify, kb_fill_gap, ask_user, deprecate/create/modify l3 skill (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks, activate_secondary_tools |
 
 > 当 `tools` 注入时自动禁用 `json_mode`（DeepSeek 不兼容）。输出改用 `@modify` markup 格式或 tool call 原生格式。
+
+---
+
+## 次级工具系统
+
+主工具数量严格控制在 50 以内，保证 LLM 工具选择精度。次级工具（secondary tools）按场景需要懒加载：
+
+- **注册**：次工具和主工具统一注册到 `ToolRegistry`，仅 `tool_spec="secondary"` 区分
+- **默认不可见**：`get_definitions()` 过滤次工具，除非当前线程已启用
+- **Agent 自主发现**：Agent 调用 `activate_secondary_tools(query)` 工具，LLM subagent 扫描次工具池的 `semantic_description` 做匹配，匹配结果通过 `ToolRegistry.enable_secondary()` 注入当前线程
+- **Session 级隔离**：基于 `threading.local()`，CLI 线程终止自动清零，Gradio session 切换时显式 `clear_secondary()`
+- **层可见性**：次工具不区分 L1/L2/L3，对所有层平等可见，由 Agent prompt 和场景语义自然约束
+
+详见 [docs/superpowers/specs/2026-06-22-secondary-tools-design.md](docs/superpowers/specs/2026-06-22-secondary-tools-design.md)。
 
 ---
 
@@ -462,7 +477,6 @@ cognitive-agent/
       file_tools.py      # read_file + grep
       kb_tools.py        # kb_query / ask_user / kb_delete / kb_fill_gap
       async_tools.py     # check_task / collect_tasks
-      domain_tool.py     # L1 create_domain
       tool_proposal.py   # Agent 提案新工具
       sysinfo_tool.py    # 系统信息查询（os/hardware/env/network）
       consolidation_tools.py # 整理工具（9 CRUD handler 工厂化 + ConsolidationContext）
