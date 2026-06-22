@@ -241,6 +241,8 @@ class L2Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L2 知识卡片的修改。"
                 "使用整理工具记录修改，完成后调用 l2_report 输出结果。"
+                "\n要求：先调用 l2_query 向 L3 下发整理需求（如审查技能过时/重复/功能重叠等），"
+                "收到 L3 回复后汇总 L2+L3 结果输出。禁止在未查询 L3 的情况下直接 report。"
             )
 
         system = self._build_system_prompt(instruction, meta)

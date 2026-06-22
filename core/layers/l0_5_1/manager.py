@@ -147,6 +147,8 @@ class L1Agent(LayerAgent):
             instruction += (
                 "\n\n【整理任务】你只负责 L1 行为准则的修改。"
                 "使用整理工具记录修改，完成后调用 l1_report 输出结果。"
+                "\n要求：先调用 l1_query 向 L2 下发整理需求（如审查卡片过期/重复、技能冗余等），"
+                "收到 L2 回复后汇总 L1+L2 结果输出。禁止在未查询 L2 的情况下直接 report。"
             )
         else:
             instruction += (
