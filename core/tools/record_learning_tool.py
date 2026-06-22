@@ -1,8 +1,10 @@
 """record_learning tool — Agent proposes learnable content, sub-agent fills details."""
 from __future__ import annotations
-import json, uuid, tempfile
+import json, logging, uuid, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -63,7 +65,7 @@ def _record_learning_handler(args=None, **kwargs):
                 parent_task_id=parent_task_id, tool_name="record_learning",
             )
         except Exception:
-            pass
+            logger.exception("Failed to register record_learning task in session store")
     return json.dumps({"task_id": tid, "status": "running"})
 
 
@@ -120,7 +122,7 @@ def _check_auto_trigger(pending_path: Path, domain: str):
                 parent_task_id=parent_task_id, tool_name="auto_learning",
             )
         except Exception:
-            pass
+            logger.exception("Failed to register auto_learning task in session store")
 
 
 def _dispatch_learning(domain: str, pending_path: Path, json_files: list):

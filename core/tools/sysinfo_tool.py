@@ -52,10 +52,12 @@ def _get_network_info() -> dict:
     try:
         info["local_ip"] = socket.gethostbyname(socket.gethostname())
     except Exception:
+        logger.exception("Failed to resolve local IP")
         info["local_ip"] = "unavailable"
     try:
         info["fqdn"] = socket.getfqdn()
     except Exception:
+        logger.exception("Failed to resolve FQDN")
         info["fqdn"] = "unavailable"
     return info
 

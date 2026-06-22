@@ -10,6 +10,13 @@ allows dispatch handlers to know which session/task they belong to without
 explicit parameter passing.
 """
 from __future__ import annotations
+import logging
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 import sqlite3
 import threading
 import uuid
@@ -152,7 +159,8 @@ class SessionStore:
             return self._conn.total_changes > 0
 
     def close_session(self, session_id: str) -> None:
-        self.update_session(session_id, status="closed")
+        if not self.update_session(session_id, status="closed"):
+            logger.warning("close_session: session %s not found or already closed", session_id)
 
     def delete_session(self, session_id: str) -> None:
         with self._write_lock:

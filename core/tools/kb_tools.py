@@ -169,6 +169,7 @@ def _ask_user_handler(args: dict | None = None, **kwargs) -> str:
             root.destroy()
         return _ask_user_dialog(question, _TIMEOUT_MSG)
     except Exception:
+        logger.exception("tkinter ask_user failed, falling back to console")
         return _ask_user_console(question, _TIMEOUT_MSG)
 
 
@@ -216,9 +217,9 @@ def _ask_user_console(question: str, timeout_msg: str) -> str:
             if not done.is_set():
                 result[0] = response or "(no response)"
             done.set()
-        except Exception:
+        except Exception as e:
             if not done.is_set():
-                result[0] = "(input error)"
+                result[0] = f"(input error: {e})"
             done.set()
 
     t = threading.Thread(target=_read_input, daemon=True)
@@ -307,7 +308,8 @@ def _kb_modify_handler(args: dict | None = None, **kwargs) -> str:
                 fields[key] = val
         if not fields:
             return json.dumps({"status": "ok", "doc_id": doc_id, "note": "no fields to update"})
-        kb.update(doc_id, **fields)
+        if not kb.update(doc_id, **fields):
+            return json.dumps({"status": "not_found", "doc_id": doc_id})
         with _kb_lock:
             kb.save()
         return json.dumps({"status": "ok", "doc_id": doc_id, "updated": list(fields.keys())}, ensure_ascii=False)

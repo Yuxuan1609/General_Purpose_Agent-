@@ -35,9 +35,9 @@ def knowledge_update(kb, doc_id: str, content: str | None = None,
 
 
 def knowledge_delete(kb, doc_id: str) -> str:
-    kb.delete(doc_id)
+    ok = kb.delete(doc_id)
     kb.save()
-    return json.dumps({"status": "ok"}, ensure_ascii=False)
+    return json.dumps({"status": "ok" if ok else "not_found"}, ensure_ascii=False)
 
 
 def knowledge_get(kb, doc_id: str) -> str:

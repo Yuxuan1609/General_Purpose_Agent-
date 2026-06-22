@@ -9,8 +9,11 @@ Pure query module — does NOT modify any state. All data sourced from:
 - chain internals (L2/L3 capacity)
 """
 from __future__ import annotations
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def snapshot(session_id: str | None = None, chain=None,
@@ -48,6 +51,7 @@ def log_tail(log_dir: str, layer: str, lines: int = 50) -> str:
         with open(path, encoding="utf-8") as f:
             all_lines = f.readlines()
     except OSError:
+        logger.exception("Cannot read log file: %s", path)
         return ""
     return "".join(all_lines[-lines:])
 

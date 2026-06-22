@@ -119,7 +119,7 @@ class LayerAgent(ABC):
                 self._log.debug("  ── %d async tasks still running after grace, abandoning ──",
                                len(remaining))
         except Exception:
-            pass
+            self._log.exception("Failed to drain pending async tasks")
 
     def set_context(self, ctx) -> None:
         self._context = ctx
@@ -284,7 +284,7 @@ class LayerAgent(ABC):
                                     get_session_store().register_task(
                                         _tid, _sid, name, parent_task_id=_ptid, tool_name=name)
                                 except Exception:
-                                    pass
+                                    self._log.exception("Failed to register downward async task in session store")
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc.id,
@@ -330,7 +330,7 @@ class LayerAgent(ABC):
                                     parent_task_id=parent_task_id, tool_name=name,
                                 )
                             except Exception:
-                                pass
+                                self._log.exception("Failed to register async task in session store")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,

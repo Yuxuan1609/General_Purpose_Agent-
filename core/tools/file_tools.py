@@ -212,6 +212,7 @@ def _grep_python(search_dir: str, pattern: str, include: str) -> str:
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
         except Exception:
+            logger.warning("grep cannot read %s", f)
             continue
         for i, line in enumerate(text.splitlines(), 1):
             if compiled.search(line):

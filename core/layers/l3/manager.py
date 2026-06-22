@@ -243,6 +243,7 @@ class L3Manager(LayerManager):
             try:
                 domain = Domain(domain_path, "specific")
             except Exception:
+                logger.exception("Failed to construct Domain(%s), falling back to general", domain_path)
                 domain = Domain("general", "general")
             matched = self._skill_layer.match(domain)
             self._matched = [s.name for s in matched]

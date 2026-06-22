@@ -1,12 +1,15 @@
 # core/task_runner.py
 """Async task runner — thread pool + task lifecycle + stats + progress + events."""
 from __future__ import annotations
+import logging
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -97,7 +100,7 @@ class TaskRunner:
             try:
                 cb(task)
             except Exception:
-                pass
+                logger.exception("subscriber callback failed")
 
     def update_progress(self, task_id: str, progress: float) -> None:
         """Update progress (0-100) of a running task."""

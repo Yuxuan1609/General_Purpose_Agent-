@@ -311,6 +311,7 @@ class L2Agent(LayerAgent):
             try:
                 domain = Domain(name, "specific")
             except Exception:
+                logger.exception("Failed to construct Domain(%s), falling back to general", name)
                 domain = Domain("general", "general")
             all_cards.extend(self._knowledge.get_domain_cards(domain))
         return all_cards
@@ -415,6 +416,7 @@ class L2Manager(LayerManager):
             try:
                 domain = Domain(name, "specific")
             except Exception:
+                logger.exception("Failed to construct Domain(%s), skipping node", name)
                 continue
             cards.extend(self._knowledge.get_domain_cards(domain))
         return [

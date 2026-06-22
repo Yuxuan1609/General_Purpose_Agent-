@@ -9,14 +9,14 @@ logger = logging.getLogger(__name__)
 SEARXNG_URL = "http://localhost:8765/search?format=json"
 
 
-def _search_searxng(query: str, max_results: int = 5) -> list[dict] | None:
+def _search_searxng(query: str, max_results: int = 5, timeout: int = 10) -> list[dict] | None:
     """Search via self-hosted SearXNG instance."""
     try:
         url = f"{SEARXNG_URL}&q={urllib.request.quote(query)}"
         req = urllib.request.Request(
             url, headers={"User-Agent": "cognitive-agent/1.0"}
         )
-        data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        data = json.loads(urllib.request.urlopen(req, timeout=min(timeout, 30)).read())
         results = data.get("results", [])[:max_results]
         formatted = []
         for r in results:
@@ -63,7 +63,7 @@ def register_web_search_tool(registry):
             return json.dumps({"error": "No query provided"})
         max_results = int((args or {}).get("max_results", 5))
 
-        results = _search_searxng(query, max_results)
+        results = _search_searxng(query, max_results, timeout=timeout)
         if results is None:
             results = _search_ddgs(query, max_results)
 
