@@ -5,8 +5,10 @@ from core.tools.registry import ToolRegistry
 
 @pytest.fixture(autouse=True)
 def _clear_registry():
+    from core.tools.secondary_tool import _set_llm_for_test
     ToolRegistry().clear()
     ToolRegistry().clear_secondary()
+    _set_llm_for_test(None)
 
 
 class FakeLLMResponse:

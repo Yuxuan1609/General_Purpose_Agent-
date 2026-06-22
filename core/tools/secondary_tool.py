@@ -71,14 +71,15 @@ def _activate_secondary_tools_handler(args: dict | None = None, **kwargs) -> str
         resp = llm.chat(messages=messages, json_mode=True)
         text = resp.text if hasattr(resp, "text") else str(resp)
         parsed = json.loads(text)
-        matched_names = [t.get("name", "") for t in parsed.get("tools", [])]
+        matched_names = [t.get("name", "") for t in parsed.get("tools", [])][:top_k]
     except Exception as e:
         logger.warning("activate_secondary_tools LLM call failed: %s", e)
         return json.dumps({"error": str(e), "total_candidates": len(candidates)})
 
-    count = registry.enable_secondary(matched_names)
+    registry.enable_secondary(matched_names)
+    enabled_set = registry._get_enabled_secondary()
     return json.dumps({
-        "enabled": [n for n in matched_names if n],
+        "enabled": [n for n in matched_names if n and n in enabled_set],
         "total_candidates": len(candidates),
     }, ensure_ascii=False)
 
