@@ -72,6 +72,28 @@ def register_kb_tools(registry):
             },
         },
     }
+    _KB_SCHEMAS["kb_modify"] = {
+        "type": "function",
+        "function": {
+            "name": "kb_modify",
+            "description": (
+                "更新知识库文档的标题或内容。仅当确认文档有误时使用。"
+                "不填的字段保持不变。知识库仅保存低时效敏感、易于验证的客观信息。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {"type": "string", "description": "要更新的文档 ID"},
+                    "title": {"type": "string", "description": "新标题（不填则不变）"},
+                    "content": {"type": "string", "description": "新内容（不填则不变）"},
+                    "domain": {"type": "string", "description": "新 domain（不填则不变）"},
+                    "reason": {"type": "string", "description": "更新原因"},
+                    "sync": {"type": "boolean", "description": "true=blocking(default), false=fire-and-forget returns task_id"},
+                },
+                "required": ["doc_id"],
+            },
+        },
+    }
     _KB_SCHEMAS["kb_fill_gap"] = {
         "type": "function",
         "function": {
@@ -101,6 +123,7 @@ def register_kb_tools(registry):
 
     registry.register("kb_query", _schema("kb_query"), _kb_query_handler, toolset="core", force_sync=True)
     registry.register("kb_delete", _schema("kb_delete"), _kb_delete_handler, toolset="core")
+    registry.register("kb_modify", _schema("kb_modify"), _kb_modify_handler, toolset="core")
     registry.register("kb_fill_gap", _schema("kb_fill_gap"), _kb_fill_gap_handler, toolset="core", sync=False)
 
     _KB_SCHEMAS["ask_user"] = {
@@ -265,6 +288,31 @@ def _kb_delete_handler(args: dict | None = None, **kwargs) -> str:
         return json.dumps({"status": "ok", "doc_id": doc_id, "title": title}, ensure_ascii=False)
     except Exception as e:
         logger.exception("kb_delete failed")
+        return json.dumps({"status": "error", "reason": str(e)})
+
+
+def _kb_modify_handler(args: dict | None = None, **kwargs) -> str:
+    doc_id = (args or {}).get("doc_id", "")
+    if not doc_id:
+        return json.dumps({"status": "error", "reason": "empty doc_id"})
+    try:
+        kb = _get_kb()
+        doc = kb.get(doc_id)
+        if doc is None:
+            return json.dumps({"status": "not_found", "doc_id": doc_id})
+        fields = {}
+        for key in ("title", "content", "domain", "content_type"):
+            val = (args or {}).get(key)
+            if val is not None and val != "":
+                fields[key] = val
+        if not fields:
+            return json.dumps({"status": "ok", "doc_id": doc_id, "note": "no fields to update"})
+        kb.update(doc_id, **fields)
+        with _kb_lock:
+            kb.save()
+        return json.dumps({"status": "ok", "doc_id": doc_id, "updated": list(fields.keys())}, ensure_ascii=False)
+    except Exception as e:
+        logger.exception("kb_modify failed")
         return json.dumps({"status": "error", "reason": str(e)})
 
 

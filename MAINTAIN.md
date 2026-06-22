@@ -20,6 +20,7 @@
 | 2026-06-20 | **setup_executor 提取（Gradio v2 Task 0）**：新增 `core/setup.py` — `setup_executor(project_root=None) → (chain, executor)`，一次性构建 llm→chain→executor→register_runtime。CLI（`interactive_agent.py`）和 Gradio 共用，消除 copy-paste。`scripts/interactive_agent.py` `_setup_executor` 改为委托 `setup_executor`。 |
 | 2026-06-19 | **Gradio Frontend Plan + MAINTAIN.md 修正**：新增 `core/setup.py`、`core/monitor.py`、`scripts/gradio_app.py` 三个模块文档。修正 6 处签名过时：`L0_5_1Manager`/`L2Manager`/`L3Manager`/`build_chain` 删 `consol_ctx` 参数；`Rule` 删 usefulness/misleading/comment 字段；`LearningEnv.step` 描述更新为轻量。新增 `core/chain_factory.py` — `build_default_chain`/`_mount_tools`/`_iter_layers`。新增 `scripts/interactive_agent.py` — `main`/`_setup_executor`/`_show_notifies`。删 `TaskRunner.stats` 重复条目，`get_task_runner` 替换为 `get_shared_runner`。删 `core/llm_factory.py` 重复章节。 |
 | 2026-06-18 | **#12 A段 拆 ConsolidationContext**：`ConsolidationContext` 废弃，拆为 `consolidation_injection`（store DI）+ `runtime_registry`（chain/executor 全局注册）。9 CRUD handler 改为直接改 store（不再 record_mod → drain_mods side-channel）。`pending_mods`/`drain_mods`/三层 Manager `_consol_ctx`/learning env `_apply_*`/`_parse_*`/`_quality_kwargs` 全删。`learning env step` 退化为轻量（只计轮次）。DomainRegistry 加 `mark_domain_dirty`/`flush_correlations`（增量，L1 Manager.query 在 decide 返回后调）。8 脚本 `chain._consol_ctx.executor = executor` 改 `register_runtime(chain, executor)`。L1 `Rule` 删 usefulness/misleading/comment 字段 + `L1SQLiteStore` 删对应列 + `modify_l1_rule` schema 删 quality。auto-learning 改调 `get_executor()`。`build_chain`/`build_default_chain`/`register_all_tools` 删 consol_ctx 参数。 |
+| 2026-06-22 | **kb_modify + L1 id/bug修复**：新增 `kb_modify` 工具（更新标题/内容/domain），注册到 ToolRegistry + tools.yaml allowlist。L1 `remove_rule` 不存在时改为 `ValueError`（原静默成功）。L0.5.1 prompt 显示 `r.id`（原只有 content），Agent 可以正确传递 rule_id 给 deprecate/modify 工具。 |
 | 2026-06-18 | **#20 B段 decide-once 统一模型**：三层 Manager 外层 while 全废，每层只调一次 `decide()`，多轮统一在 `_call_llm` tool loop（`MAX_TOOL_TURNS`）。`l1_query`/`l2_query` 从 capture_tool 降级为 ToolRegistry 普通工具（新建 `core/tools/downward_comm_tool.py`，handler 同步调 downstream.query + collect_notify 回灌 tool result）。`L3_CONTINUE_TOOL` 删除（l3_report 是唯一退出信号）。consolidation cascade 整段删除（record_learning 后由 Agent 自驱分发）。`ConsolidationStrategy.allowed_base_tools` L1/L2 加 downward 工具。RoundTree 改 thread-local node 栈绑定 decide 建节点（`round_tree.py` 新增 `current_node`/`push_node`/`pop_node`）。`config.yaml:runtime.max_rounds_l1/l2/l3` 删除。`build_chain` 删 max_rounds 参数。`L0_5_1Manager`/`L2Manager`/`L3Manager` __init__ 删 max_rounds。 |
 | 2026-06-18 | **#14 限制来源统一**：`LearningEnv.__init__` 默认 `_l2_limit`/`_l3_limit` 改从 `config.yaml:consolidation.l*.limits.soft` 读取（原读 `learning.l2_card_limit/l3_skill_limit`）。构造函数 override 参数 `l2_card_limit`/`l3_skill_limit` 保留优先级不变。删除 `config.yaml:learning.l2_card_limit`/`l3_skill_limit` 两个死 key（单一来源，避免一事两做）。触发语义对齐 spec：L2 触发 >25、level1=26-30、level2=31+；L3 触发 >15、level1=16-20、level2=21+。 |
 | 2026-06-17 | **Config Overhaul**：统一 `config.yaml` 为唯一配置入口。新建 `core/config_loader.py`（`load_config`/`get_section`）。所有模块从 config 读默认值 + 构造函数可覆盖。删除 `config/layers/`（6 个 yaml）和 `config/consolidation_tools.yaml`。Consolidation spec 合并进 config.yaml。 |MAINTAIN.md 修复签名不匹配（A）、删死引用（B）、修正 dataclass 字段（C）、补缺失方法文档（D）、修正上下游引用错误（E）。README 工具表/项目结构/测试数更新。COOKBOOK 标注过时。 |`DomainRegistry.unindex_item_all()` 替代外部 `_reverse_index` 直接访问（`flexible_knowledge.py`、`consolidation_tools.py`、`threshold_scorer.py`）。删 `sub_tags` 字段链（无消费者）。删 `apply_updates` + `add_failed_proposal_record`（零调用者）。`_apply_l2`/`_apply_l3` domain 变更前校验路径存在于 DomainRegistry。 |
@@ -58,6 +59,12 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `_ask_user_handler` | `(args) → str` | tkinter 弹窗向用户提问，fallback 到 console input | ToolRegistry.dispatch | tkinter.simpledialog |
+| `_kb_query_handler` | `(args) → str` | 知识库语义检索，Stage1 txtai 粗筛 + Stage2 Agent LLM 精排 | ToolRegistry.dispatch | _get_kb(), LLM |
+| `_kb_delete_handler` | `(args) → str` | 删除知识库文档，检查 doc_id 存在性 | ToolRegistry.dispatch | _get_kb(), kb.delete(), kb.save() |
+| `_kb_modify_handler` | `(args) → str` | 更新知识库文档 title/content/domain，检查 doc_id 存在性 | ToolRegistry.dispatch | _get_kb(), kb.update(), kb.save() |
+| `_kb_fill_gap_handler` | `(args) → str` | 触发后台 FillGapLoop 填补知识库缺口 | ToolRegistry.dispatch | FillGapLoop.run(), _get_kb(), kb.save() |
+| `_get_kb` | `() → KnowledgeBase` | 单例获取 KnowledgeBase，加 _kb_lock 保护并行 save() | kb handlers | KnowledgeBase() |
+| `_get_llm` | `() → LLM` | 获取全局 LLM 实例 | _kb_fill_gap_handler, _kb_query_handler | model_manager |
 
 ## core/tools/async_tools.py
 
@@ -353,7 +360,7 @@
 | `Philosophy.l1_rules` | `() → list[Rule]` | 仅返回 L1 可变规则 | Verifier, test | — |
 | `Philosophy.add_rule` | `(content, created_by, source="l1") → Rule` | 添加新规则（自动校验 not_duplicate + no_contradiction + max_rules） | seed, L0_5_1Manager, LearningEnv | _validate_rule_change(), _save() |
 | `Philosophy.modify_rule` | `(rule_id, new_content) → Rule` | 修改规则（拒绝L0.5，自动校验）| L0_5_1Manager, LearningEnv | _validate_rule_change(), _save() |
-| `Philosophy.remove_rule` | `(rule_id) → None` | 删除规则（拒绝L0.5）| L0_5_1Manager | _save() |
+| `Philosophy.remove_rule` | `(rule_id) → None` | 删除规则（拒绝L0.5，不存在抛 ValueError）| L0_5_1Manager, consolidation_tools._do_deprecate | _save() |
 | `Philosophy._validate_rule_change` | `(content, skip_rule_id) → None` | 校验规则变更：duplicate、contradiction、max_rules；不通过 raise ValueError | add_rule(), modify_rule() | _check_not_duplicate(), _check_no_contradiction() |
 | `Philosophy.apply` | `(proposal: L1Proposal) → Rule` | 按 proposal 调用 add_rule 或 modify_rule | LearningEnv | add_rule(), modify_rule() |
 | `_check_not_duplicate` | `(content, existing_rules) → tuple[bool, str]` | 检查新规则是否与已有规则重复 | _validate_rule_change | — |

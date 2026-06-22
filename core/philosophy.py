@@ -140,6 +140,7 @@ class Philosophy:
             raise ValueError(f"规则总数已达上限 {self.max_rules} 条")
 
     def remove_rule(self, rule_id: str) -> None:
+        found = False
         for r in self._rules:
             if r.id == rule_id:
                 if r.source == "l0_5":
@@ -147,7 +148,10 @@ class Philosophy:
                         f"Rule {rule_id} is L0.5 constitution (immutable). "
                         "Only manually removable by user."
                     )
+                found = True
                 break
+        if not found:
+            raise ValueError(f"Rule not found: {rule_id}")
         self._rules = [r for r in self._rules if r.id != rule_id]
         if self._db:
             self._db.delete(rule_id)

@@ -58,7 +58,7 @@ class L1Agent(LayerAgent):
                               static_context: str = "") -> str:
         """Build system prompt: layer identity + instruction + meta + behavior rules."""
         rules = self._philosophy.all_rules()
-        rules_text = "\n".join(f"- {r.content}" for r in rules) if rules else "（无）"
+        rules_text = "\n".join(            f"- [{r.id}] {r.content}" for r in rules) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
         from core.layers.base import _TOOL_RULES
         tool_rules = _TOOL_RULES

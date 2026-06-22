@@ -72,6 +72,14 @@ tools:
       max_retries: 1
       degrade: []
 
+  kb_modify:
+    sync: true
+    timeout: 5
+    allowlist: [l2, l3]
+    fallback:
+      max_retries: 1
+      degrade: []
+
   kb_fill_gap:
     sync: true
     timeout: 120
