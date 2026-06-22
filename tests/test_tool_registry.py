@@ -107,3 +107,11 @@ class TestToolRegistry:
         names = [t.name for t in tools]
         assert "poker_calc" in names
         assert "web_search" not in names
+
+
+class TestToolSpec:
+    def test_tool_entry_default_tool_spec_is_primary(self):
+        from core.tools.registry import ToolEntry
+        e = ToolEntry(name="t", schema={}, handler=lambda **k: None)
+        assert e.tool_spec == "primary"
+        assert e.semantic_description == ""

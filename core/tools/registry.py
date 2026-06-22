@@ -10,6 +10,8 @@ class ToolEntry:
     name: str
     schema: dict
     handler: Callable
+    tool_spec: str = "primary"
+    semantic_description: str = ""
     sync: bool = True
     force_sync: bool = False
     check_fn: Callable | None = None
@@ -37,7 +39,9 @@ class ToolRegistry:
                  check_fn: Callable | None = None, toolset: str = "core",
                  available_domains: list[str] | None = None,
                  override: bool = False, sync: bool = True,
-                 force_sync: bool = False):
+                 force_sync: bool = False,
+                 tool_spec: str = "primary",
+                 semantic_description: str = ""):
         if available_domains is None:
             available_domains = ["general"]
         with self._lock:
@@ -51,6 +55,8 @@ class ToolRegistry:
                 name=name, schema=schema, handler=handler,
                 sync=sync, force_sync=force_sync, check_fn=check_fn, toolset=toolset,
                 available_domains=available_domains,
+                tool_spec=tool_spec,
+                semantic_description=semantic_description,
             )
             self._entries[name] = tool
             if self._registry:
