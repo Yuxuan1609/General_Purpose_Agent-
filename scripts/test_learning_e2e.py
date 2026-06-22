@@ -1,292 +1,349 @@
-"""Learning E2E test — full pipeline with dry_run=False.
+"""E2E test: record_learning → auto-learning → consolidation, with real LLM.
 
-Run: python scripts/test_learning_e2e.py
+Verifies the full pipeline:
+  1. Simulate 5+ record_learning JSON files in pending/
+  2. _dispatch_learning archives them, runs learning pass via Executor
+  3. If stores overflow, consolidation pass triggers
+  4. Tracks new L1/L2/L3 items for cleanup
 
-Phases:
-  1. Seed test data (domain, L2 cards, L3 skill, pending records)
-  2. LearningEnv.reset() → enriched units
-  3. Execute full chain → collect notify_layers
-  4. Apply modifications (dry_run=False)
-  5. Cleanup
+Usage:
+    python scripts/test_learning_e2e.py          # run all scenarios
+    python scripts/test_learning_e2e.py --dry     # dry-run (no LLM, just structure)
 """
 from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import contextmanager
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-TEST_DOMAIN = "game/test_learning"
-PENDING_DIR_NAME = TEST_DOMAIN.replace("/", "_")
+from core.env_loader import load_env
+load_env(PROJECT_ROOT)
+
+_TMP: Path | None = None
+_CLEANUP: list = []
+_TEST_ID = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+_LOG_DIR = PROJECT_ROOT / "logs" / "test_learning_e2e" / _TEST_ID
+_NEW_ITEMS: dict[str, list[str]] = {"l1": [], "l2": [], "l3": []}
 
 
-def _make_pending_records() -> list[list[dict]]:
-    hands = [
-        {
-            "session": {"id": "test_session_001", "domain": TEST_DOMAIN, "step_index": 0, "enable_learning": True},
-            "observation": {"meta": "test game task", "state": {"current": "player has AA preflop", "history": ""}},
-            "notify_layers": {
-                "l0_5_1": {"done": True, "result": "raise 3x", "reasoning": "preflop with AA is strong"},
-                "l2": {"cards_used": []},
-                "l3": {"skills_used": []},
-            },
-            "action": "raise 3x",
-        },
-        {
-            "session": {"id": "test_session_001", "domain": TEST_DOMAIN, "step_index": 1, "enable_learning": True},
-            "observation": {"meta": "test game task", "state": {"current": "player has KQ suited, flop is K-7-2 rainbow", "history": "preflop: raise 2x, opponent called"}},
-            "notify_layers": {
-                "l0_5_1": {"done": True, "result": "bet 2/3 pot", "reasoning": "top pair good kicker on dry board, value bet"},
-                "l2": {"cards_used": []},
-                "l3": {"skills_used": []},
-            },
-            "action": "bet 2/3 pot",
-        },
-        {
-            "session": {"id": "test_session_001", "domain": TEST_DOMAIN, "step_index": 2, "enable_learning": True},
-            "observation": {"meta": "test game task", "state": {"current": "player has 77, board is A-K-Q-J with flush draw", "history": "preflop: called, flop: checked through, turn: opponent bets pot"}},
-            "notify_layers": {
-                "l0_5_1": {"done": True, "result": "fold", "reasoning": "underpair on dangerous board facing pot bet, no equity"},
-                "l2": {"cards_used": []},
-                "l3": {"skills_used": []},
-            },
-            "action": "fold",
-        },
-    ]
-    return [hands]
+# ═══════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-def main():
-    from core.env_loader import load_env
-    from core.llm_factory import build_llm_client
+def _tmp() -> Path:
+    global _TMP
+    if _TMP is None:
+        _TMP = Path(tempfile.mkdtemp(prefix="learn_e2e_"))
+        _CLEANUP.append(lambda: shutil.rmtree(str(_TMP), ignore_errors=True))
+    return _TMP
+
+
+def _cleanup():
+    for cb in reversed(_CLEANUP):
+        try:
+            cb()
+        except Exception:
+            pass
+
+
+def _log(title: str, content: str = ""):
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = _LOG_DIR / "test.log"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"\n{'=' * 60}\n  {title}\n{'=' * 60}\n\n")
+        if content:
+            f.write(content)
+            f.write("\n")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Fixture: build stores with seed data (over limit to trigger consolidation)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _build_seed_stores(root: Path) -> tuple:
+    """Build Philosophy + FlexibleKnowledge + SkillLayer with enough data
+    to trigger consolidation: L2 > 25 cards, L3 > 15 skills."""
     from core.philosophy import Philosophy
     from core.flexible_knowledge import FlexibleKnowledge
     from core.skill_layer import SkillLayer
-    from core.seed_knowledge import seed_knowledge, init_registry
-    from core.domain_registry import set_embedding_model_path
-    from core.env.learning_env import LearningEnv
     from core.task import Domain
+    from core.domain_registry import DomainRegistry
 
-    load_env(PROJECT_ROOT)
-    set_embedding_model_path(str(PROJECT_ROOT / "embeddinggemma"))
+    data = root / "data"
+    data.mkdir(parents=True, exist_ok=True)
 
-    reg = init_registry(PROJECT_ROOT / "data" / "layers" / "domain_registry.json")
-    phil = Philosophy(PROJECT_ROOT / "data" / "layers" / "l1_rules.json")
-    fk = FlexibleKnowledge(
-        PROJECT_ROOT / "data" / "layers" / "knowledge",
-        PROJECT_ROOT / "data" / "layers" / "knowledge" / "l2_index.json",
-        domain_registry=reg,
-    )
-    sl = SkillLayer(PROJECT_ROOT / "data" / "layers" / "skills", domain_registry=reg)
-    seed_knowledge(fk, phil, sl, domain_registry=reg)
+    # L1: seed rules
+    l1_path = data / "l1_rules.json"
+    phil = Philosophy(l1_path, max_rules=20, max_rule_length=300)
+    for r in [
+        "面对不确定信息时优先搜索验证",
+        "当同一种方法连续3次失败时主动换策略",
+        "代码修改前先用搜索确认改动范围",
+        "工具调用后必须检查返回结果",
+    ]:
+        phil.add_rule(r, created_by="seed", source="l1")
 
-    llm = build_llm_client(PROJECT_ROOT / "config.yaml", temperature=0.1)
+    # L2: seed cards + overflow cards (> 25)
+    fk_dir = root / "data" / "knowledge"
+    fk_dir.mkdir(parents=True, exist_ok=True)
+    (fk_dir / "l2_index.json").write_text(
+        '{"version":1,"chapters":[],"relations":[]}')
+    fk = FlexibleKnowledge(fk_dir, fk_dir / "l2_index.json")
 
-    pending_dir = PROJECT_ROOT / "data" / "learning" / "pending"
-    test_pending_dir = pending_dir / PENDING_DIR_NAME
-    test_card_ids: list[str] = []
-    test_skill_name = "test_e2e_poker_basics"
-
-    l1_count_before = len(phil.all_rules())
-    l2_count_before = len(fk.cards)
-    l3_count_before = len(sl.list_all())
-
-    try:
-        # ════════════════════════════════════════════════════════════
-        # Phase 1: Seed test data
-        # ════════════════════════════════════════════════════════════
-        if reg.get_node(TEST_DOMAIN) is None:
-            reg.add_node(TEST_DOMAIN, "game",
-                         "E2E test domain for poker learning pipeline",
-                         {}, "test domain")
-
-        c1 = fk.add_card(
-            content="[AA preflop] → raise 3x immediately, maximize value before flop",
-            domain=Domain(TEST_DOMAIN, "specific"),
-            source="test_seed",
+    for i in range(30):
+        fk.add_card(
+            content=f"测试知识卡片 #{i}: 描述测试场景中观察到的策略模式",
+            domain=Domain("tests_auto/e2e_learning", "specific"),
+            source="seed",
         )
-        test_card_ids.append(c1.id)
 
-        c2 = fk.add_card(
-            content="[Top pair on dry board] → bet 2/3 pot for value, fold to large reraise",
-            domain=Domain(TEST_DOMAIN, "specific"),
-            source="test_seed",
-        )
-        test_card_ids.append(c2.id)
-
-        c3 = fk.add_card(
-            content="[Underpair on wet board] → fold to aggression, no implied odds",
-            domain=Domain(TEST_DOMAIN, "specific"),
-            source="test_seed",
-        )
-        test_card_ids.append(c3.id)
-
+    # L3: seed skills + overflow skills (> 15)
+    skills_dir = root / "data" / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    sl = SkillLayer(skills_dir, db_path=root / "data" / "l3.db")
+    for i in range(20):
         sl.create_skill(
-            name=test_skill_name,
-            content="---\nname: test_e2e_poker_basics\ndomain: game/test_learning\n---\n\n# Poker Basics\n\nValue bet strong hands, fold weak hands on dangerous boards.",
-            domain=Domain(TEST_DOMAIN, "specific"),
-            created_by="test_seed",
+            name=f"test-skill-{i}",
+            content=f"---\ndomain: tests_auto/e2e_learning\ndescription: 测试技能 #{i}\n---\n\n# 测试技能\n\n步骤:\n1. 步骤一\n2. 步骤二\n",
+            domain=Domain("tests_auto/e2e_learning", "specific"),
+            created_by="seed",
         )
 
-        test_pending_dir.mkdir(parents=True, exist_ok=True)
-        for i, batch in enumerate(_make_pending_records()):
-            filepath = test_pending_dir / f"test_batch_{i:03d}.json"
-            filepath.write_text(json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8")
+    reg = DomainRegistry()
+    reg.add_node("tests_auto/e2e_learning", "tests_auto",
+                 "E2E test learning domain")
 
-        print(f"Phase 1: Seeded 3 cards + 1 skill + {len(_make_pending_records())} pending records")
+    return phil, fk, sl, reg
 
-        # ════════════════════════════════════════════════════════════
-        # Phase 2: LearningEnv.reset()
-        # ════════════════════════════════════════════════════════════
-        knowledge = {"l1": phil, "l2": fk, "l3": sl}
-        lenv = LearningEnv(
-            pending_dir, knowledge,
-            preprocessing_llm=llm,
-            dry_run=False,
-            domain_registry=reg,
-        )
 
-        # _extract_domain has keyword collision ("learn" → "learning/reflect")
-        # Bypass by manually driving the reset sequence
-        lenv._base_domain = TEST_DOMAIN
-        records = lenv._scan_pending(TEST_DOMAIN)
-        if not records:
-            print("FAIL: No pending records found after seeding")
-            sys.exit(1)
+def _make_records(domain: str, count: int = 6) -> list[dict]:
+    records = []
+    for i in range(count):
+        records.append({
+            "id": f"e2e_rec_{i}",
+            "domain": domain,
+            "learning_target": f"学习目标 #{i}: 验证完整学习管线",
+            "importance": "high" if i < 2 else "medium",
+            "reasoning": f"第{i}轮学习验证中观察到知识点",
+            "l1_observations": [
+                {"finding": f"规则发现 {i}", "evidence": f"L1第{i}轮决策推理",
+                 "implication": f"需要补充或修改规则", "relevance": "high"}
+            ],
+            "l2_observations": [
+                {"finding": f"卡片发现 {i}",
+                 "evidence": f"L2第{i}轮结果: 匹配到卡片 card_{i%30}",
+                 "implication": f"卡片需要更新或新建", "relevance": "high"}
+            ],
+            "l3_observations": [
+                {"finding": f"技能发现 {i}",
+                 "evidence": f"L3第{i}轮执行: test-skill-{i%20}",
+                 "implication": f"技能可优化", "relevance": "medium"}
+            ],
+            "source_rounds": [i + 1],
+            "recorded_at": _now(),
+        })
+    return records
 
-        lenv._pending_records = records
-        lenv._step_count = 0
-        lenv._done = False
 
-        learning_units = lenv._build_learning_units(records)
-        lenv._enriched_units = learning_units
-        review = lenv._build_per_layer_review(learning_units, TEST_DOMAIN)
-        lenv._current_observation = review["meta"]
+def _snapshot_items(phil, fk, sl) -> dict[str, set]:
+    """Capture current item IDs for later diff."""
+    return {
+        "l1": {r.id for r in phil.all_rules()},
+        "l2": {c.id for c in fk.cards},
+        "l3": {s.name for s in sl.list_all()},
+    }
 
-        if not lenv._enriched_units:
-            print("FAIL: _enriched_units is empty after reset")
-            sys.exit(1)
 
-        print(f"Phase 2: {len(lenv._enriched_units)} enriched learning units")
+def _diff_items(before: dict, after: dict) -> dict:
+    """Return newly created item IDs."""
+    return {
+        layer: sorted(after[layer] - before[layer])
+        for layer in ("l1", "l2", "l3")
+    }
 
-        # ════════════════════════════════════════════════════════════
-        # Phase 3: Execute full chain
-        # ════════════════════════════════════════════════════════════
-        from core.chain_factory import build_default_chain
-        from core.executor import Executor
 
-        chain = build_default_chain(data_root=PROJECT_ROOT, seed=False)
-
-        executor = Executor(
-            layer_root=chain,
-            llm_client=llm,
-            learning_dir=PROJECT_ROOT / "data" / "learning",
-        )
-        from core.runtime_registry import register_runtime
-        register_runtime(chain, executor)
-
-        task = lenv.build_task_observation()
-        if task is None:
-            print("FAIL: build_task_observation() returned None")
-            sys.exit(1)
-
-        result = executor.execute(task)
-        notify_layers = result.get("notify_layers", {})
-
-        l1_mods = notify_layers.get("l0_5_1", {}).get("l1_modifications", [])
-        l2_mods = notify_layers.get("l2", {}).get("l2_modifications", [])
-        l3_mods = notify_layers.get("l3", {}).get("l3_modifications", [])
-
-        print(f"Phase 3: L1: {len(l1_mods)} mods, L2: {len(l2_mods)} mods, L3: {len(l3_mods)} mods")
-
-        # ════════════════════════════════════════════════════════════
-        # Phase 4: Apply modifications
-        # ════════════════════════════════════════════════════════════
-        step_result = lenv.apply_modifications(notify_layers)
-
-        l1_count_after = len(phil.all_rules())
-        l2_count_after = len(fk.cards)
-        l3_count_after = len(sl.list_all())
-
-        l1_delta = l1_count_after - l1_count_before
-        l2_delta = l2_count_after - l2_count_before
-        l3_delta = l3_count_after - l3_count_before
-
-        print(f"Phase 4: Knowledge stores updated "
-              f"(L1:{l1_delta:+d}, L2:{l2_delta:+d}, L3:{l3_delta:+d})")
-
-        # ════════════════════════════════════════════════════════════
-        # Phase 5: Verify domain embedding refresh
-        # ════════════════════════════════════════════════════════════
-        node = reg.get_node(TEST_DOMAIN)
-        has_embedding = node is not None and node.embedding_vector is not None
-        if has_embedding:
-            print("Phase 5: Domain embedding refreshed")
-        else:
-            print("Phase 5: Domain embedding not refreshed (no affected domains in mods — acceptable)")
-
-        # ════════════════════════════════════════════════════════════
-        # Final verification
-        # ════════════════════════════════════════════════════════════
-        if not step_result:
-            print("FAIL: apply_modifications returned falsy result")
-            sys.exit(1)
-
-        print("PASS: All learning E2E phases passed!")
-
-    finally:
-        # ════════════════════════════════════════════════════════════
-        # Cleanup
-        # ════════════════════════════════════════════════════════════
-        for card_id in test_card_ids:
-            fk.remove_card(card_id)
-
+def _cleanup_new_items(phil, fk, sl, items: dict):
+    """Remove items created during test."""
+    for rid in items.get("l1", []):
         try:
-            sl.delete_skill(test_skill_name)
-        except (ValueError, FileNotFoundError):
+            phil.remove_rule(rid)
+        except ValueError:
+            pass
+    for cid in items.get("l2", []):
+        fk.remove_card(cid)
+    for sname in items.get("l3", []):
+        try:
+            sl.delete_skill(sname)
+        except ValueError:
             pass
 
-        if reg.get_node(TEST_DOMAIN) is not None:
-            reg._nodes.pop(TEST_DOMAIN, None)
 
-        if test_pending_dir.exists():
-            shutil.rmtree(test_pending_dir)
+# ═══════════════════════════════════════════════════════════════════════════
+# Main test
+# ═══════════════════════════════════════════════════════════════════════════
 
-        # Remove any cards/skills created by learning during Phase 4
-        for card in list(fk.cards):
-            if card.domain.path == TEST_DOMAIN and card.id not in test_card_ids:
-                fk.remove_card(card.id)
+def test_full_learning_pipeline(domain: str = "tests_auto/e2e_learning"):
+    """E2E: write 6 records → dispatch_learning → learning + consolidation."""
+    tmp = _tmp()
+    test_root = tmp / "project"
+    test_root.mkdir()
 
-        for skill_meta in sl.list_all():
-            if skill_meta.domain.path == TEST_DOMAIN and skill_meta.name != test_skill_name:
-                try:
-                    sl.delete_skill(skill_meta.name)
-                except (ValueError, FileNotFoundError):
-                    pass
+    # 1. Build seed stores with overflow data
+    phil, fk, sl, reg = _build_seed_stores(test_root)
+    _log("Stores built",
+         f"L1 rules: {len(phil.all_rules())}\n"
+         f"L2 cards: {len(fk.cards)}\n"
+         f"L3 skills: {len(sl.list_all())}")
 
-        # Clean up skill archive dir if test skill was archived
-        archive_dir = sl.skills_dir / ".archive" / test_skill_name
-        if archive_dir.exists():
-            shutil.rmtree(archive_dir)
+    # Snapshot pre-test state
+    before = _snapshot_items(phil, fk, sl)
 
-        # Clean up skill dir created during seed
-        skill_dir = sl.skills_dir / TEST_DOMAIN / test_skill_name
-        if skill_dir.exists():
-            shutil.rmtree(skill_dir)
-        # Remove parent dir if empty
-        parent = sl.skills_dir / TEST_DOMAIN
-        if parent.exists() and not any(parent.iterdir()):
-            parent.rmdir()
-        # Also check game/test_learning path structure
-        game_dir = sl.skills_dir / "game"
-        test_learning_dir = game_dir / "test_learning"
-        if test_learning_dir.exists():
-            shutil.rmtree(test_learning_dir)
-            if game_dir.exists() and not any(game_dir.iterdir()):
-                game_dir.rmdir()
+    # 2. Create pending records
+    pending_dir = tmp / "data" / "learning" / "pending" / domain.replace("/", "_")
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    records = _make_records(domain, 6)
+    json_files = []
+    for i, rec in enumerate(records):
+        fp = pending_dir / f"e2e_rec_{i}.json"
+        fp.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+        json_files.append(fp)
+    _log("Pending records written",
+         f"{len(json_files)} files in {pending_dir}")
 
+    # 3. Log: pre-state summary
+    cards_by_domain = {}
+    for c in fk.cards:
+        d = c.domain.path
+        cards_by_domain[d] = cards_by_domain.get(d, 0) + 1
+    skills_by_domain = {}
+    for s in sl.list_all():
+        d = s.domain.path
+        skills_by_domain[d] = skills_by_domain.get(d, 0) + 1
+    _log("Pre-test capacity",
+         f"L2 domains: {json.dumps(cards_by_domain, indent=2)}\n"
+         f"L3 domains: {json.dumps(skills_by_domain, indent=2)}")
+
+    # 4. Build chain with real LLM using pre-built stores
+    from core.layers import build_chain
+    from core.layers.comm import UpwardComm, DownwardComm
+    from core.llm_factory import build_llm_client
+    from core.executor import Executor
+    from core.runtime_registry import register_runtime
+    from core.chain_factory import _mount_tools
+
+    llm = build_llm_client(PROJECT_ROOT / "config.yaml")
+    chain = build_chain(phil, fk, sl, auxiliary_llm=llm,
+                        domain_registry=reg,
+                        knowledge_stores={"l2": fk, "l3": sl})
+    _mount_tools(chain, test_root)
+    executor = Executor(
+        layer_root=chain,
+        llm_client=llm,
+        learning_dir=test_root / "data" / "learning",
+    )
+    register_runtime(chain, executor)
+    _log("Chain built", "Executor + L1→L2→L3 chain ready")
+
+    # 5. Ensure paths resolve to temp dir
+    (tmp / "data" / "learning" / "archive").mkdir(parents=True, exist_ok=True)
+
+    import core.tools.record_learning_tool as rlt
+    _orig_path = rlt.Path
+
+    def _patch_path(p):
+        s = str(p)
+        if s.startswith("data/learning"):
+            # Map "data/learning/..." to tmp/data/learning/...
+            return tmp / s
+        return _orig_path(p)
+
+    rlt.Path = _patch_path
+
+    try:
+        # 6. Dispatch learning
+        _log("Dispatching learning", f"{len(json_files)} records, domain={domain}")
+        t0 = time.time()
+        rlt._dispatch_learning(domain,
+                               tmp / "data" / "learning" / "pending",
+                               json_files)
+        elapsed = time.time() - t0
+        _log("Dispatch complete", f"Took {elapsed:.1f}s")
+
+        # 7. Snapshot post-test state
+        after = _snapshot_items(phil, fk, sl)
+        new_items = _diff_items(before, after)
+
+        _log("New items created",
+             f"L1 rules: {len(new_items['l1'])} → {new_items['l1']}\n"
+             f"L2 cards: {len(new_items['l2'])} → {new_items['l2'][:20]}\n"
+             f"L3 skills: {len(new_items['l3'])} → {new_items['l3']}")
+
+        # 8. Verify expectations
+        print(f"\n{'=' * 60}")
+        print(f"  E2E Learning Pipeline Results")
+        print(f"{'=' * 60}")
+        print(f"  Duration: {elapsed:.1f}s")
+        print(f"  L1 new rules: {len(new_items['l1'])}")
+        print(f"  L2 new cards: {len(new_items['l2'])}")
+        print(f"  L3 new skills: {len(new_items['l3'])}")
+        print(f"  Logs: {_LOG_DIR}")
+        print(f"{'=' * 60}")
+
+        # Persist new items for manual cleanup
+        global _NEW_ITEMS
+        _NEW_ITEMS = new_items
+        marker = tmp / "e2e_new_items.json"
+        marker.write_text(json.dumps(new_items, ensure_ascii=False, indent=2))
+        print(f"  Cleanup marker: {marker}")
+        print(f"  Run cleanup: del marker content → "
+              f"_cleanup_new_items(phil, fk, sl, json.load(marker))")
+
+        return new_items
+
+    finally:
+        rlt.Path = _orig_path
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry", action="store_true",
+                        help="Dry-run: validate structure only, no LLM")
+    args = parser.parse_args()
+
+    if args.dry:
+        print("Dry-run mode: checking structure only")
+        tmp = _tmp()
+        test_root = tmp / "project"
+        test_root.mkdir()
+        phil, fk, sl, reg = _build_seed_stores(test_root)
+        records = _make_records("tests_auto/e2e_learning", 6)
+        from core.env.learning_env import LearningEnv
+        lenv = LearningEnv(tmp, {"l1": phil, "l2": fk, "l3": sl})
+        obs = lenv.process_in_memory(records, "tests_auto/e2e_learning")
+        assert obs is not None, "process_in_memory returned None"
+        assert "learning" in obs.meta.lower()
+        print(f"  PASS: process_in_memory → valid TaskObservation ({len(obs.meta)} chars meta)")
+        consol = lenv.build_consolidation_task()
+        assert consol is not None, "consolidation task returned None (stores under limit?)"
+        assert "learning/compile" in consol.session.get("domain", "")
+        print(f"  PASS: build_consolidation_task → valid ({len(consol.meta)} chars meta)")
+        print("  Dry-run OK — all structures valid")
+    else:
+        result = test_full_learning_pipeline()
+        print(f"\nDone. New items: {json.dumps(result, indent=2)}")

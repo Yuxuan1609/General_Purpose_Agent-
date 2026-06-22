@@ -143,7 +143,7 @@ def _dispatch_learning(domain: str, pending_path: Path, json_files: list):
         return
 
     # 2. Move files to archive
-    archive_dir = Path("data/learning/archive") / domain.replace("/", "_")
+    archive_dir = pending_path.parent.parent / "archive" / domain.replace("/", "_")
     archive_dir.mkdir(parents=True, exist_ok=True)
     for fp in json_files:
         try:
