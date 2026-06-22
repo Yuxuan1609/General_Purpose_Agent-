@@ -512,7 +512,7 @@
 | `SkillLayer._load_from_db` | `() → None` | 从 SQLite 加载全部技能为内存对象 | __init__ | L3SQLiteStore.list_all() |
 | `SkillLayer.match` | `(domain) → list[SkillMeta]` | 按 domain 匹配技能 | L3Manager.query() | — |
 | `SkillLayer.create_skill` | `(name, content, domain, cross_domain=False, created_by="agent", available_domains=None) → SkillMeta` | 创建新技能（内存 + SQLite） | L3Manager | L3SQLiteStore.insert() |
-| `SkillLayer.edit_skill` | `(name, new_content, usefulness, misleading, comment) → SkillMeta` | 更新技能内容/质量字段（内存 + SQLite） | L3Manager | L3SQLiteStore.update() |
+| `SkillLayer.edit_skill` | `(name, new_content=None, usefulness=None, misleading=None, comment=None) → SkillMeta` | 更新技能内容/质量字段（内存 + SQLite） | L3Manager | L3SQLiteStore.update() |
 | `SkillLayer.delete_skill` | `(name) → None` | 软删除技能（移到.archive + SQLite + unindex from DomainRegistry） | L3Manager | L3SQLiteStore.delete(), DomainRegistry.unindex_item() |
 | `SkillLayer.touch_skill` | `(name) → None` | 标记技能最近使用（更新 last_used） | L3Manager.query() | — |
 

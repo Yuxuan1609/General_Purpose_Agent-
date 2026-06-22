@@ -322,9 +322,6 @@ def _do_deprecate(store, layer, target, args, registry):
     elif layer == "l2":
         if not store.remove_card(target):
             raise ValueError(f"Card not found: {target}")
-        if registry:
-            for d in (store.cards if hasattr(store, 'cards') else []):
-                pass
     elif layer == "l3":
         store.delete_skill(target)
 

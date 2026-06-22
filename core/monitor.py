@@ -73,9 +73,10 @@ def _task_list(session_id: str | None) -> list[dict]:
 def _capacity_snapshot(chain) -> dict:
     """L2/L3 capacity vs limits."""
     from core.config_loader import get_section
-    learn = get_section("learning", default={})
-    l2_limit = learn.get("l2_card_limit", 30)
-    l3_limit = learn.get("l3_skill_limit", 20)
+    l2_limits = get_section("consolidation", "l2", "limits", default={})
+    l3_limits = get_section("consolidation", "l3", "limits", default={})
+    l2_limit = l2_limits.get("soft", 25)
+    l3_limit = l3_limits.get("soft", 15)
 
     l2_count = 0
     l3_count = 0
