@@ -246,7 +246,7 @@ tools:
   # ── Downward comm tools ──
   l1_query:
     sync: true
-    timeout: 120
+    timeout: 2000
     allowlist: [l1]
     fallback:
       max_retries: 0
@@ -254,7 +254,7 @@ tools:
 
   l2_query:
     sync: true
-    timeout: 120
+    timeout: 2000
     allowlist: [l2]
     fallback:
       max_retries: 0

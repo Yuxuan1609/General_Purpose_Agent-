@@ -6,6 +6,7 @@ downstream results as tool result for LLM to consume in same session.
 """
 from __future__ import annotations
 import json
+import threading
 from typing import Any
 
 _downstreams: dict[str, Any] = {}
@@ -113,6 +114,8 @@ def _make_handler(tool_name: str):
         if not queries:
             return json.dumps({"error": "queries/queries_to_L3 required"})
 
+        timeout = kwargs.get("timeout", 2000)
+
         results = []
         for q in queries:
             query_text = q.get("query") or q.get("task") or ""
@@ -123,9 +126,30 @@ def _make_handler(tool_name: str):
                 meta=query_text,
                 state={"domains_hint": domains_hint} if domains_hint else {},
             )
-            downstream.query(sub_obs)
-            notify = downstream.collect_notify()
 
+            result_box = {"notify": None, "error": None}
+
+            def _run():
+                try:
+                    downstream.query(sub_obs)
+                    result_box["notify"] = downstream.collect_notify()
+                except Exception as e:
+                    result_box["error"] = str(e)
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=timeout)
+
+            if t.is_alive():
+                return json.dumps({
+                    "error": f"{tool_name} timed out after {timeout}s",
+                    "query": query_text,
+                })
+
+            if result_box["error"]:
+                return json.dumps({"error": result_box["error"]})
+
+            notify = result_box["notify"]
             reply = _extract_reply(notify, downstream.name)
             results.append({
                 "query": query_text,

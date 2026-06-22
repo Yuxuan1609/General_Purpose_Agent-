@@ -17,7 +17,7 @@ auxiliary_llm:
 
 # ── Runtime ──
 runtime:
-  max_tool_turns: 5
+  max_tool_turns: 10
   task_runner_workers: 8
 
 # ── L1 Philosophy ──
