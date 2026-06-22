@@ -213,23 +213,27 @@ python scripts/test_kb_io.py
 | `tavily_search` | Tavily AI 搜索（web_search 降级备选） | `core/tools/web_search_tool.py` |
 | `read_file` | 读取文件（offset/limit） | `core/tools/file_tools.py` |
 | `grep` | 正则搜索文件内容 | `core/tools/file_tools.py` |
-| `kb_query`/`kb_delete`/`kb_fill_gap` | KB 查询/删除/补缺 | `core/tools/kb_tools.py` |
+| `kb_query`/`kb_delete`/`kb_fill_gap`/`kb_modify` | KB 查询/删除/补缺/修改 | `core/tools/kb_tools.py` |
 | `ask_user` | 向用户提问（tkinter 弹窗 + console fallback） | `core/tools/kb_tools.py` |
-| `create_domain` | L1 创建领域节点 | `core/tools/domain_tool.py` |
+| `query_domain` | 列出某 domain 下 L2 cards + L3 skills | `core/tools/consolidation_tools.py` |
+| `create_domain` | 创建新 domain（可选初始 cards/skills） | `core/tools/consolidation_tools.py` |
+| `deprecate_domain` | 删除 domain（有 orphaned item 时报错） | `core/tools/consolidation_tools.py` |
+| `merge_domain` | 合并 source→target domain | `core/tools/consolidation_tools.py` |
 | `tool_proposal` | Agent 提案新工具 | `core/tools/tool_proposal.py` |
 | `sysinfo` | 系统信息查询（os/hardware/env/network） | `core/tools/sysinfo_tool.py` |
 | `check_task`/`collect_tasks` | 异步任务状态查询/收割 | `core/tools/async_tools.py` |
 | `record_learning` | Agent 主动提案学习内容 | `core/tools/record_learning_tool.py` |
-| `consolidation_tools` (10) | L1/L2/L3 知识整理 CRUD + domain 管理 | `core/tools/consolidation_tools.py` |
+| `l1_query`/`l2_query` | L1↔L2 / L2↔L3 向下通信 | `core/tools/downward_comm_tool.py` |
+| `consolidation CRUD` (9) | L1/L2/L3 知识整理 deprecate/create/modify | `core/tools/consolidation_tools.py` |
 | `knowledge_query` | 静态知识库语义搜索（KnowledgeCapability，需手动注册到 CapabilityRegistry） | `capability/knowledge_capability.py` |
 
 **层可见性（ToolPolicy）** — 完整 allowlist 见 `config/tools.yaml`：
 
-| 层 | 可见工具类别 |
+| 层 | 可见工具 |
 |----|---------|
-| L1 | terminal, kb_query, ask_user, create_domain, record_learning, l1 consolidation (3), query_domain, deprecate_domain, merge_domain, tool_proposal, sysinfo, check_task, collect_tasks |
-| L2 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_fill_gap, l2 consolidation (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
-| L3 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_fill_gap, l3 consolidation (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
+| L1 | terminal, kb_query, ask_user, create_domain, record_learning, deprecate/create/modify l1 rule (3), query_domain, deprecate_domain, merge_domain, tool_proposal, sysinfo, check_task, collect_tasks, l1_query |
+| L2 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_modify, kb_fill_gap, ask_user, record_learning, deprecate/create/modify l2 card (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks, l2_query |
+| L3 | terminal, web_search, tavily_search, read_file, grep, kb_query, kb_delete, kb_modify, kb_fill_gap, ask_user, deprecate/create/modify l3 skill (3), query_domain, tool_proposal, sysinfo, check_task, collect_tasks |
 
 > 当 `tools` 注入时自动禁用 `json_mode`（DeepSeek 不兼容）。输出改用 `@modify` markup 格式或 tool call 原生格式。
 
