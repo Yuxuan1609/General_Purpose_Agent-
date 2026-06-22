@@ -83,3 +83,13 @@ class TestActivateSecondaryTools:
         data = json.loads(result)
         assert data["enabled"] == []
         assert data["total_candidates"] == 0
+
+
+class TestSecondaryToolRegistration:
+    def test_activate_secondary_tools_registered_as_primary_visible(self):
+        from core.tools import register_all_tools
+        r = ToolRegistry()
+        register_all_tools(r)
+        defs = r.get_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert "activate_secondary_tools" in names

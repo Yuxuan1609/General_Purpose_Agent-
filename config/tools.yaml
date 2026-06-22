@@ -259,3 +259,12 @@ tools:
     fallback:
       max_retries: 0
       degrade: []
+
+  # ── Secondary tool activation ──
+  activate_secondary_tools:
+    sync: true
+    timeout: 30
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []

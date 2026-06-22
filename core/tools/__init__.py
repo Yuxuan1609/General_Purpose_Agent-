@@ -36,5 +36,8 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     from core.tools.downward_comm_tool import register_downward_tools
     register_downward_tools(registry)
 
+    from core.tools.secondary_tool import register_secondary_tool
+    register_secondary_tool(registry)
+
     if proposal_dir:
         set_proposal_dir(proposal_dir)
