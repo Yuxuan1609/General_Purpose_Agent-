@@ -38,10 +38,10 @@ class ToolRegistry:
 
     def _get_enabled_secondary(self) -> set[str]:
         """Return current thread's enabled secondary set (lazy-init to empty set)."""
-        s = getattr(self._enabled_secondary, "set", None)
+        s = getattr(self._enabled_secondary, "enabled", None)
         if s is None:
             s = set()
-            self._enabled_secondary.set = s
+            self._enabled_secondary.enabled = s
         return s
 
     def enable_secondary(self, names: list[str]) -> int:
@@ -58,7 +58,7 @@ class ToolRegistry:
 
     def clear_secondary(self) -> None:
         """Clear current thread's enabled secondary set."""
-        self._enabled_secondary.set = set()
+        self._enabled_secondary.enabled = set()
 
     def register(self, name: str, schema: dict, handler: Callable,
                  check_fn: Callable | None = None, toolset: str = "core",

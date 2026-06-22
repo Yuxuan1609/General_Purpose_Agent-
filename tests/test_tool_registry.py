@@ -16,6 +16,7 @@ def check_never():
 def _clear_registry():
     """Clear the singleton registry before each test to ensure isolation."""
     ToolRegistry().clear()
+    ToolRegistry().clear_secondary()
 
 
 class TestToolRegistry:
@@ -177,3 +178,28 @@ class TestToolSpec:
         r.clear_secondary()
         count = r.enable_secondary(["sec_a", "nonexistent"])
         assert count == 1
+
+    def test_secondary_tools_are_thread_isolated(self):
+        import threading
+        r = ToolRegistry()
+        r.register("sec_isolated",
+                   {"type": "function", "function": {"name": "sec_isolated", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always, tool_spec="secondary")
+        r.clear_secondary()
+
+        # Enable in main thread
+        r.enable_secondary(["sec_isolated"])
+        main_defs = r.get_definitions()
+        main_names = [d["function"]["name"] for d in main_defs]
+        assert "sec_isolated" in main_names
+
+        # In another thread, the tool should NOT be visible
+        other_result = {}
+        def check_other_thread():
+            other_defs = r.get_definitions()
+            other_result["names"] = [d["function"]["name"] for d in other_defs]
+
+        t = threading.Thread(target=check_other_thread)
+        t.start()
+        t.join()
+        assert "sec_isolated" not in other_result["names"]
