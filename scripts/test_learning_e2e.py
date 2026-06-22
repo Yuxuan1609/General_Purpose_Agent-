@@ -86,6 +86,11 @@ def _build_seed_stores(root: Path) -> tuple:
     # L1: seed rules
     l1_path = data / "l1_rules.json"
     phil = Philosophy(l1_path, max_rules=20, max_rule_length=300)
+
+    reg = DomainRegistry()
+    reg.add_node("tests_auto/e2e_learning", "tests_auto",
+                 "E2E test learning domain")
+
     for r in [
         "面对不确定信息时优先搜索验证",
         "当同一种方法连续3次失败时主动换策略",
@@ -99,7 +104,8 @@ def _build_seed_stores(root: Path) -> tuple:
     fk_dir.mkdir(parents=True, exist_ok=True)
     (fk_dir / "l2_index.json").write_text(
         '{"version":1,"chapters":[],"relations":[]}')
-    fk = FlexibleKnowledge(fk_dir, fk_dir / "l2_index.json")
+    fk = FlexibleKnowledge(fk_dir, fk_dir / "l2_index.json",
+                          domain_registry=reg)
 
     for i in range(30):
         fk.add_card(
@@ -111,7 +117,8 @@ def _build_seed_stores(root: Path) -> tuple:
     # L3: seed skills + overflow skills (> 15)
     skills_dir = root / "data" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    sl = SkillLayer(skills_dir, db_path=root / "data" / "l3.db")
+    sl = SkillLayer(skills_dir, domain_registry=reg,
+                    db_path=root / "data" / "l3.db")
     for i in range(20):
         sl.create_skill(
             name=f"test-skill-{i}",
@@ -119,10 +126,6 @@ def _build_seed_stores(root: Path) -> tuple:
             domain=Domain("tests_auto/e2e_learning", "specific"),
             created_by="seed",
         )
-
-    reg = DomainRegistry()
-    reg.add_node("tests_auto/e2e_learning", "tests_auto",
-                 "E2E test learning domain")
 
     return phil, fk, sl, reg
 
@@ -255,6 +258,21 @@ def test_full_learning_pipeline(domain: str = "tests_auto/e2e_learning"):
     register_runtime(chain, executor)
     _log("Chain built", "Executor + L1→L2→L3 chain ready")
 
+    # 5. Set up per-layer logging (consistent with interactive agent pattern)
+    from core.layers.logging_setup import setup_layer_logging
+    layer_log_dir = _LOG_DIR
+    setup_layer_logging(layer_log_dir)
+    _log("Layer logging", f"Per-layer logs: {layer_log_dir}")
+
+    # Also capture root logger (record_learning_tool, etc.) to test.log
+    import logging
+    root_handler = logging.FileHandler(
+        str(layer_log_dir / "all.log"), encoding="utf-8")
+    root_handler.setLevel(logging.DEBUG)
+    root_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
+    logging.root.addHandler(root_handler)
+
     # 5. Ensure paths resolve to temp dir
     (tmp / "data" / "learning" / "archive").mkdir(parents=True, exist_ok=True)
 
@@ -271,7 +289,30 @@ def test_full_learning_pipeline(domain: str = "tests_auto/e2e_learning"):
     rlt.Path = _patch_path
 
     try:
-        # 6. Dispatch learning
+        # 6. Save TaskObservation for debugging before dispatch
+        from core.env.learning_env import LearningEnv
+        lenv = LearningEnv(tmp / "data" / "learning", {"l1": phil, "l2": fk, "l3": sl})
+        obs_preview = lenv.process_in_memory(records, domain)
+        if obs_preview:
+            obs_str = json.dumps({
+                "meta": obs_preview.meta[:2000],
+                "state": {k: v[:500] if isinstance(v, str) else v
+                          for k, v in obs_preview.state.items()},
+                "session": obs_preview.session,
+            }, ensure_ascii=False, indent=2, default=str)
+            _log("Learning TaskObservation", obs_str)
+        if lenv.needs_consolidation():
+            consol_preview = lenv.build_consolidation_task()
+            if consol_preview:
+                consol_str = json.dumps({
+                    "meta": consol_preview.meta[:2000],
+                    "state": {k: v[:500] if isinstance(v, str) else v
+                              for k, v in consol_preview.state.items()},
+                    "session": consol_preview.session,
+                }, ensure_ascii=False, indent=2, default=str)
+                _log("Consolidation TaskObservation", consol_str)
+
+        # 7. Dispatch learning
         _log("Dispatching learning", f"{len(json_files)} records, domain={domain}")
         t0 = time.time()
         rlt._dispatch_learning(domain,
