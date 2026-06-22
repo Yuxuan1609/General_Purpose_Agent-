@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from core.tools.registry import ToolRegistry
-from core.tools.domain_tool import set_domain_registry, register_create_domain
+from core.tools.consolidation_injection import set_consolidation_stores
+from core.tools.consolidation_tools import register_consolidation_tools
 from core.domain_registry import DomainRegistry
 from core.tools.file_tools import set_workspace_root
 
@@ -179,15 +180,14 @@ class TestCreateDomainDispatch:
     def setup_class(cls):
         cls._tmpdir = tempfile.mkdtemp()
         cls._reg = DomainRegistry()
+        set_consolidation_stores({"l1": None, "l2": None, "l3": None}, registry=cls._reg)
 
     @classmethod
     def teardown_class(cls):
         shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def test_create_domain_success(self, registry):
-        old = set_domain_registry.__wrapped__ if hasattr(set_domain_registry, '__wrapped__') else None
-        set_domain_registry(self._reg)
-        register_create_domain(registry)
+        register_consolidation_tools(registry)
         result = json.loads(registry.dispatch("create_domain", {
             "path": "game/mahjong",
             "description": "Mahjong game domain",
@@ -197,16 +197,14 @@ class TestCreateDomainDispatch:
         assert node is not None
 
     def test_create_domain_empty_path(self, registry):
-        set_domain_registry(self._reg)
-        register_create_domain(registry)
+        register_consolidation_tools(registry)
         result = json.loads(registry.dispatch("create_domain", {
             "path": "", "description": "test",
         }))
         assert "error" in result
 
     def test_create_domain_idempotent_returns_success(self, registry):
-        set_domain_registry(self._reg)
-        register_create_domain(registry)
+        register_consolidation_tools(registry)
         registry.dispatch("create_domain", {
             "path": "game/chess", "description": "Chess game domain",
         })

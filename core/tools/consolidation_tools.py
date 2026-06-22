@@ -179,7 +179,7 @@ def register_consolidation_tools(tool_registry, ctx=None):
     tool_registry.register("create_domain", {
         "type": "function", "function": {
             "name": "create_domain",
-            "description": "Create a new domain. Must provide at least one L2 card or L3 skill as initial content — empty domains are not allowed.",
+            "description": "Create a new domain. Optionally provide initial L2 cards or L3 skills as seed content.",
             "parameters": {"type": "object", "properties": {
                 "path": {"type": "string", "description": "Domain path, e.g. 'interaction'"},
                 "parent": {"type": "string", "description": "Parent domain. Default: 'general'."},
@@ -443,8 +443,6 @@ def _h_create_domain(args=None, **kwargs):
     skill_layer = get_store("l3")
     if not path or not description:
         return json.dumps({"error": "path and description are required"})
-    if not initial_cards and not initial_skills:
-        return json.dumps({"error": "Domain must have at least one initial card or skill. Empty domains are not allowed."})
     try:
         registry.add_node(path, parent, description, {}, relations)
         created_cards = 0
