@@ -14,7 +14,6 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     from core.tools.web_search_tool import register_web_search_tool, register_tavily_search_tool
     from core.tools.file_tools import register_read_file, register_grep
     from core.tools.tool_proposal import register_tool_proposal, set_proposal_dir
-    from core.tools.domain_tool import set_domain_registry
     from core.tools.kb_tools import register_kb_tools
     from core.tools.async_tools import register_async_tools
     from core.tools.consolidation_tools import register_consolidation_tools

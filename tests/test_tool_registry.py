@@ -92,23 +92,6 @@ class TestToolRegistry:
         with pytest.raises(ValueError, match="already registered"):
             r.register("dup", schema, echo_handler, check_fn=check_always, toolset="B")
 
-    def test_tool_domain_filtering(self):
-        from core.domain_registry import DomainRegistry
-        reg = DomainRegistry()
-        reg.add_node("game/leduc", "game", "Leduc")
-        reg.add_node("general", None, "General")
-        tr = ToolRegistry(domain_registry=reg)
-        tr.register("web_search",
-                    {"type": "function", "function": {"name": "web_search", "description": "search", "parameters": {}}},
-                    lambda args, ctx=None: None, available_domains=["general"])
-        tr.register("poker_calc",
-                    {"type": "function", "function": {"name": "poker_calc", "description": "odds", "parameters": {}}},
-                    lambda args, ctx=None: None, available_domains=["game/leduc"])
-        tools = tr.get_tools_for_domain("game/leduc")
-        names = [t.name for t in tools]
-        assert "poker_calc" in names
-        assert "web_search" not in names
-
 
 class TestToolSpec:
     def test_tool_entry_default_tool_spec_is_primary(self):
@@ -203,3 +186,22 @@ class TestToolSpec:
         t.start()
         t.join()
         assert "sec_isolated" not in other_result["names"]
+
+
+class TestAvailableDomainsRemoved:
+    def test_register_without_available_domains_works(self):
+        r = ToolRegistry()
+        r.register("plain_tool",
+                   {"type": "function", "function": {"name": "plain_tool", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always)
+        defs = r.get_definitions()
+        assert len(defs) == 1
+        assert defs[0]["function"]["name"] == "plain_tool"
+
+    def test_register_rejects_available_domains_param(self):
+        r = ToolRegistry()
+        with pytest.raises(TypeError):
+            r.register("bad_tool",
+                       {"type": "function", "function": {"name": "bad_tool", "description": "", "parameters": {}}},
+                       echo_handler, check_fn=check_always,
+                       available_domains=["general"])

@@ -74,12 +74,6 @@ def _mount_tools(chain, data_root: Path):
     registry = ToolRegistry()
     register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals")
 
-    from core.tools.domain_tool import set_domain_registry
-    for layer in _iter_layers(chain):
-        if layer._registry:
-            set_domain_registry(layer._registry)
-            break
-
     from core.tools.consolidation_injection import set_consolidation_stores
     l2 = chain._downstream
     l3 = l2._downstream if l2 else None

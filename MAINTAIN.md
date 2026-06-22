@@ -46,13 +46,12 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `ToolEntry` | `@dataclass(name, schema, handler, sync, check_fn, toolset, available_domains)` | 工具条目数据类，含域名归属及同步/异步标记 | ToolRegistry | — |
-| `ToolRegistry` | `__init__(domain_registry=None)` → singleton | 线程安全工具注册中心，支持域名索引 | setup scripts, LayerAgent | DomainRegistry.index_item() |
-| `ToolRegistry.register` | `(name, schema, handler, check_fn, toolset, available_domains, override, sync)` | 注册工具，可选同步到 DomainRegistry reverse index | setup scripts | DomainRegistry.index_item() |
+| `ToolEntry` | `@dataclass(name, schema, handler, tool_spec, semantic_description, sync, force_sync, check_fn, toolset)` | 工具条目数据类，含同步/异步标记及主/次工具规格 | ToolRegistry | — |
+| `ToolRegistry` | `__init__(domain_registry=None)` → singleton | 线程安全工具注册中心 | setup scripts, LayerAgent | — |
+| `ToolRegistry.register` | `(name, schema, handler, check_fn, toolset, override, sync, force_sync, tool_spec, semantic_description)` | 注册工具 | setup scripts | — |
 | `ToolRegistry.get_definitions` | `(requested=None) → list[dict]` | 获取所有可见工具的 OpenAI schema 列表 | Executor, LayerInjector | — |
 | `ToolRegistry.dispatch` | `(name, args, context=None, timeout=None) → str` | 按名分发工具调用 | ToolCapability | entry.handler() |
 | `ToolRegistry.deregister` | `(name)` | 注销工具 | — | — |
-| `ToolRegistry.get_tools_for_domain` | `(domain) → list[ToolEntry]` | 按域名过滤工具列表，无 registry 时返回全部 | L2Manager | DomainRegistry.get_primary_items() |
 | `ToolRegistry.clear` | `()` | 重置所有条目（仅测试用） | test fixtures | — |
 
 ## core/tools/kb_tools.py
