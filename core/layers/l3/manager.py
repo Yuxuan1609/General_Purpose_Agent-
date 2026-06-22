@@ -224,7 +224,7 @@ class L3Manager(LayerManager):
 
         l3_task = obs.state.get("l3_task", "") if obs.state else ""
         selected_nodes = obs.state.get("selected_nodes", []) if obs.state else []
-        session = obs.session if obs else {}
+        session = obs.session or {}
         domain_path = session.get("domain", "general")
 
         # Deterministic: domain-based skill matching (unchanged)
