@@ -115,3 +115,65 @@ class TestToolSpec:
         e = ToolEntry(name="t", schema={}, handler=lambda **k: None)
         assert e.tool_spec == "primary"
         assert e.semantic_description == ""
+
+    def test_secondary_tool_hidden_by_default(self):
+        r = ToolRegistry()
+        r.register("primary_tool",
+                   {"type": "function", "function": {"name": "primary_tool", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always)
+        r.register("secondary_tool",
+                   {"type": "function", "function": {"name": "secondary_tool", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always,
+                   tool_spec="secondary",
+                   semantic_description="A demo secondary tool")
+        defs = r.get_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert "primary_tool" in names
+        assert "secondary_tool" not in names
+
+    def test_enable_secondary_makes_tool_visible(self):
+        r = ToolRegistry()
+        r.register("secondary_tool",
+                   {"type": "function", "function": {"name": "secondary_tool", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always,
+                   tool_spec="secondary",
+                   semantic_description="A demo secondary tool")
+        r.clear_secondary()
+        r.enable_secondary(["secondary_tool"])
+        defs = r.get_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert "secondary_tool" in names
+
+    def test_clear_secondary_hides_tools(self):
+        r = ToolRegistry()
+        r.register("secondary_tool",
+                   {"type": "function", "function": {"name": "secondary_tool", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always,
+                   tool_spec="secondary",
+                   semantic_description="A demo secondary tool")
+        r.enable_secondary(["secondary_tool"])
+        r.clear_secondary()
+        defs = r.get_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert "secondary_tool" not in names
+
+    def test_enable_secondary_returns_count(self):
+        r = ToolRegistry()
+        r.register("sec_a",
+                   {"type": "function", "function": {"name": "sec_a", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always, tool_spec="secondary")
+        r.register("sec_b",
+                   {"type": "function", "function": {"name": "sec_b", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always, tool_spec="secondary")
+        r.clear_secondary()
+        count = r.enable_secondary(["sec_a", "sec_b"])
+        assert count == 2
+
+    def test_enable_secondary_ignores_unknown_names(self):
+        r = ToolRegistry()
+        r.register("sec_a",
+                   {"type": "function", "function": {"name": "sec_a", "description": "", "parameters": {}}},
+                   echo_handler, check_fn=check_always, tool_spec="secondary")
+        r.clear_secondary()
+        count = r.enable_secondary(["sec_a", "nonexistent"])
+        assert count == 1

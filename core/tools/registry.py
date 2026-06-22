@@ -30,10 +30,35 @@ class ToolRegistry:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._entries: dict[str, ToolEntry] = {}
+                    cls._instance._enabled_secondary = threading.local()
         return cls._instance
 
     def __init__(self, domain_registry=None):
         self._registry = domain_registry
+
+    def _get_enabled_secondary(self) -> set[str]:
+        """Return current thread's enabled secondary set (lazy-init to empty set)."""
+        s = getattr(self._enabled_secondary, "set", None)
+        if s is None:
+            s = set()
+            self._enabled_secondary.set = s
+        return s
+
+    def enable_secondary(self, names: list[str]) -> int:
+        """Add secondary tool names to current thread's enabled set.
+
+        Returns count of names that correspond to actually-registered secondary tools.
+        """
+        with self._lock:
+            valid = {n for n, e in self._entries.items() if e.tool_spec == "secondary"}
+        wanted = set(names) & valid
+        enabled = self._get_enabled_secondary()
+        enabled |= wanted
+        return len(wanted)
+
+    def clear_secondary(self) -> None:
+        """Clear current thread's enabled secondary set."""
+        self._enabled_secondary.set = set()
 
     def register(self, name: str, schema: dict, handler: Callable,
                  check_fn: Callable | None = None, toolset: str = "core",
@@ -64,13 +89,15 @@ class ToolRegistry:
                     self._registry.index_item("tool", d, name)
 
     def get_definitions(self, requested: set[str] | None = None) -> list[dict]:
+        enabled = self._get_enabled_secondary()
         with self._lock:
             entries = self._entries.values()
             if requested:
                 entries = [e for e in entries if e.name in requested]
             return [
                 e.schema for e in entries
-                if e.check_fn is None or e.check_fn()
+                if (e.check_fn is None or e.check_fn())
+                and not (e.tool_spec == "secondary" and e.name not in enabled)
             ]
 
     def dispatch(self, name: str, args: dict, context: dict | None = None,
