@@ -56,9 +56,11 @@ class L1Agent(LayerAgent):
 
     def _build_system_prompt(self, instruction: str, meta: str,
                               static_context: str = "") -> str:
-        """Build system prompt: layer identity + instruction + meta + behavior rules."""
+        """Build system prompt: layer identity + behavior rules + tool guidance."""
         rules = self._philosophy.all_rules()
-        rules_text = "\n".join(            f"- [{r.id}] {r.content}" for r in rules) if rules else "（无）"
+        rules_text = "\n".join(
+            f"- [{r.id}] {r.content}" for r in rules
+        ) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
         from core.layers.base import _TOOL_RULES
         tool_rules = _TOOL_RULES
@@ -72,32 +74,44 @@ class L1Agent(LayerAgent):
             "L2/L3的详细evidence会由后台自动补充。\n"
             "注意：如果之前已提交过内容相似的 learning_target，不要重复调用 record_learning。\n"
         )
+        l1_query_guide = (
+            "## l1_query 工具用法\n"
+            "l1_query 是向 L2 层发起查询的工具。使用场景：\n"
+            "- 需要 L2 检索相关知识卡片来辅助决策\n"
+            "- 需要 L2 调用终端/write/search 等工具执行具体操作\n"
+            "- 不确定某些事实或信息，需要 L2 补充\n"
+            "每次 l1_query 提交一个问题，L2 会回复结果。收到回复后：\n"
+            "- 如果还需要 L2 协助 → 再发一次 l1_query\n"
+            "- 如果已掌握足够信息 → 调用 l1_report 汇报最终结果\n"
+            "禁止在未调用 l1_query 咨询 L2 的情况下直接 l1_report（除非任务无需下层协助）。\n"
+        )
         return (
             f"## 认知层架构\n"
-            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。可调用 create_domain 创建新领域。不调用其他工具。\n"
+            f"- L1（你）：管理行为准则，负责顶层任务拆解与最终决策。可调用 create_domain 创建新领域。\n"
             f"- L2：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
             f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
             f"## 领域边界\n"
             f"你只管理 L1 行为准则（Philosophy Rules）。\n"
             f"不要修改 L2 的知识卡片或 L3 的技能。\n"
-            f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 call_l2=true 下发给 L2/L3 执行。\n\n"
-            f"## 指令\n{instruction}\n\n"
+            f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 l1_query 下发给 L2/L3 执行。\n\n"
+            f"{l1_query_guide}\n"
             f"{tool_rules}\n"
             f"{learning_guidance}\n"
-            f"{meta}\n\n"
             f"【行为准则】\n{rules_text}\n\n"
             f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"
             f"{extra}"
         )
 
-    def _build_user_context(self, state: dict) -> str:
-        """Build user prompt body: current state + history (dynamic per-step).
+    def _build_user_context(self, state: dict, meta: str = "") -> str:
+        """Build user prompt body: task input (meta) + current state + history.
 
         For learning tasks, include Execution Records here instead of system prompt.
         """
         current = state.get("current", "")
         history = state.get("history", "")
         is_learning = "l1_output_format" in state
+
+        task_section = f"[任务]\n{meta}\n\n" if meta else ""
 
         if is_learning:
             units = state.get("learning_units", [])
@@ -116,8 +130,9 @@ class L1Agent(LayerAgent):
             if l1_fb:
                 fb_text = f"{feedback}\n{l1_fb}" if feedback else l1_fb
             fb_section = f"\n\n[L1 修改结果确认]\n{fb_text}" if fb_text else ""
-            return f"[学习数据]\n{records_text}{fb_section}"
+            return f"{task_section}[学习数据]\n{records_text}{fb_section}"
         return (
+            f"{task_section}"
             f"[当前局面]\n{current}\n\n"
             f"[对局历史]\n{history or '（无）'}"
         )
@@ -174,7 +189,7 @@ class L1Agent(LayerAgent):
         static_context = f"[领域节点]\n{nodes_text}" if nodes_text else ""
         system = self._build_system_prompt(instruction, meta, static_context=static_context)
 
-        user_parts = [self._build_user_context(state)]
+        user_parts = [self._build_user_context(state, meta=meta)]
         if history:
             history_lines = []
             for h in history:

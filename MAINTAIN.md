@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-23 | **Terminal-Bench 集成**：新增 `tb/` 模块 — TB 评估环境。`tb/agent/cognitive_agent.py`：`CognitiveAgent(BaseAgent)` 将 cognitive-agent 的 Executor+三层链封装为 TB Agent，`perform_task` 内多轮循环（TaskObservation → Executor → tool call via tmux → capture_pane 反馈 → 直到 done）。`tb/tools/`：`tb_terminal`/`tb_read_file`/`tb_grep` — 同名覆盖原工具（`override=True`），走 `TmuxSession.send_keys()` + `capture_pane()` 在 Docker 容器内执行。`tb/session_holder.py`：模块级 `_current` 引用供 TB 工具取 session。`tb/config/tasks_data.yaml`：Data & File Processing 8 道 task 列表（5 train + 3 test）。`tb/run.sh`：`tb run --agent-import-path` 入口脚本。`core/llm_client.py`：`LLMResponse` 新增 `prompt_tokens`/`completion_tokens` 字段；`LLMClient` 新增 `total_tokens` 属性 + `reset_token_counts()` 方法（累积计数 + 可重置）。`CognitiveAgent.perform_task` 增强：per-round 日志（tokens/耗时/action）、summary.json 摘要文件（含时间戳/轮次/token 统计）。 |
 | 2026-06-22 | **次工具系统**：新增 `core/tools/secondary_tool.py` — `activate_secondary_tools` 工具（LLM subagent 筛选次工具池的 `semantic_description` → `ToolRegistry.enable_secondary()` 启用当前线程）。ToolEntry 新增 `tool_spec`（"primary"/"secondary"）+ `semantic_description` 字段；ToolRegistry 新增 thread-local `_enabled_secondary` + `enable_secondary`/`clear_secondary`/`_get_enabled_secondary` 方法；`get_definitions()` 按确定性逻辑过滤次工具（仅已启用返回）。删除死代码：`ToolEntry.available_domains` 字段、`register()` 中 DomainRegistry 索引块、`get_tools_for_domain()` 方法、`core/tools/domain_tool.py` 整个文件、`chain_factory.py` 中 `set_domain_registry` block。config/tools.yaml 新增 `activate_secondary_tools` 条目（allowlist [l1,l2,l3]）。 |
 | 2026-06-20 | **测试覆盖评估**：新增 `TEST_COVERAGE.md` — 全量测试覆盖报告（pytest 289 tests + 15 E2E 脚本），记录模块-测试映射、覆盖缺口、多并发/异步/E2E 场景缺失。MAINTAIN.md 补：`LayerAgent.set_context`/`_drain_pending_async`、`TaskRunner.wait_all`/`shutdown`、修正 `_call_llm` 中 `MAX_TOOL_TURNS` 为 config 可配。README.md 补：`core/session|monitor|setup|runtime_registry.py` + `scripts/gradio_app.py`；更新测试数 (229→289)。
 | 2026-06-20 | **Gradio App（Gradio v2 Task 7）**：新增 `scripts/gradio_app.py` — Gradio Web UI 入口，三栏布局（左：Session 列表持久化创建/切换/删除；中：当前 session 的任务列表+对话输入；右：选中 task 的 trace 详情 L1/L2/L3 决策树+子任务+层日志）。`SessionState` dataclass 持每浏览器会话 env/session_id/current_task_id/chat_history。`_setup_task_tracking` 订阅 TaskRunner 事件自动回写 SessionStore（sub-agent 完成无需轮询）。`chat()` 用 `set_task_context`/`clear_task_context`（try/finally）绑定 thread-local context 供 dispatch handler 关联子任务。`app.load(every=3)` 定时刷新任务列表。Gradio 4.x API（gr.Blocks/gr.State/gr.Dataframe）。无自动测试，仅 import + py_compile 验证。 |
@@ -876,3 +877,78 @@
 | `chat` | `(user_input, state) → (state, msg, task_df, trace_md, trace_json, log)` closure | 注册 top task → set_task_context → executor.execute → clear_task_context(try/finally) → update_task done/error → env.step | msg.submit, send_btn.click | SessionStore.register_task/update_task/get_session, set_task_context/clear_task_context, executor.execute, env.receive_input/build_task_observation/step, _refresh_* |
 | `select_task` | `(evt: SelectData, task_table, state) → (state, trace_md, trace_json, log)` closure | 点击 task 行：短 id 匹配全 id → 刷新 trace | task_table.select | SessionStore.list_tasks/get_session, _refresh_trace |
 | `refresh_log` | `(log_dir, layer_choice) → gr.update` closure | 按选中层重读日志尾部 50 行 | log_refresh_btn.click | monitor.log_tail |
+
+## tb/ — Terminal-Bench 评估模块
+
+### tb/session_holder.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `set` | `(session) → None` | 设置当前 TmuxSession（模块级 global） | CognitiveAgent.perform_task | — |
+| `get` | `() → TmuxSession` | 获取当前 session（未设置抛 RuntimeError） | tb_terminal/tb_read_file/tb_grep handlers | — |
+| `clear` | `() → None` | 清除当前 session | CognitiveAgent.perform_task | — |
+
+### tb/tools/tb_terminal.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_tb_terminal_tool` | `(registry) → None` | 注册 TB 版 `terminal` 工具（override=True）：`session.send_keys([command, "Enter"], block=True)` → `capture_pane()` | register_tb_tools() | ToolRegistry.register(), session_holder.get() |
+
+### tb/tools/tb_read_file.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_tb_read_file` | `(registry) → None` | 注册 TB 版 `read_file` 工具（override=True）：`wc -l` + `sed -n` 通过 tmux 读取容器内文件 | register_tb_tools() | ToolRegistry.register(), session_holder.get() |
+| `_extract_last_int` | `(pane: str) → int` | 从 wc 输出提取最后整数（总行数） | register_tb_read_file handler | — |
+| `_extract_command_output` | `(pane: str, command: str) → str` | 从 tmux pane 中提取命令后的实际输出 | register_tb_read_file handler | — |
+
+### tb/tools/tb_grep.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_tb_grep` | `(registry) → None` | 注册 TB 版 `grep` 工具（override=True）：`grep -rn -- pattern path` 通过 tmux 搜索容器内文件 | register_tb_tools() | ToolRegistry.register(), session_holder.get() |
+
+### tb/tools/__init__.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `register_tb_tools` | `(registry) → None` | 注册所有 TB 专用工具（覆盖 terminal/read_file/grep） | CognitiveAgent._ensure_setup() | register_tb_terminal_tool, register_tb_read_file, register_tb_grep |
+
+### tb/agent/cognitive_agent.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `CognitiveAgent` | `__init__(**kwargs)` | TB BaseAgent 实现：懒加载 Executor+chain+TB 工具 | tb run harness | setup_executor(), register_tb_tools() |
+| `CognitiveAgent.name` | `() → "cognitive-agent"` | Agent 名称（静态） | harness | — |
+| `CognitiveAgent._ensure_setup` | `() → None` | 首次调用时一次性构建：setup_executor + register_tb_tools | perform_task | setup_executor(), register_tb_tools() |
+| `CognitiveAgent.perform_task` | `(instruction, session, logging_dir) → AgentResult` | 多轮执行循环：build_observation → execute → capture_pane → 反馈 → 直到 L1 done 或 max_rounds | tb run harness | Executor.execute(), session_holder.set/clear, TmuxSession.capture_pane() |
+| `CognitiveAgent._build_observation` | `(task_meta, feedback, round_idx) → TaskObservation` | 构建 TaskObservation（domain="tb", enable_learning=True） | perform_task | — |
+| `CognitiveAgent._log_round` | `(logging_dir, round_idx, result, done, elapsed, tokens) → None` | 写 round_N.json（含 notify 摘要、耗时、token 统计） | perform_task | — |
+| `CognitiveAgent._log_summary` | `(logging_dir, round_logs, llm, total_time) → None` | 写 summary.json（含完成时间、总轮次、总 tokens） | perform_task | — |
+| `_trim_pane` | `(pane, max_lines) → str` | 截断终端输出保留最后 N 行 | perform_task | — |
+
+### tb/config/tasks_data.yaml
+
+| 字段 | 作用 |
+|------|------|
+| `dataset` | TB dataset 名称（terminal-bench-2）|
+| `train[]` | 5 道训练任务（log-summary-date-ranges / heterogeneous-dates / gcode-to-text / db-wal-recovery / extract-elf） |
+| `test[]` | 3 道测试任务（financial-document-processor / large-scale-text-editing / organization-json-generator） |
+
+### tb/run.sh
+
+| 字段 | 作用 |
+|------|------|
+| 用法 | `bash tb/run.sh [task_id]` — 不传 task_id 则跑全部 8 道；参数 `TB_DATASET_PATH` 可覆盖数据集路径 |
+| --agent-import-path | `tb.agent.cognitive_agent:CognitiveAgent` |
+| --dataset-path | 默认 `/tmp/tb-tasks/original-tasks`（需先 `git clone --depth 1 https://github.com/laude-institute/terminal-bench.git /tmp/tb-tasks`）|
+
+### core/llm_client.py (2026-06-23 更新)
+
+| 变化 | 描述 |
+|------|------|
+| `LLMResponse.prompt_tokens` | 新增字段：每次调用的 prompt token 数 |
+| `LLMResponse.completion_tokens` | 新增字段：每次调用的 completion token 数 |
+| `LLMResponse.total_tokens` | 新增 property：prompt_tokens + completion_tokens |
+| `LLMClient.total_tokens` | 新增 property：所有调用的累积 total tokens |
+| `LLMClient.reset_token_counts` | 新增方法：重置累积计数器（每个 task 开始时调用） |

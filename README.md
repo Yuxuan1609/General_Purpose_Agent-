@@ -131,13 +131,40 @@ export DEEPSEEK_API_KEY=your-key-here
 ```yaml
 main_llm:
   provider: deepseek
-  model: deepseek-chat
+  model: deepseek-v4-flash
   api_key_env: DEEPSEEK_API_KEY
   base_url: https://api.deepseek.com
+  thinking: true
+  thinking_effort: high
 
-max_iterations: 50
-l1_max_rules: 20
-l1_max_rule_length: 100
+auxiliary_llm:
+  provider: deepseek
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+
+runtime:
+  max_tool_turns: 30
+  task_runner_workers: 8
+
+l1:
+  max_rules: 20
+  max_rule_length: 300
+
+l2:
+  max_nodes: 5
+  max_cards: 15
+
+l3:
+  name_regex: "^[\\w][\\w._-]*$"
+  name_max_length: 64
+
+executor:
+  max_tokens: 512
+  temperature: 0.1
+
+learning:
+  trigger_threshold: 5.0
+  maintenance_trigger: 5
 ```
 
 ### 运行
@@ -471,16 +498,19 @@ cognitive-agent/
       l2/                # L2Manager + L2Agent
       l3/                # L3Manager + L3Agent
     tools/               # ToolRegistry + 工具实现
-      registry.py        # 注册中心
+      registry.py        # 注册中心（含 thread-local secondary 过滤）
       terminal_tool.py   # 终端执行（优先 pwsh）
       web_search_tool.py # web_search + tavily_search
       file_tools.py      # read_file + grep
-      kb_tools.py        # kb_query / ask_user / kb_delete / kb_fill_gap
+      kb_tools.py        # kb_query / ask_user / kb_delete / kb_fill_gap / kb_modify
       async_tools.py     # check_task / collect_tasks
       tool_proposal.py   # Agent 提案新工具
       sysinfo_tool.py    # 系统信息查询（os/hardware/env/network）
-      consolidation_tools.py # 整理工具（9 CRUD handler 工厂化 + ConsolidationContext）
+      consolidation_tools.py # 整理工具（9 CRUD handler 工厂化 + domain CRUD）
+      consolidation_injection.py # Store DI（替代 ConsolidationContext）
       record_learning_tool.py # record_learning + auto-learning dispatch
+      downward_comm_tool.py   # l1_query / l2_query（跨层向下通信）
+      secondary_tool.py       # activate_secondary_tools（LLM subagent 筛选）
     storage/             # SQLite 存储后端 (l1_store, l2_store, l3_store, domain_store, kb_store)
   scripts/               # 运行脚本
     interactive_agent.py      # 交互式 CLI Agent
@@ -492,7 +522,7 @@ cognitive-agent/
     test_consolidation_real.py# 真实 LLM consolidation 测试
     gradio_app.py            # Gradio Web UI（多 session + 并行任务追踪）
   data/                  # 运行时数据
-  tests/                 # pytest (289 tests, 37 files)
+  tests/                 # pytest (331 tests, 41 files)
     fixtures/              #   Consolidation 测试数据
   docs/                  # 设计文档
 ```
@@ -543,6 +573,19 @@ per-layer modifications (create/update/deprecate)
 | 2 | 超软上限 >5 条 | 深度压缩（跨域抽象、L2→L3 编译、归档过时，需审核）|
 
 配置规格见 `config.yaml` 的 `consolidation:` 段。测试脚本：`python scripts/test_consolidation_real.py`。
+
+---
+
+## 当前阶段：Terminal Bench 2.0 学习能力验证
+
+项目进入实际"学习能力"测试阶段。核心 benchmark 为轻量化的 **Terminal Bench 2.0**，共两组实验：
+
+| 实验 | 方法 | 说明 |
+|------|------|------|
+| **实验一** | 8-10 个高难度 case 直接迭代 | Proof of Concept，存在类似 over-fitting 的情况 |
+| **实验二** | 按类目对 TB 题目划分，传统 train/test split，training set 上学习后测试 | 评估泛化能力 |
+
+预期约一周完成完整实验。
 
 ## 文档
 

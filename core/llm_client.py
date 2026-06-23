@@ -18,10 +18,16 @@ class ToolCall:
 class LLMResponse:
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
     @property
     def has_tool_calls(self) -> bool:
         return len(self.tool_calls) > 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
 
 
 class LLMClient:
@@ -29,6 +35,16 @@ class LLMClient:
         self._client = client
         self.model = model
         self.thinking_enabled = False
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self._prompt_tokens + self._completion_tokens
+
+    def reset_token_counts(self) -> None:
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
 
     def chat(self, messages: list, tools: list | None = None,
              json_mode: bool = False, **kwargs) -> LLMResponse:
@@ -50,6 +66,11 @@ class LLMClient:
             ]
         resp = self._client.chat.completions.create(**params)
         msg = resp.choices[0].message
+        usage = getattr(resp, "usage", None)
+        prompt_tokens = usage.prompt_tokens if usage else 0
+        completion_tokens = usage.completion_tokens if usage else 0
+        self._prompt_tokens += prompt_tokens
+        self._completion_tokens += completion_tokens
         raw_calls = msg.tool_calls or []
         tool_calls = [
             ToolCall(
@@ -64,4 +85,6 @@ class LLMClient:
         return LLMResponse(
             text=msg.content or "",
             tool_calls=tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
