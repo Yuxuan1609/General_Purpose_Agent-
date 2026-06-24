@@ -45,6 +45,12 @@ class CognitiveAgent(BaseAgent):
             sys.path.insert(0, str(_PROJECT_ROOT))
         from core.setup import setup_executor
         self._chain, self._executor = setup_executor(_PROJECT_ROOT)
+
+        import os
+        phase = os.environ.get("TB_PHASE", "train")
+        from tb.env import apply_learning_context
+        apply_learning_context(self._chain, enable=(phase == "train"))
+
         from tb.tools import register_tb_tools
         from core.tools.registry import ToolRegistry
         registry = ToolRegistry()
