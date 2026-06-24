@@ -69,6 +69,13 @@ class CognitiveAgent(BaseAgent):
         from tb.session_holder import set as set_session, clear as clear_session
         set_session(session)
 
+        # Disable pagers so git/man/etc output goes straight to terminal
+        # instead of opening less, which breaks the tmux blocking mechanism.
+        session.send_keys(
+            ["export PAGER=cat GIT_PAGER=cat LESS=FRX", "Enter"],
+            block=True, max_timeout_sec=10,
+        )
+
         # Setup per-layer file logging (detailed prompts + tool calls → logs/tb/)
         _setup_tb_logging()
 
