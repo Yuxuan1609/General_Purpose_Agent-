@@ -6,7 +6,6 @@ downstream results as tool result for LLM to consume in same session.
 """
 from __future__ import annotations
 import json
-import threading
 from typing import Any
 
 _downstreams: dict[str, Any] = {}
@@ -96,11 +95,14 @@ _L2_QUERY_SCHEMA = {
 }
 
 
-def _extract_reply(notify: dict, layer_name: str) -> str:
+def _extract_reply(notify: dict, layer_name: str) -> dict:
     layer_notify = notify.get(layer_name, {})
     if isinstance(layer_notify, dict):
-        return layer_notify.get("reply", "") or layer_notify.get("result", "")
-    return ""
+        return {
+            "reply": layer_notify.get("reply", "") or layer_notify.get("result", ""),
+            "reasoning": layer_notify.get("reasoning", ""),
+        }
+    return {"reply": "", "reasoning": ""}
 
 
 def _make_handler(tool_name: str):
@@ -114,8 +116,6 @@ def _make_handler(tool_name: str):
         if not queries:
             return json.dumps({"error": "queries/queries_to_L3 required"})
 
-        timeout = kwargs.get("timeout", 2000)
-
         results = []
         for q in queries:
             query_text = q.get("query") or q.get("task") or ""
@@ -127,33 +127,17 @@ def _make_handler(tool_name: str):
                 state={"domains_hint": domains_hint} if domains_hint else {},
             )
 
-            result_box = {"notify": None, "error": None}
+            try:
+                downstream.query(sub_obs)
+                notify = downstream.collect_notify()
+            except Exception as e:
+                return json.dumps({"error": str(e)})
 
-            def _run():
-                try:
-                    downstream.query(sub_obs)
-                    result_box["notify"] = downstream.collect_notify()
-                except Exception as e:
-                    result_box["error"] = str(e)
-
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
-            t.join(timeout=timeout)
-
-            if t.is_alive():
-                return json.dumps({
-                    "error": f"{tool_name} timed out after {timeout}s",
-                    "query": query_text,
-                })
-
-            if result_box["error"]:
-                return json.dumps({"error": result_box["error"]})
-
-            notify = result_box["notify"]
-            reply = _extract_reply(notify, downstream.name)
+            extracted = _extract_reply(notify, downstream.name)
             results.append({
                 "query": query_text,
-                "reply": reply,
+                "reply": extracted["reply"],
+                "reasoning": extracted["reasoning"],
             })
 
         return json.dumps({"results": results}, ensure_ascii=False)

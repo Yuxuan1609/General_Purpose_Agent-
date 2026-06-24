@@ -3,6 +3,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch
 
+from core.round_tree import DecisionNode, push_node, pop_node, current_node
 from core.tools.downward_comm_tool import (
     set_layer_downstreams, register_downward_tools, _downstreams
 )
@@ -101,3 +102,67 @@ class TestL2QueryHandler:
         mock.query.assert_called_once()
         parsed = json.loads(result)
         assert "results" in parsed
+
+
+class TestDownwardRoundTreeContinuity:
+    """Issue #1: downward handler must run on caller's thread so the
+    thread-local RoundTree node stack stays continuous and child nodes
+    append to the parent (caller's current_node)."""
+
+    def test_child_node_appends_to_parent_across_downward_call(self):
+        parent = DecisionNode(layer="l0_5_1", query="q", result="", reasoning="")
+        push_node(parent)
+        try:
+            captured_children = []
+
+            def fake_query(obs):
+                child = DecisionNode(layer="l2", query=obs.meta, result="r", reasoning="")
+                push_node(child)
+                pop_node()
+                node = current_node()
+                if node is not None:
+                    node.children.append(child)
+                captured_children.append(current_node())
+
+            downstream = MagicMock()
+            downstream.name = "l2"
+            downstream.query.side_effect = fake_query
+            downstream.collect_notify.return_value = {"l2": {"reply": "ok"}}
+
+            set_layer_downstreams({"l1_query": downstream})
+            registry = ToolRegistry()
+            registry.clear()
+            register_downward_tools(registry)
+
+            registry.dispatch("l1_query", {
+                "queries": [{"query": "what?"}],
+                "reasoning": "r",
+            })
+
+            assert len(parent.children) == 1
+            assert parent.children[0].layer == "l2"
+        finally:
+            pop_node()
+
+
+class TestDownwardReasoningPropagation:
+    """Issue #4: downstream reasoning must be propagated upward in the
+    tool result so upper layers can see the chain of thought."""
+
+    def test_result_includes_reasoning_from_downstream(self):
+        downstream = _make_mock_downstream("l2", reply="answer", result="answer")
+        downstream.collect_notify.return_value = {
+            "l2": {"reply": "answer", "result": "answer", "reasoning": "because X"},
+        }
+        set_layer_downstreams({"l1_query": downstream})
+        registry = ToolRegistry()
+        registry.clear()
+        register_downward_tools(registry)
+
+        result = registry.dispatch("l1_query", {
+            "queries": [{"query": "why?"}],
+            "reasoning": "r",
+        })
+        parsed = json.loads(result)
+        assert "results" in parsed
+        assert parsed["results"][0]["reasoning"] == "because X"

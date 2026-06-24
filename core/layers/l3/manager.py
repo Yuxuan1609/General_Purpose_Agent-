@@ -192,6 +192,11 @@ class L3Agent(LayerAgent):
         self._log.debug("  tools: %s", [t["function"]["name"] for t in all_tools])
         result = self._call_llm(system, user, tools=all_tools, layer=layer,
                                 capture_tools={"l3_report"})
+        if not result.get("done"):
+            raw = result.get("_raw") or result.get("result") or ""
+            if raw:
+                return {"done": True, "result": str(raw),
+                        "reasoning": "direct reply", "skills_used": []}
         return result
 
 

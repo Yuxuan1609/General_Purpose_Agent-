@@ -216,7 +216,7 @@ def _clean_old_archives(archive_root: Path, max_age_days: int):
 
 
 SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target 扫描决策树，
-提取 L2 和 L3 层中与该目标相关的 observation。
+ 提取 L1、L2 和 L3 层中与该目标相关的 observation。
 
 决策树结构（缩进表示父子关系）：
   L1[name=root]: 本轮最高决策
@@ -225,6 +225,14 @@ SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target
 
 你需要输出严格的 JSON（json_mode），格式如下：
 {
+  "l1_observations": [
+    {
+      "finding": "L1 层的顶层推理或结论",
+      "evidence": "摘录自决策树中 L1 节点的 result 字段（原文引用）",
+      "implication": "这对 learning_target 意味着什么",
+      "relevance": "high | medium | low"
+    }
+  ],
   "l2_observations": [
     {
       "finding": "L2层发现了什么或处理了什么",
@@ -242,11 +250,11 @@ SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target
 - 只提取与 learning_target 语义相关的 observation。不相关的跳过。
 - evidence 必须是 decision_tree 中某节点的 result 原文（截取前 500 字），不能编造。
 - implication 是推论：例如"因为 L2 没有该领域的卡片，所以应该补充"。
-- 如果 L2 节点在某轮中无实质发现（result 为空或纯状态信息如 status:ok），跳过该节点。
+- 如果某节点在某轮中无实质发现（result 为空或纯状态信息如 status:ok），跳过该节点。
 - 最多每层返回 5 条 observation，按 relevance 降序。
 - 如果没有相关 observation，返回空数组 []。
 - L3 节点仅在其内容与 learning_target 相关时才提取。
-- 注意保留树结构中的 parent-child 关系——observation 的 evidence 应该清晰地指出来自哪个 L2 节点及其子 L3 节点。
+- 注意保留树结构中的 parent-child 关系——observation 的 evidence 应该清晰地指出来自哪个节点及其子节点。
 """
 
 
@@ -312,5 +320,6 @@ def _fill_observations_llm(record: dict, tree_nodes: list, target: str):
     resp = llm.chat(messages=messages, json_mode=True)
     text = resp.text if hasattr(resp, 'text') else str(resp)
     filled = json.loads(text)
+    record["l1_observations"] = filled.get("l1_observations", [])
     record["l2_observations"] = filled.get("l2_observations", [])
     record["l3_observations"] = filled.get("l3_observations", [])

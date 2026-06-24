@@ -4,12 +4,15 @@
 # Usage:
 #   bash tb/run.sh                            # run ALL 32 tasks
 #   bash tb/run.sh <task-id>                  # run single task
+#   bash tb/run.sh <task-id> <phase>          # single task with phase
 #   bash tb/run.sh train                      # run all 20 train tasks
 #   bash tb/run.sh test                       # run all 12 test tasks
 #   bash tb/run.sh debugging                  # run Debugging category (8)
 #   bash tb/run.sh software-engineering       # run Software Engineering (8)
 #   bash tb/run.sh system-administration      # run System Administration (8)
 #   bash tb/run.sh security                   # run Security category (8)
+#   bash tb/run.sh parallel <task...>         # parallel test run (processes)
+#   bash tb/run.sh parallel-train <task...>   # parallel train run (processes)
 #
 # Requires: terminal-bench installed (pip), Docker running, DEEPSEEK_API_KEY set
 
@@ -116,6 +119,41 @@ _run() {
         --no-cleanup
 }
 
+_run_bg() {
+    local task="$1"
+    local phase="${2:-train}"
+    local log="$OUTPUT_DIR/parallel/${task}.log"
+    mkdir -p "$OUTPUT_DIR/parallel"
+    echo "  [launch] $task ($phase) → $log"
+    TB_PHASE="$phase" python3.13 -m tb.runner run \
+        --agent-import-path "$AGENT" \
+        --dataset-path "$DATASET_PATH" \
+        --task-id "$task" \
+        --output-path "$OUTPUT_DIR" \
+        --n-concurrent 1 \
+        --no-rebuild \
+        --no-cleanup \
+        > "$log" 2>&1 &
+}
+
+_parallel_summary() {
+    echo ""
+    echo "=== Parallel Results ==="
+    for task in "$@"; do
+        local json=$(find "$OUTPUT_DIR" -path "*/${task}/*" -name results.json -maxdepth 6 2>/dev/null | head -1)
+        if [ -f "$json" ]; then
+            python3.13 -c "
+import json
+d = json.load(open('$json'))
+r = d.get('results', [d])[0] if d.get('results') else d
+print(f'  {r[\"task_id\"]:30s} resolved={str(r[\"is_resolved\"]):5s}  tokens={r[\"total_input_tokens\"]}/{r[\"total_output_tokens\"]}')
+" 2>/dev/null
+        else
+            printf "  %-30s (no results.json)\n" "$task"
+        fi
+    done
+}
+
 if [ -n "$1" ]; then
     case "$1" in
         train)
@@ -142,9 +180,28 @@ if [ -n "$1" ]; then
             echo "Running Security category (${#SECURITY_TASKS[@]} tasks)"
             for task in "${SECURITY_TASKS[@]}"; do _run "$task"; done
             ;;
+        parallel)
+            shift
+            echo "Running in parallel: $# tasks"
+            for task in "$@"; do _run_bg "$task" "test"; done
+            wait
+            _parallel_summary "$@"
+            ;;
+        parallel-train)
+            shift
+            echo "Running in parallel (train): $# tasks"
+            for task in "$@"; do _run_bg "$task" "train"; done
+            wait
+            _parallel_summary "$@"
+            ;;
         *)
-            echo "Running single task: $1"
-            _run "$1" "train"
+            if [ -n "$2" ]; then
+                echo "Running single task: $1 (phase=$2)"
+                _run "$1" "$2"
+            else
+                echo "Running single task: $1"
+                _run "$1" "train"
+            fi
             ;;
     esac
 else

@@ -210,30 +210,20 @@ class LayerAgent(ABC):
                 }
                 messages.append(assistant_msg)
 
-                # Split: capture tools vs executable tools
+                # Split: capture tools vs executable tools.
+                # Capture is deferred: executables run first (side effects +
+                # tool results recorded), then capture result is returned.
                 executable_calls = []
+                capture_call = None
                 for tc in resp.tool_calls:
                     if capture_tools and tc.function.name in capture_tools:
-                        self._log.debug("  ═══ capture tool '%s' (turn %d) ═══\n%s",
-                                       tc.function.name, turn,
-                                       _indent(tc.function.arguments, 4))
-                        self._drain_pending_async()
-                        try:
-                            parsed = json.loads(tc.function.arguments)
-                            if isinstance(parsed, dict):
-                                parsed["_capture_tool"] = tc.function.name
-                                return parsed
-                        except json.JSONDecodeError:
-                            self._log.warning("capture_tool arguments not valid JSON")
-                        self._drain_pending_async()
-                        return {"_raw": tc.function.arguments, "_capture_tool": tc.function.name}
-                    executable_calls.append(tc)
+                        capture_call = tc
+                    else:
+                        executable_calls.append(tc)
 
-                if not executable_calls:
-                    continue  # all calls were captured
+                async_dispatched = 0
 
                 # Split: downward comm tools force all sync tools to run inline (serial, main thread)
-                # to avoid concurrent layer chain traversal with other tool execution.
                 _DOWNWARD_TOOLS = {"l1_query", "l2_query"}
                 has_downward = any(tc.function.name in _DOWNWARD_TOOLS for tc in executable_calls)
 
@@ -290,6 +280,7 @@ class LayerAgent(ABC):
                                 "tool_call_id": tc.id,
                                 "content": json.dumps({"task_id": _tid, "status": "running"}),
                             })
+                            async_dispatched += 1
 
                 # No downward comm — normal flow: split sync/async
                 sync_batch = []
@@ -336,6 +327,7 @@ class LayerAgent(ABC):
                             "tool_call_id": tc.id,
                             "content": json.dumps({"task_id": tid, "status": "running"}),
                         })
+                        async_dispatched += 1
 
                 # Process sync calls — parallel batch
                 if sync_batch:
@@ -392,9 +384,27 @@ class LayerAgent(ABC):
                             "content": serialized,
                         })
 
-                if async_calls:
-                    pending_text = f"[Pending async tasks: {len(async_calls)}. Use collect_tasks to retrieve results.]"
+                if async_dispatched:
+                    pending_text = f"[Pending async tasks: {async_dispatched}. Use collect_tasks to retrieve results.]"
                     messages.append({"role": "system", "content": pending_text})
+
+                # Capture tool: executables above have already run (side effects
+                # + tool results recorded). Return the capture tool's arguments
+                # as structured output. Drain pending async once before returning.
+                if capture_call is not None:
+                    self._log.debug("  ═══ capture tool '%s' (turn %d) ═══\n%s",
+                                   capture_call.function.name, turn,
+                                   _indent(capture_call.function.arguments, 4))
+                    self._drain_pending_async()
+                    try:
+                        parsed = json.loads(capture_call.function.arguments)
+                        if isinstance(parsed, dict):
+                            parsed["_capture_tool"] = capture_call.function.name
+                            return parsed
+                    except json.JSONDecodeError:
+                        self._log.warning("capture_tool arguments not valid JSON")
+                    return {"_raw": capture_call.function.arguments,
+                            "_capture_tool": capture_call.function.name}
 
                 continue  # next turn
 

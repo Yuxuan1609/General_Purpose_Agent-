@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-24 | **Layer Loop 缺陷修复（ISSUES.md #1-6,#8）**：`downward_comm_tool` 去掉 `threading.Thread+join(timeout)`，改纯同步执行（放弃 downward 超时），修复 thread-local RoundTree 栈被线程割裂致 L2/L3 节点丢失 (#1)；`_extract_reply` 签名 `str→dict{reply,reasoning}`，下层 reasoning 向上传递 (#4)；`L2Manager.query` pop 后 append l2_node 到 `current_node()`，对齐 L3 (#2)；`L3Agent.decide` normal mode 加 done 兜底（_raw/result 拼装），对齐 L1/L2 (#6)；`base.py _call_llm` capture 改延迟语义——同轮 executable 先执行再 return capture (#3)；统一 `async_dispatched` 计数器驱动 "Pending async/collect_tasks" 提醒，覆盖 downward 路径 (#5)；capture 命中 `_drain_pending_async` 只调一次 (#8)。#7 经确认保持原状（纯文本回复 reasoning 仍为空，LLMResponse 无独立 thinking 字段）。新增 `tests/test_call_llm_tool_loop.py`，扩展 `test_downward_comm_tool.py`/`test_layers.py`。 |
 | 2026-06-24 | **TB 测试反馈机制**：新增 `tb/feedback_harness.py` — `FeedbackHarness(Harness)` 子类重写 `_run_trial`，将 `_parse_results` 移入 `with spin_up_terminal()` 块内，在容器存活期间插入修复循环（最多 3 轮修复）。`tb/agent/cognitive_agent.py` 新增 `receive_test_results()`/`_build_feedback_meta()` 方法 — 接收 pass/fail 结果驱动 Executor 反思/修复。新增 `tb/runner.py` — monkey-patch `terminal_bench.Harness = FeedbackHarness` 后调用 Typer CLI。新增 `tb/env.py` — `apply_learning_context(chain, enable)` 用 `AgentContext(denied_tools={...})` 实现 train/test 工具过滤（test 禁用 record_learning/kb_add/kb_fill_gap）。`tb/run.sh` 改用 `python -m tb.runner run` 入口；加 `_run()` 函数支持 `$2` phase 参数 → `TB_PHASE` 环境变量。`tb/config/tasks_data.yaml` 更新为 32 道 Debugging/SoftwareEng/SystemAdmin/Security 四类任务（20 train + 12 test）。 |
 | 2026-06-23 | **Terminal-Bench 集成**：新增 `tb/` 模块 — TB 评估环境。`tb/agent/cognitive_agent.py`：`CognitiveAgent(BaseAgent)` 将 cognitive-agent 的 Executor+三层链封装为 TB Agent，`perform_task` 内多轮循环（TaskObservation → Executor → tool call via tmux → capture_pane 反馈 → 直到 done）。`tb/tools/`：`tb_terminal`/`tb_read_file`/`tb_grep` — 同名覆盖原工具（`override=True`），走 `TmuxSession.send_keys()` + `capture_pane()` 在 Docker 容器内执行。`tb/session_holder.py`：模块级 `_current` 引用供 TB 工具取 session。`tb/config/tasks_data.yaml`：Data & File Processing 8 道 task 列表（5 train + 3 test）。`tb/run.sh`：`tb run --agent-import-path` 入口脚本。`core/llm_client.py`：`LLMResponse` 新增 `prompt_tokens`/`completion_tokens` 字段；`LLMClient` 新增 `total_tokens` 属性 + `reset_token_counts()` 方法（累积计数 + 可重置）。`CognitiveAgent.perform_task` 增强：per-round 日志（tokens/耗时/action）、summary.json 摘要文件（含时间戳/轮次/token 统计）。 |
 | 2026-06-22 | **次工具系统**：新增 `core/tools/secondary_tool.py` — `activate_secondary_tools` 工具（LLM subagent 筛选次工具池的 `semantic_description` → `ToolRegistry.enable_secondary()` 启用当前线程）。ToolEntry 新增 `tool_spec`（"primary"/"secondary"）+ `semantic_description` 字段；ToolRegistry 新增 thread-local `_enabled_secondary` + `enable_secondary`/`clear_secondary`/`_get_enabled_secondary` 方法；`get_definitions()` 按确定性逻辑过滤次工具（仅已启用返回）。删除死代码：`ToolEntry.available_domains` 字段、`register()` 中 DomainRegistry 索引块、`get_tools_for_domain()` 方法、`core/tools/domain_tool.py` 整个文件、`chain_factory.py` 中 `set_domain_registry` block。config/tools.yaml 新增 `activate_secondary_tools` 条目（allowlist [l1,l2,l3]）。 |
@@ -191,8 +192,9 @@
 |----------|------|------|-----------|---------|
 | `set_layer_downstreams` | `(mapping: dict[str, Manager]) → None` | 设置 tool_name → downstream Manager 映射（模块级 global） | chain_factory._mount_tools | — |
 | `register_downward_tools` | `(tool_registry) → None` | 注册 l1_query / l2_query 为普通 ToolRegistry 工具（sync=true） | register_all_tools() | ToolRegistry.register() |
-| `l1_query` handler | `(args, timeout=2000) → str` | threading.Thread + join(timeout) 同步调 L2 Manager.query + collect_notify，超时返回 error JSON（daemon 线程继续运行） | L1Agent tool loop（_call_llm） | downstream.query(), downstream.collect_notify() |
-| `l2_query` handler | `(args, timeout=2000) → str` | threading.Thread + join(timeout) 同步调 L3 Manager.query + collect_notify，超时返回 error JSON（daemon 线程继续运行） | L2Agent tool loop（_call_llm） | downstream.query(), downstream.collect_notify() |
+| `_extract_reply` | `(notify: dict, layer_name: str) → dict{reply, reasoning}` | 从下层 notify payload 提取 reply 与 reasoning（原只取 reply，现 reasoning 一并向上传） | l1_query/l2_query handler | — |
+| `l1_query` handler | `(args, **kwargs) → str` | 同步（主线程）调 L2 Manager.query + collect_notify，返回含 reply+reasoning 的 JSON。原用 threading.Thread+join(timeout) 实现 timeout，但 thread-local RoundTree 栈被割裂致决策树断裂，已移除线程改纯同步（放弃 downward 超时） | L1Agent tool loop（_call_llm） | downstream.query(), downstream.collect_notify() |
+| `l2_query` handler | `(args, **kwargs) → str` | 同步（主线程）调 L3 Manager.query + collect_notify，返回含 reply+reasoning 的 JSON。同上，已移除线程改纯同步 | L2Agent tool loop（_call_llm） | downstream.query(), downstream.collect_notify() |
 
 ## core/tools/consolidation_tools.py
 
@@ -289,7 +291,7 @@
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `LayerAgent` | `__init__(llm_client, log)` | ABC，所有层 LLM Agent 基类。含 `_injector` 属性。 | L1Agent, L2Agent | — |
-| `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。async 分支有 thread-local context 时登记到 SessionStore。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch(), SessionStore.register_task (async branch, via get_task_context) |
+| `LayerAgent._call_llm` | `(system, user, schema=None, tools=None, layer="", capture_tools=None) → dict` | 多轮 tool call 循环 + json_mode + robust_parse。parallel sync execution via run_sync_batch, async dispatch via TaskRunner。`capture_tools` 将指定 tool 的 arguments 直接作为结构化输出返回，替代 JSON-in-prompt。capture 现为延迟语义：同轮 executable 先执行（副作用+tool 结果入 messages）再 return capture；统一 `async_dispatched` 计数器驱动 "Pending async/collect_tasks" 提醒（覆盖 downward 路径）；capture 命中时 `_drain_pending_async` 只调一次。async 分支有 thread-local context 时登记到 SessionStore。 | L1/L2/L3 decide() | LLMClient.chat(), robust_parse(), injector.execute_tool_call(), TaskRunner.submit(), run_sync_batch(), SessionStore.register_task (async branch, via get_task_context) |
 | `LayerAgent._schema_to_tool` | `(name, description, schema) → dict` | 将 JSON Schema 转为 OpenAI function-calling tool 定义（已少用，CaptureToolDef.to_openai_tool() 替代） | L1/L2/L3 decide() | — |
 | `LayerAgent._get_tools` | `(layer) → list[dict]\|None` | 从 injector 获取该层可见工具 schema 列表。 | L1/L2/L3 decide() | injector.get_tools_for_layer() |
 | `LayerAgent.set_injector` | `(injector) → None` | 注入 LayerInjector 以启用工具调用。 | chain_factory._mount_tools() | — |
@@ -315,14 +317,14 @@
 | `L3Manager.process` | `(obs) → dict` | stub，实际逻辑在 query() | LayerManager.query() | — |
 | `L3Manager.notify` | `() → dict` | 返回 `{skills_matched, skills_used, result, reasoning}` | collect_notify() | — |
 | `L3Agent` | `__init__(llm_client, skill_layer=None, domain_registry=None)` | L3 LLM Agent：基于匹配技能执行认知任务 | L3Manager.query() | — |
-| `L3Agent.decide` | `(meta, state, context, tools, layer) → dict{done, result, skills_used, reasoning}` | 单步决策：通过 capture_tool（l3_report 唯一退出）输出；`l3_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。L3_CONTINUE_TOOL 已删除，多轮靠 tool loop。 | L3Manager.query() | _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
+| `L3Agent.decide` | `(meta, state, context, tools, layer) → dict{done, result, skills_used, reasoning}` | 单步决策：通过 capture_tool（l3_report 唯一退出）输出；`l3_output_format` 时从 ToolRegistry 获取 consolidation 工具 schema。normal mode 加 done 兜底（capture JSON 解析失败时用 _raw/result 拼装 done=True 返回，对齐 L1/L2）。L3_CONTINUE_TOOL 已删除，多轮靠 tool loop。 | L3Manager.query() | _call_llm(), _schema_to_tool(), ToolRegistry.get_definitions() |
 
 ## core/layers/l2/manager.py (Phase 1)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
 | `L2Manager` | `__init__(knowledge, downstream, upward, downward, auxiliary_llm, domain_registry=None)` | L2 层 Manager，包裹 FlexibleKnowledge + L2Agent。单次 decide()，l2_query 走 ToolRegistry 工具 | build_chain() | — |
-| `L2Manager.query` | `(msg, trace_id) → None` | 单次 decide()（l2_query 在 tool loop 内同步调 L3）→ RoundTree push | L0_5_1 DownwardComm / l1_query handler | L2Agent.decide(), push_node/pop_node |
+| `L2Manager.query` | `(msg, trace_id) → None` | 单次 decide()（l2_query 在 tool loop 内同步调 L3）→ RoundTree push + append l2_node 到父节点（current_node） | L0_5_1 DownwardComm / l1_query handler | L2Agent.decide(), push_node/pop_node/current_node |
 | `L2Manager.notify` | `() → dict` | 返回 `{reply, cards, reasoning}` | collect_notify() | — |
 | `L2Manager._propagate` | `(obs, trace_id, l3_task="", selected_nodes=None) → None` | 包装 LayerMessage(QUERY) 发送到 L3 | query() | L3Manager.query() |
 | `L2Agent` | `__init__(llm_client, knowledge, domain_nodes=None, domain_registry=None)` | L2 层 LLM Agent，while-loop 决策 | L2Manager | — |

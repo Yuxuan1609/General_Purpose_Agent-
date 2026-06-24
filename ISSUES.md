@@ -2,6 +2,8 @@
 
 > 2026-06-24 审查发现：L1/L2/L3 多轮对话中的断点与逻辑漏洞。
 > 重点排查思维链传递与工具结果返回值。
+>
+> **2026-06-24 修复进度**：#1 #2 #3 #4 #5 #6 #8 已修复（见各条 ✅）。#7 经确认保持原状（已知限制）。
 
 ---
 
@@ -107,13 +109,13 @@
 
 ## 汇总
 
-| # | 严重度 | 问题 | 位置 |
-|---|--------|------|------|
-| 1 | 🔴 | 决策树被 threading.local 割裂 | downward_comm_tool:139 + round_tree:62 |
-| 2 | 🔴 | L2Manager 缺 parent.children.append | l2/manager.py:410 |
-| 3 | 🟡 | capture tool 同轮吞掉 executable tool | base.py:214-230 |
-| 4 | 🟡 | 下层 reasoning 不向上传递 | downward_comm_tool:99-103 |
-| 5 | 🟡 | downward 路径 async 无提示 | base.py:295-397 |
-| 6 | 🟢 | L3Agent 缺 done fallback | l3/manager.py:193-195 |
-| 7 | 🟢 | 纯文本回复 reasoning 丢失 | base.py:407-408 |
-| 8 | 🟢 | drain 重复调用 | base.py:220,228 |
+| # | 严重度 | 问题 | 位置 | 状态 |
+|---|--------|------|------|------|
+| 1 | 🔴 | 决策树被 threading.local 割裂 | downward_comm_tool:139 + round_tree:62 | ✅ 改纯同步 |
+| 2 | 🔴 | L2Manager 缺 parent.children.append | l2/manager.py:410 | ✅ 已加 append |
+| 3 | 🟡 | capture tool 同轮吞掉 executable tool | base.py:214-230 | ✅ 延迟 capture |
+| 4 | 🟡 | 下层 reasoning 不向上传递 | downward_comm_tool:99-103 | ✅ 提取 reasoning |
+| 5 | 🟡 | downward 路径 async 无提示 | base.py:295-397 | ✅ 统一计数器 |
+| 6 | 🟢 | L3Agent 缺 done fallback | l3/manager.py:193-195 | ✅ 已加兜底 |
+| 7 | 🟢 | 纯文本回复 reasoning 丢失 | base.py:407-408 | ⏸ 保持原状（已知限制） |
+| 8 | 🟢 | drain 重复调用 | base.py:220,228 | ✅ 只调一次 |

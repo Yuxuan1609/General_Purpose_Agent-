@@ -7,7 +7,7 @@ from pathlib import Path
 from capability import Capability, CapabilityResult
 
 _TOOL_CONFIG: dict | None = None
-_TOOL_CONFIG_PATH = Path("config/tools.yaml")
+_TOOL_CONFIG_PATH = Path(__file__).parent.parent / "config" / "tools.yaml"
 
 
 def _load_tool_config() -> dict:

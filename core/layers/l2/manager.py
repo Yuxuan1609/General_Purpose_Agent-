@@ -392,7 +392,7 @@ class L2Manager(LayerManager):
             "l3_results": [],
         }
 
-        from core.round_tree import DecisionNode, push_node, pop_node
+        from core.round_tree import DecisionNode, push_node, pop_node, current_node
         l2_node = DecisionNode(layer="l2", query=query, result="", reasoning="")
         push_node(l2_node)
 
@@ -408,6 +408,9 @@ class L2Manager(LayerManager):
         l2_node.result = result.get("reply", "")
         l2_node.reasoning = result.get("reasoning", "")
         pop_node()
+        parent = current_node()
+        if parent is not None:
+            parent.children.append(l2_node)
 
         cards = result.get("selected_cards", [])
         self._cards = cards

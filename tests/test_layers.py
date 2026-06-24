@@ -1,7 +1,10 @@
 import pytest
 from pathlib import Path
+from unittest.mock import MagicMock
+
 from core.types import TaskObservation
 from core.task import Domain
+from core.round_tree import DecisionNode, push_node, pop_node
 
 
 @pytest.fixture
@@ -98,3 +101,80 @@ class TestL2Manager:
         payload = manager.notify()
         assert "status" in payload
         assert payload["layer"] == "l2"
+
+
+class TestL2ManagerRoundTreeAppend:
+    """Issue #2: L2Manager.query must append l2_node to the parent
+    (current_node) so the decision tree keeps the L1→L2→L3 structure."""
+
+    def test_l2_node_appended_to_parent(self, l2_knowledge):
+        manager = L2Manager(l2_knowledge)
+        manager._agent = MagicMock()
+        manager._agent.decide.return_value = {
+            "done": True, "reply": "ans", "reasoning": "r", "selected_cards": [],
+        }
+
+        parent = DecisionNode(layer="l0_5_1", query="q", result="", reasoning="")
+        push_node(parent)
+        try:
+            obs = TaskObservation(meta="query", state={})
+            manager.query(obs)
+            assert len(parent.children) == 1
+            assert parent.children[0].layer == "l2"
+        finally:
+            pop_node()
+
+
+from core.layers.l3.manager import L3Manager
+
+
+class TestL3ManagerRoundTreeAppend:
+    """Symmetry check: L3 already appends (Issue #2 references it as the
+    correct pattern). Verifies it still appends to the parent node."""
+
+    def test_l3_node_appended_to_parent(self, l3_skill_layer):
+        manager = L3Manager(l3_skill_layer)
+        manager._agent = MagicMock()
+        manager._agent.decide.return_value = {
+            "done": True, "result": "ans", "reasoning": "r", "skills_used": [],
+        }
+
+        parent = DecisionNode(layer="l2", query="q", result="", reasoning="")
+        push_node(parent)
+        try:
+            obs = TaskObservation(meta="task", state={}, session={"domain": "general"})
+            manager.query(obs)
+            assert len(parent.children) == 1
+            assert parent.children[0].layer == "l3"
+        finally:
+            pop_node()
+
+
+class TestL3AgentDoneFallback:
+    """Issue #6: L3Agent.decide normal mode must wrap a result lacking 'done'
+    (e.g. capture-tool JSON parse failure returns {_raw, _capture_tool}) into
+    a done=True payload, mirroring L1/L2 fallback."""
+
+    def test_wraps_raw_result_without_done(self, l3_skill_layer):
+        from core.layers.l3.manager import L3Agent
+        agent = L3Agent(MagicMock(), skill_layer=l3_skill_layer)
+        agent._call_llm = MagicMock(
+            return_value={"_raw": "raw text", "_capture_tool": "l3_report"})
+
+        result = agent.decide(
+            meta="m", state={}, context={"matched_skills": [], "l3_task": ""})
+
+        assert result.get("done") is True
+        assert "raw text" in str(result.get("result", ""))
+
+    def test_returns_original_when_done_present(self, l3_skill_layer):
+        from core.layers.l3.manager import L3Agent
+        agent = L3Agent(MagicMock(), skill_layer=l3_skill_layer)
+        agent._call_llm = MagicMock(return_value={
+            "done": True, "result": "ok", "reasoning": "r", "skills_used": ["s"]})
+
+        result = agent.decide(
+            meta="m", state={}, context={"matched_skills": [], "l3_task": ""})
+
+        assert result["result"] == "ok"
+        assert result["skills_used"] == ["s"]
