@@ -131,48 +131,56 @@ class FeedbackHarness(Harness):
 
             is_resolved = self._is_resolved(parser_results)
 
-            for repair_round in range(_MAX_REPAIRS + 1):
-                if is_resolved:
-                    self._logger.debug(
-                        f"Task {trial_handler.task_id} resolved (round {repair_round})"
-                    )
-                    self._call_receive_test_results(
-                        task_agent, parser_results=parser_results,
-                        is_resolved=True, exhausted=False,
-                        session=session, terminal=terminal,
-                    )
-                    break
+            import os
+            is_test = os.environ.get("TB_PHASE", "train") == "test"
 
-                if repair_round < _MAX_REPAIRS:
-                    self._logger.debug(
-                        f"Task {trial_handler.task_id} unresolved, "
-                        f"repair round {repair_round + 1}/{_MAX_REPAIRS}"
-                    )
-                    self._call_receive_test_results(
-                        task_agent, parser_results=parser_results,
-                        is_resolved=False, exhausted=False,
-                        session=session, terminal=terminal,
-                    )
-                    self._run_tests(
-                        terminal=terminal, session=session, trial_handler=trial_handler,
-                    )
-                    post_test_pane = session.capture_pane(capture_entire=True)
-                    parser_results, parse_failure_mode = self._parse_results(
-                        trial_handler=trial_handler, post_test_pane=post_test_pane,
-                    )
-                    if parse_failure_mode != FailureMode.NONE:
+            if is_test:
+                self._logger.debug(
+                    f"Task {trial_handler.task_id} test mode — skipping feedback loop"
+                )
+            else:
+                for repair_round in range(_MAX_REPAIRS + 1):
+                    if is_resolved:
+                        self._logger.debug(
+                            f"Task {trial_handler.task_id} resolved (round {repair_round})"
+                        )
+                        self._call_receive_test_results(
+                            task_agent, parser_results=parser_results,
+                            is_resolved=True, exhausted=False,
+                            session=session, terminal=terminal,
+                        )
                         break
-                    is_resolved = self._is_resolved(parser_results)
-                else:
-                    self._logger.debug(
-                        f"Task {trial_handler.task_id} unresolved, "
-                        f"repairs exhausted ({_MAX_REPAIRS})"
-                    )
-                    self._call_receive_test_results(
-                        task_agent, parser_results=parser_results,
-                        is_resolved=False, exhausted=True,
-                        session=session, terminal=terminal,
-                    )
+
+                    if repair_round < _MAX_REPAIRS:
+                        self._logger.debug(
+                            f"Task {trial_handler.task_id} unresolved, "
+                            f"repair round {repair_round + 1}/{_MAX_REPAIRS}"
+                        )
+                        self._call_receive_test_results(
+                            task_agent, parser_results=parser_results,
+                            is_resolved=False, exhausted=False,
+                            session=session, terminal=terminal,
+                        )
+                        self._run_tests(
+                            terminal=terminal, session=session, trial_handler=trial_handler,
+                        )
+                        post_test_pane = session.capture_pane(capture_entire=True)
+                        parser_results, parse_failure_mode = self._parse_results(
+                            trial_handler=trial_handler, post_test_pane=post_test_pane,
+                        )
+                        if parse_failure_mode != FailureMode.NONE:
+                            break
+                        is_resolved = self._is_resolved(parser_results)
+                    else:
+                        self._logger.debug(
+                            f"Task {trial_handler.task_id} unresolved, "
+                            f"repairs exhausted ({_MAX_REPAIRS})"
+                        )
+                        self._call_receive_test_results(
+                            task_agent, parser_results=parser_results,
+                            is_resolved=False, exhausted=True,
+                            session=session, terminal=terminal,
+                        )
 
             results.parser_results = parser_results
             results.is_resolved = is_resolved
@@ -183,6 +191,9 @@ class FeedbackHarness(Harness):
     def _call_receive_test_results(
         task_agent, parser_results, is_resolved, exhausted, session, terminal,
     ):
+        import os
+        if os.environ.get("TB_PHASE", "train") == "test":
+            return
         if not hasattr(task_agent, "receive_test_results"):
             return
         try:

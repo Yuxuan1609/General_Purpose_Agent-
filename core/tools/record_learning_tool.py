@@ -88,7 +88,7 @@ def _build_and_save(domain, target, importance, reasoning):
 
     _fill_observations_llm(record, tree_nodes, target)
 
-    pending_path = Path("data/learning/pending") / domain
+    pending_path = Path("data/learning/pending")
     pending_path.mkdir(parents=True, exist_ok=True)
     stamp = _now().replace(":", "-")
     filepath = pending_path / f"{record['id']}_{stamp}.json"
