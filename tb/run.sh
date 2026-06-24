@@ -139,38 +139,41 @@ _run_bg() {
 }
 
 _poll_and_summary() {
-    # Trap: show summary on Ctrl+C / exit
-    trap '_show_summary "$@"' EXIT
-    local done=0
-    while [ $done -lt $# ]; do
+    _PS_TASKS=("$@")
+    trap '_show_summary "${_PS_TASKS[@]}"' EXIT
+    local done=0 total=${#_PS_TASKS[@]}
+    while [ $done -lt $total ]; do
         sleep 10
         done=0
-        for task in "$@"; do
+        for task in "${_PS_TASKS[@]}"; do
             local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
-            if [ -f "$json" ]; then
-                done=$((done + 1))
-            fi
+            if [ -f "$json" ]; then done=$((done + 1)); fi
         done
-        if [ $done -lt $# ]; then
-            echo "  [$done/$#] tasks completed, checking again in 10s..."
+        if [ $done -lt $total ]; then
+            echo "  [$done/$total] done, checking in 10s..."
         fi
     done
-    # Clear trap before normal exit to avoid duplicate output
     trap - EXIT
-    _show_summary "$@"
+    _show_summary "${_PS_TASKS[@]}"
 }
 
 _show_summary() {
+    local tasks=("$@")
     echo ""
     echo "=== Parallel Results ==="
-    for task in "$@"; do
+    for task in "${tasks[@]}"; do
         local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
         if [ -f "$json" ]; then
             python3.13 -c "
 import json
 d = json.load(open('$json'))
 r = d.get('results', [d])[0] if d.get('results') else d
-print(f'  {r[\"task_id\"]:30s} resolved={str(r[\"is_resolved\"]):5s}  tokens={r[\"total_input_tokens\"]}/{r[\"total_output_tokens\"]}')
+k = r.get('task_id','?')
+v = str(r.get('is_resolved','?'))
+ti = r.get('total_input_tokens',0)
+to = r.get('total_output_tokens',0)
+fm = r.get('failure_mode','')
+print(f'  {k:30s} resolved={v:5s}  failure={fm:20s}  tokens={ti}/{to}')
 " 2>/dev/null
         else
             printf "  %-30s (still running)\n" "$task"
