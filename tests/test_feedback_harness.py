@@ -201,3 +201,75 @@ class TestFeedbackHarnessLoop:
 
         result = harness._run_trial(handler)
         assert result is not None
+
+
+class TestReceiveTestResults:
+    """Test CognitiveAgent.receive_test_results method."""
+
+    def _make_agent(self):
+        """Create a CognitiveAgent with mocked internals."""
+        from unittest.mock import MagicMock
+        from tb.agent.cognitive_agent import CognitiveAgent
+        agent = CognitiveAgent.__new__(CognitiveAgent)
+        agent._executor = MagicMock()
+        agent._chain = MagicMock()
+        agent._setup_done = True
+        agent._task_meta = "original task instruction"
+        return agent
+
+    def test_receive_test_results_pass_calls_executor(self):
+        from unittest.mock import MagicMock
+        from terminal_bench.parsers.base_parser import UnitTestStatus
+
+        agent = self._make_agent()
+        agent._executor.execute.return_value = {
+            "notify_layers": {"l0_5_1": {"done": True, "result": "reflected"}},
+            "action_text": "done",
+        }
+        mock_session = MagicMock()
+        mock_session.capture_pane.return_value = "pane content"
+
+        agent.receive_test_results(
+            parser_results={"test_1": UnitTestStatus.PASSED},
+            is_resolved=True, exhausted=False,
+            session=mock_session, terminal=MagicMock(),
+        )
+        assert agent._executor.execute.call_count >= 1
+
+    def test_receive_test_results_fail_repair_calls_executor(self):
+        from unittest.mock import MagicMock
+        from terminal_bench.parsers.base_parser import UnitTestStatus
+
+        agent = self._make_agent()
+        agent._executor.execute.return_value = {
+            "notify_layers": {"l0_5_1": {"done": True, "result": "fixed"}},
+            "action_text": "done",
+        }
+        mock_session = MagicMock()
+        mock_session.capture_pane.return_value = "pane content"
+
+        agent.receive_test_results(
+            parser_results={"test_1": UnitTestStatus.FAILED},
+            is_resolved=False, exhausted=False,
+            session=mock_session, terminal=MagicMock(),
+        )
+        assert agent._executor.execute.call_count >= 1
+
+    def test_receive_test_results_exhausted_calls_executor(self):
+        from unittest.mock import MagicMock
+        from terminal_bench.parsers.base_parser import UnitTestStatus
+
+        agent = self._make_agent()
+        agent._executor.execute.return_value = {
+            "notify_layers": {"l0_5_1": {"done": True, "result": "learned"}},
+            "action_text": "done",
+        }
+        mock_session = MagicMock()
+        mock_session.capture_pane.return_value = "pane content"
+
+        agent.receive_test_results(
+            parser_results={"test_1": UnitTestStatus.FAILED},
+            is_resolved=False, exhausted=True,
+            session=mock_session, terminal=MagicMock(),
+        )
+        assert agent._executor.execute.call_count >= 1
