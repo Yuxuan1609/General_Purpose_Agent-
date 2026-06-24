@@ -138,7 +138,29 @@ _run_bg() {
         > "$log" 2>&1 &
 }
 
-_parallel_summary() {
+_poll_and_summary() {
+    # Trap: show summary on Ctrl+C / exit
+    trap '_show_summary "$@"' EXIT
+    local done=0
+    while [ $done -lt $# ]; do
+        sleep 10
+        done=0
+        for task in "$@"; do
+            local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
+            if [ -f "$json" ]; then
+                done=$((done + 1))
+            fi
+        done
+        if [ $done -lt $# ]; then
+            echo "  [$done/$#] tasks completed, checking again in 10s..."
+        fi
+    done
+    # Clear trap before normal exit to avoid duplicate output
+    trap - EXIT
+    _show_summary "$@"
+}
+
+_show_summary() {
     echo ""
     echo "=== Parallel Results ==="
     for task in "$@"; do
@@ -151,7 +173,7 @@ r = d.get('results', [d])[0] if d.get('results') else d
 print(f'  {r[\"task_id\"]:30s} resolved={str(r[\"is_resolved\"]):5s}  tokens={r[\"total_input_tokens\"]}/{r[\"total_output_tokens\"]}')
 " 2>/dev/null
         else
-            printf "  %-30s (no results.json)\n" "$task"
+            printf "  %-30s (still running)\n" "$task"
         fi
     done
 }
@@ -186,15 +208,15 @@ if [ -n "$1" ]; then
             shift
             echo "Running in parallel: $# tasks"
             for task in "$@"; do _run_bg "$task" "test"; done
-            wait
-            _parallel_summary "$@"
+            echo ""
+            _poll_and_summary "$@"
             ;;
         parallel-train)
             shift
             echo "Running in parallel (train): $# tasks"
             for task in "$@"; do _run_bg "$task" "train"; done
-            wait
-            _parallel_summary "$@"
+            echo ""
+            _poll_and_summary "$@"
             ;;
         *)
             if [ -n "$2" ]; then
