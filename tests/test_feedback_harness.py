@@ -36,7 +36,8 @@ class TestFeedbackHarnessLoop:
         handler.trial_paths.sessions_path = MagicMock()
         handler.trial_paths.agent_logging_dir = MagicMock()
         handler.trial_paths.commands_path = MagicMock()
-        handler.trial_paths.docker_compose_path = MagicMock()
+        handler.task_paths = MagicMock()
+        handler.task_paths.docker_compose_path = MagicMock()
         handler.client_container_name = "test-container"
         handler.client_image_name = "test-image"
         handler.docker_image_name_prefix = "test-prefix"
