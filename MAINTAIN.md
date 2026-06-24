@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-24 | **TB 测试反馈机制**：新增 `tb/feedback_harness.py` — `FeedbackHarness(Harness)` 子类重写 `_run_trial`，将 `_parse_results` 移入 `with spin_up_terminal()` 块内，在容器存活期间插入修复循环（最多 3 轮修复）。`tb/agent/cognitive_agent.py` 新增 `receive_test_results()`/`_build_feedback_meta()` 方法 — 接收 pass/fail 结果驱动 Executor 反思/修复。新增 `tb/runner.py` — monkey-patch `terminal_bench.Harness = FeedbackHarness` 后调用 Typer CLI。新增 `tb/env.py` — `apply_learning_context(chain, enable)` 用 `AgentContext(denied_tools={...})` 实现 train/test 工具过滤（test 禁用 record_learning/kb_add/kb_fill_gap）。`tb/run.sh` 改用 `python -m tb.runner run` 入口；加 `_run()` 函数支持 `$2` phase 参数 → `TB_PHASE` 环境变量。`tb/config/tasks_data.yaml` 更新为 32 道 Debugging/SoftwareEng/SystemAdmin/Security 四类任务（20 train + 12 test）。 |
 | 2026-06-23 | **Terminal-Bench 集成**：新增 `tb/` 模块 — TB 评估环境。`tb/agent/cognitive_agent.py`：`CognitiveAgent(BaseAgent)` 将 cognitive-agent 的 Executor+三层链封装为 TB Agent，`perform_task` 内多轮循环（TaskObservation → Executor → tool call via tmux → capture_pane 反馈 → 直到 done）。`tb/tools/`：`tb_terminal`/`tb_read_file`/`tb_grep` — 同名覆盖原工具（`override=True`），走 `TmuxSession.send_keys()` + `capture_pane()` 在 Docker 容器内执行。`tb/session_holder.py`：模块级 `_current` 引用供 TB 工具取 session。`tb/config/tasks_data.yaml`：Data & File Processing 8 道 task 列表（5 train + 3 test）。`tb/run.sh`：`tb run --agent-import-path` 入口脚本。`core/llm_client.py`：`LLMResponse` 新增 `prompt_tokens`/`completion_tokens` 字段；`LLMClient` 新增 `total_tokens` 属性 + `reset_token_counts()` 方法（累积计数 + 可重置）。`CognitiveAgent.perform_task` 增强：per-round 日志（tokens/耗时/action）、summary.json 摘要文件（含时间戳/轮次/token 统计）。 |
 | 2026-06-22 | **次工具系统**：新增 `core/tools/secondary_tool.py` — `activate_secondary_tools` 工具（LLM subagent 筛选次工具池的 `semantic_description` → `ToolRegistry.enable_secondary()` 启用当前线程）。ToolEntry 新增 `tool_spec`（"primary"/"secondary"）+ `semantic_description` 字段；ToolRegistry 新增 thread-local `_enabled_secondary` + `enable_secondary`/`clear_secondary`/`_get_enabled_secondary` 方法；`get_definitions()` 按确定性逻辑过滤次工具（仅已启用返回）。删除死代码：`ToolEntry.available_domains` 字段、`register()` 中 DomainRegistry 索引块、`get_tools_for_domain()` 方法、`core/tools/domain_tool.py` 整个文件、`chain_factory.py` 中 `set_domain_registry` block。config/tools.yaml 新增 `activate_secondary_tools` 条目（allowlist [l1,l2,l3]）。 |
 | 2026-06-20 | **测试覆盖评估**：新增 `TEST_COVERAGE.md` — 全量测试覆盖报告（pytest 289 tests + 15 E2E 脚本），记录模块-测试映射、覆盖缺口、多并发/异步/E2E 场景缺失。MAINTAIN.md 补：`LayerAgent.set_context`/`_drain_pending_async`、`TaskRunner.wait_all`/`shutdown`、修正 `_call_llm` 中 `MAX_TOOL_TURNS` 为 config 可配。README.md 补：`core/session|monitor|setup|runtime_registry.py` + `scripts/gradio_app.py`；更新测试数 (229→289)。
@@ -918,14 +919,37 @@
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
 |----------|------|------|-----------|---------|
-| `CognitiveAgent` | `__init__(**kwargs)` | TB BaseAgent 实现：懒加载 Executor+chain+TB 工具 | tb run harness | setup_executor(), register_tb_tools() |
+| `CognitiveAgent` | `__init__(**kwargs)` | TB BaseAgent 实现：懒加载 Executor+chain+TB 工具。初始化 `_task_meta=""` | tb run harness | setup_executor(), register_tb_tools() |
 | `CognitiveAgent.name` | `() → "cognitive-agent"` | Agent 名称（静态） | harness | — |
-| `CognitiveAgent._ensure_setup` | `() → None` | 首次调用时一次性构建：setup_executor + register_tb_tools | perform_task | setup_executor(), register_tb_tools() |
-| `CognitiveAgent.perform_task` | `(instruction, session, logging_dir) → AgentResult` | 多轮执行循环：build_observation → execute → capture_pane → 反馈 → 直到 L1 done 或 max_rounds | tb run harness | Executor.execute(), session_holder.set/clear, TmuxSession.capture_pane() |
+| `CognitiveAgent._ensure_setup` | `() → None` | 首次调用时一次性构建：setup_executor + register_tb_tools + apply_learning_context（读 `TB_PHASE` 环境变量控制 train/test 工具集） | perform_task | setup_executor(), register_tb_tools(), tb.env.apply_learning_context() |
+| `CognitiveAgent.perform_task` | `(instruction, session, logging_dir) → AgentResult` | 多轮执行循环：保存 `_task_meta` → build_observation → execute → capture_pane → 反馈 → 直到 L1 done 或 max_rounds | tb run harness | Executor.execute(), session_holder.set/clear, TmuxSession.capture_pane() |
 | `CognitiveAgent._build_observation` | `(task_meta, feedback, round_idx) → TaskObservation` | 构建 TaskObservation（domain="tb", enable_learning=True） | perform_task | — |
 | `CognitiveAgent._log_round` | `(logging_dir, round_idx, result, done, elapsed, tokens) → None` | 写 round_N.json（含 notify 摘要、耗时、token 统计） | perform_task | — |
 | `CognitiveAgent._log_summary` | `(logging_dir, round_logs, llm, total_time) → None` | 写 summary.json（含完成时间、总轮次、总 tokens） | perform_task | — |
-| `_trim_pane` | `(pane, max_lines) → str` | 截断终端输出保留最后 N 行 | perform_task | — |
+| `CognitiveAgent._build_feedback_meta` | `(parser_results, is_resolved, exhausted) → str` | 构建反馈阶段 task meta（PASS 反思成功 / FAIL 修复 / EXHAUSTED 反思失败） | receive_test_results | — |
+| `CognitiveAgent.receive_test_results` | `(parser_results, is_resolved, exhausted, session, terminal) → None` | 接收 harness 测试结果，驱动 Executor 反思/修复循环（PASS/EXHAUSTED 最多 5 轮，FAIL 修复最多 15 轮） | FeedbackHarness._call_receive_test_results | Executor.execute(), session_holder.set/clear |
+| `_trim_pane` | `(pane, max_lines) → str` | 截断终端输出保留最后 N 行 | perform_task, receive_test_results | — |
+| `_head` | `(text, n) → str` | 截取文本前 N 字符 | perform_task | — |
+
+### tb/feedback_harness.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `FeedbackHarness(Harness)` | `__init__(same as Harness)` | Harness 子类，重写 `_run_trial` 插入测试结果反馈循环 | tb/runner.py (monkey-patch) | _run_agent, _run_tests, _parse_results, _is_resolved |
+| `FeedbackHarness._run_trial` | `(trial_handler) → TrialResults` | 重写：将 `_parse_results` 移入 container 生命周期内；PASS → agent.receive_test_results；FAIL → 最多 3 轮修复循环 | Harness._execute_tasks → ThreadPoolExecutor | — |
+| `FeedbackHarness._call_receive_test_results` | `(task_agent, parser_results, is_resolved, exhausted, session, terminal) → None` | 安全调用 `agent.receive_test_results()`（hasattr 检查 + try/except） | _run_trial | CognitiveAgent.receive_test_results |
+
+### tb/runner.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `tb.runner (module)` | — | Monkey-patch `terminal_bench.Harness = FeedbackHarness` 后调用 Typer CLI `app()` | tb/run.sh (`python -m tb.runner run`) | FeedbackHarness, terminal_bench.cli.tb.main.app() |
+
+### tb/env.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `apply_learning_context` | `(chain, enable) → None` | 遍历 chain 所有层 `set_context(ctx)`：enable=True → None（全部工具可用）；enable=False → `AgentContext(denied_tools={record_learning, kb_add, kb_fill_gap})` | CognitiveAgent._ensure_setup（读 `TB_PHASE` 环境变量） | AgentContext, LayerAgent.set_context |
 
 ### tb/config/tasks_data.yaml
 
