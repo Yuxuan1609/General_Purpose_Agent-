@@ -123,13 +123,15 @@ _run_bg() {
     local task="$1"
     local phase="${2:-train}"
     local log="$OUTPUT_DIR/parallel/${task}.log"
+    local run_id="${task}-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$OUTPUT_DIR/parallel"
     echo "  [launch] $task ($phase) → $log"
     TB_PHASE="$phase" python3.13 -m tb.runner run \
         --agent-import-path "$AGENT" \
         --dataset-path "$DATASET_PATH" \
         --task-id "$task" \
-        --output-path "$OUTPUT_DIR" \
+        --output-path "$OUTPUT_DIR/parallel/$task" \
+        --run-id "$run_id" \
         --n-concurrent 1 \
         --no-rebuild \
         --no-cleanup \
@@ -140,7 +142,7 @@ _parallel_summary() {
     echo ""
     echo "=== Parallel Results ==="
     for task in "$@"; do
-        local json=$(find "$OUTPUT_DIR" -path "*/${task}/*" -name results.json -maxdepth 6 2>/dev/null | head -1)
+        local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
         if [ -f "$json" ]; then
             python3.13 -c "
 import json
