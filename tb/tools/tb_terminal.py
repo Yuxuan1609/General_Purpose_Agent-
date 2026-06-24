@@ -25,12 +25,22 @@ def register_tb_terminal_tool(registry):
             # Split multi-line commands (heredoc, etc.) into individual key
             # arguments. Docker exec API corrupts args containing literal \n,
             # so each line becomes a separate tmux send-keys argument with
-            # "Enter" between them. All sent in ONE blocking send_keys call
-            # to avoid race conditions between separate Docker exec calls.
+            # "Enter" between them.
+            #
+            # TB harness _prevent_execution strips trailing "Enter" keys, then
+            # appends "; tmux wait -S done" as the next key arg. tmux types
+            # consecutive args without a line break, so the completion marker
+            # would land on the same line as the heredoc terminator (e.g.
+            # "EOF; tmux wait -S done"), which bash doesn't recognize as the
+            # heredoc delimiter. Appending "true" forces the completion marker
+            # onto a separate line after the heredoc closes.
             lines = command.split('\n')
             keys = []
             for line in lines:
                 keys.append(line)
+                keys.append("Enter")
+            if len(lines) > 1:
+                keys.append("true")
                 keys.append("Enter")
             try:
                 session.send_keys(keys, block=True,
