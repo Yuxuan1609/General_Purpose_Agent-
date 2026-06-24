@@ -93,6 +93,8 @@ class L1Agent(LayerAgent):
             f"## 领域边界\n"
             f"你只管理 L1 行为准则（Philosophy Rules）。\n"
             f"不要修改 L2 的知识卡片或 L3 的技能。\n"
+            f"你只实际执行相对简单的任务。对于需要多步骤操作的复杂任务，"
+            f"你进行拆解并通过 l1_query 逐个部分下发。\n"
             f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 l1_query 下发给 L2/L3 执行。\n\n"
             f"{l1_query_guide}\n"
             f"{tool_rules}\n"
