@@ -22,9 +22,17 @@ def register_tb_terminal_tool(registry):
             # Drain incremental state before command
             session.get_incremental_output()
 
+            # Split multi-line commands (heredoc, etc.) into individual lines.
+            # Docker exec API + tmux send-keys fail on args containing \n.
+            lines = command.split('\n')
             try:
-                session.send_keys([command, "Enter"], block=True,
-                                  max_timeout_sec=float(timeout))
+                for i, line in enumerate(lines):
+                    if i < len(lines) - 1:
+                        session.send_keys([line, "Enter"], block=False)
+                        time.sleep(0.05)
+                    else:
+                        session.send_keys([line, "Enter"], block=True,
+                                          max_timeout_sec=float(timeout))
             except TimeoutError:
                 return json.dumps({"error": f"Command timed out ({timeout}s)"})
             except Exception as e:
