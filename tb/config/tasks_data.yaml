@@ -11,12 +11,18 @@
 #
 # Build status (2026-06-24):
 #   ✅ 24/32 docker images cached (build_ready: true)
-#   ❌ 8/32 pending: crack-7z-hash, git-workflow-hack, vul-flask, vul-flink,
-#        mailman, fix-code-vulnerability, home-server-https
-#        extract-safely: no Dockerfile in repo
+#   ❌ 8/32 pending — all failed on apt-get (network intermittent):
+#      crack-7z-hash           sysadmin_test   ghcr ubuntu-24-04:20250624
+#      extract-safely          security_train  NO Dockerfile in repo
+#      fix-code-vulnerability  security_test   Docker Hub python:3.11-slim
+#      git-workflow-hack       security_train  ghcr ubuntu-24-04:20250624
+#      home-server-https       sysadmin_test   ghcr ubuntu-24-04:latest (15 pkgs)
+#      mailman                 sysadmin_test   ghcr ubuntu-24-04:20250624 (postfix)
+#      vul-flask               security_train  ghcr ubuntu-24-04:20250624
+#      vul-flink               security_test   ghcr ubuntu-24-04:20250624
 #   Backup: \\wsl.localhost\Ubuntu-22.04\home\tonyyang\tb-task-images\ (3.3GB, 26 .tar)
 #   Restore: docker load -i <name>.tar
-#   Network: TUN mode VPN enabled, deb.debian.org intermittent 502
+#   Network: TUN mode VPN, deb.debian.org intermittent 502
 
 dataset: terminal-bench-2
 
