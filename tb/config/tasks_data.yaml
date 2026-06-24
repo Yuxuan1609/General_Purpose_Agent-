@@ -1,0 +1,272 @@
+# Terminal-Bench task selection — 4 categories × 8 tasks = 32 total
+# Selected from 241 tasks across 25+ categories.
+# 20 train (5 per category) + 12 test (3 per category).
+# TB1: 34%, TB2: 66% of full dataset; selection balanced ~50/50.
+#
+# Phase notes:
+#   train: agent runs with feedback loop + record_learning + kb_add/kb_fill_gap
+#   test:  agent runs WITHOUT record_learning, kb_add, kb_fill_gap tools
+#
+# Dataset: all tasks from ~/tb-tasks/original-tasks/
+
+dataset: terminal-bench-2
+
+# =============================================================================
+# Category 1: Debugging (8 tasks: 5 train + 3 test)
+# =============================================================================
+debugging_train:
+  - task_id: fix-pandas-version
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "修复依赖版本冲突，恢复 pandas 数据分析项目运行"
+
+  - task_id: conda-env-conflict-resolution
+    source: TB1
+    difficulty: medium
+    phase: train
+    description: "解决 conda 环境依赖冲突，恢复项目可用"
+
+  - task_id: incompatible-python-fasttext
+    source: TB1
+    difficulty: medium
+    phase: train
+    description: "修复 fasttext Python 包兼容性问题，使其能正常运行"
+
+  - task_id: cpp-compatibility
+    source: TB2
+    difficulty: easy
+    phase: train
+    description: "修复 C++11 模板函数兼容性，使代码可通过编译"
+
+  - task_id: classifier-debug
+    source: TB2
+    difficulty: medium
+    phase: train
+    description: "调试神经网络训练代码，找出训练不佳的原因并修复"
+
+debugging_test:
+  - task_id: swe-bench-fsspec
+    source: TB1
+    difficulty: medium
+    phase: test
+    description: "实现 DirFileSystem 缺失的 open_async() 方法"
+
+  - task_id: overfull-hbox
+    source: TB2
+    difficulty: easy
+    phase: test
+    description: "修复 LaTeX 文档编译警告，消除 overfull hbox"
+
+  - task_id: swe-bench-astropy-1
+    source: TB1
+    difficulty: hard
+    phase: test
+    description: "修复 CompoundModel separability_matrix 计算错误"
+
+# Full Debugging category (17 tasks):
+#   TB1: conda-env-conflict-resolution(m), fix-pandas-version(e), incompatible-python-fasttext(m),
+#        sqlite-db-truncate(m), swe-bench-astropy-1(h), swe-bench-astropy-2(h),
+#        swe-bench-fsspec(m), swe-bench-langcodes(m), tmux-advanced-workflow(m)
+#   TB2: build-cython-ext(m), classifier-debug(m), cpp-compatibility(e), cprofiling-python(m),
+#        custom-memory-heap-crash(m), merge-diff-arc-agi-task(m), npm-conflict-resolution(e),
+#        overfull-hbox(e)
+#   Not selected: build-cython-ext, cprofiling-python, custom-memory-heap-crash,
+#                 merge-diff-arc-agi-task, npm-conflict-resolution, sqlite-db-truncate,
+#                 swe-bench-astropy-2, swe-bench-langcodes, tmux-advanced-workflow
+
+# =============================================================================
+# Category 2: Software Engineering (8 tasks: 5 train + 3 test)
+# =============================================================================
+software-engineering_train:
+  - task_id: fix-git
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "恢复因错误 checkout 丢失的 git 变更"
+
+  - task_id: modernize-fortran-build
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "将 Fortran 项目构建系统迁移到 gfortran"
+
+  - task_id: polyglot-c-py
+    source: TB1
+    difficulty: medium
+    phase: train
+    description: "编写同时可用 C 和 Python 运行的多语言文件"
+
+  - task_id: broken-python
+    source: TB2
+    difficulty: easy
+    phase: train
+    description: "修复损坏的系统级 pip 安装"
+
+  - task_id: pypi-server
+    source: TB2
+    difficulty: medium
+    phase: train
+    description: "创建 Python 包并搭建本地 PyPI 服务器"
+
+software-engineering_test:
+  - task_id: write-compressor
+    source: TB1
+    difficulty: hard
+    phase: test
+    description: "从解压器反向实现 LZMA 压缩器"
+
+  - task_id: regex-chess
+    source: TB2
+    difficulty: hard
+    phase: test
+    description: "用正则替换列表实现下棋逻辑"
+
+  - task_id: circuit-fibsqrt
+    source: TB2
+    difficulty: hard
+    phase: test
+    description: "用逻辑门模拟器实现 Fibonacci 和 sqrt"
+
+# Full Software Engineering category (47 tasks) — 41 not selected.
+# Selection rationale — excluded:
+#   Too trivial: grid-pattern-transform, prove-plus-comm, hello-world, vimscript-vim-quine
+#   3D/heavy render: path-tracing, path-tracing-reverse, make-doom-for-mips, torch-*, 3d-model-format-legacy, build-pov-ray
+#   Code golf (anti-readability): gpt2-codegolf
+#   Too niche: cancel-async-tasks(hard), cross-entropy-method(easy), wasm-pipeline
+
+# =============================================================================
+# Category 3: System Administration (8 tasks: 5 train + 3 test)
+# =============================================================================
+system-administration_train:
+  - task_id: fix-permissions
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "修复脚本权限/属主问题使其可运行"
+
+  - task_id: processing-pipeline
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "调试损坏的多脚本数据处理管线"
+
+  - task_id: nginx-request-logging
+    source: TB1
+    difficulty: medium
+    phase: train
+    description: "配置 Nginx 自定义访问日志"
+
+  - task_id: log-summary
+    source: TB2
+    difficulty: easy
+    phase: train
+    description: "聚合多个服务日志文件生成摘要"
+
+  - task_id: broken-networking
+    source: TB2
+    difficulty: medium
+    phase: train
+    description: "诊断并修复网络连接问题"
+
+system-administration_test:
+  - task_id: configure-git-webserver
+    source: TB1
+    difficulty: hard
+    phase: test
+    description: "搭建 Git-over-SSH 服务器含 post-receive hook 自动部署"
+
+  - task_id: home-server-https
+    source: TB2
+    difficulty: medium
+    phase: test
+    description: "搭建可通过 HTTPS 访问的家庭服务器"
+
+  - task_id: mailman
+    source: TB2
+    difficulty: medium
+    phase: test
+    description: "部署 Postfix + Mailman3 邮件列表服务"
+
+# Full System Administration category (26 tasks) — 18 not selected.
+# Selection rationale — excluded:
+#   OS/kernel build: build-linux-kernel-qemu, build-initramfs-qemu, build-tcc-qemu
+#   QEMU VM (not coding): qemu-alpine-ssh, qemu-startup
+#   Full OS install: install-windows-3.11, install-windows-xp
+#   Heavy infra: hdfs-deployment, compile-compcert, conda-env-conflict-resolution(duplicate)
+#   Too trivial: count-call-stack, slurm-simple-node-monitoring
+
+# =============================================================================
+# Category 4: Security (8 tasks: 5 train + 3 test)
+# =============================================================================
+security_train:
+  - task_id: extract-safely
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "安全提取 tar 归档（防路径穿越攻击）"
+
+  - task_id: git-workflow-hack
+    source: TB1
+    difficulty: easy
+    phase: train
+    description: "利用 GitHub Actions workflow 漏洞"
+
+  - task_id: openssl-selfsigned-cert
+    source: TB1
+    difficulty: medium
+    phase: train
+    description: "生成自签名 TLS 证书"
+
+  - task_id: sql-injection-attack
+    source: TB2
+    difficulty: easy
+    phase: train
+    description: "通过 SQL 注入利用登录漏洞"
+
+  - task_id: vul-flask
+    source: TB2
+    difficulty: medium
+    phase: train
+    description: "利用 Flask/Jinja2 SSTI 模板注入漏洞"
+
+security_test:
+  - task_id: crack-7z-hash
+    source: TB1
+    difficulty: medium
+    phase: test
+    description: "破解密码保护的 7z 归档"
+
+  - task_id: fix-code-vulnerability
+    source: TB2
+    difficulty: hard
+    phase: test
+    description: "识别并修复 CWE 分类的代码漏洞"
+
+  - task_id: vul-flink
+    source: TB2
+    difficulty: hard
+    phase: test
+    description: "利用 Apache Flink 流处理框架漏洞"
+
+# Full Security category (22 tasks) — 14 not selected.
+# Selection rationale — excluded:
+#   Too niche: run-pdp11-code (PDP-11 emulation), password-recovery (disk forensics)
+#   Too trivial: security-vulhub-minio, catch-me-if-you-can, recover-obfuscated-files, new-encrypt-command
+#   Paired tasks (need both): break-filter-js-from-html ↔ filter-js-from-html
+
+# =============================================================================
+# Global summary
+# =============================================================================
+#   Train: 20 tasks (easy:12, medium:8, hard:0)
+#   Test:  12 tasks (easy:1, medium:5, hard:6)
+#   Total: 32 tasks
+#   TB1: 17 tasks (53%), TB2: 15 tasks (47%)
+#
+# Test set is uniformly harder than train:
+#   - Train has no hard tasks (learning phase, reasonable difficulty)
+#   - Test has 6 hard / 5 medium / 1 easy (generalization challenge)
+#
+# Tool configuration (to be implemented in Phase 3):
+#   phase=train → all tools enabled (record_learning, kb_add, kb_fill_gap, etc.)
+#   phase=test  → record_learning, kb_add, kb_fill_gap DISABLED
