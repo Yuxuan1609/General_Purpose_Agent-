@@ -8,6 +8,14 @@
 #   test:  agent runs WITHOUT record_learning, kb_add, kb_fill_gap tools
 #
 # Dataset: all tasks from ~/tb-tasks/original-tasks/
+#
+# Build status (2026-06-24):
+#   ✅ 8/32 Docker images cached  (build_ready: true)
+#   ❌ 24/32 need TUN-mode VPN    (build_ready: false)
+#   Backup: \\wsl.localhost\Ubuntu-22.04\home\tonyyang\tb-task-images\*.tar
+#   Root cause: Docker Desktop HTTP proxy applies to `docker pull` only.
+#   Container-internal `apt-get install` hits archive.ubuntu.com directly.
+#   Fix: VPN TUN mode (virtual NIC) routes ALL traffic — no per-container config needed.
 
 dataset: terminal-bench-2
 
@@ -16,30 +24,35 @@ dataset: terminal-bench-2
 # =============================================================================
 debugging_train:
   - task_id: fix-pandas-version
+    build_ready: true
     source: TB1
     difficulty: easy
     phase: train
     description: "修复依赖版本冲突，恢复 pandas 数据分析项目运行"
 
   - task_id: conda-env-conflict-resolution
+    build_ready: true
     source: TB1
     difficulty: medium
     phase: train
     description: "解决 conda 环境依赖冲突，恢复项目可用"
 
   - task_id: incompatible-python-fasttext
+    build_ready: true
     source: TB1
     difficulty: medium
     phase: train
     description: "修复 fasttext Python 包兼容性问题，使其能正常运行"
 
   - task_id: cpp-compatibility
+    build_ready: true
     source: TB2
     difficulty: easy
     phase: train
     description: "修复 C++11 模板函数兼容性，使代码可通过编译"
 
   - task_id: classifier-debug
+    build_ready: true
     source: TB2
     difficulty: medium
     phase: train
@@ -47,18 +60,21 @@ debugging_train:
 
 debugging_test:
   - task_id: swe-bench-fsspec
+    build_ready: true
     source: TB1
     difficulty: medium
     phase: test
     description: "实现 DirFileSystem 缺失的 open_async() 方法"
 
   - task_id: overfull-hbox
+    build_ready: true
     source: TB2
     difficulty: easy
     phase: test
     description: "修复 LaTeX 文档编译警告，消除 overfull hbox"
 
   - task_id: swe-bench-astropy-1
+    build_ready: false
     source: TB1
     difficulty: hard
     phase: test
@@ -80,30 +96,35 @@ debugging_test:
 # =============================================================================
 software-engineering_train:
   - task_id: fix-git
+    build_ready: true
     source: TB1
     difficulty: easy
     phase: train
     description: "恢复因错误 checkout 丢失的 git 变更"
 
   - task_id: modernize-fortran-build
+    build_ready: false
     source: TB1
     difficulty: easy
     phase: train
     description: "将 Fortran 项目构建系统迁移到 gfortran"
 
   - task_id: polyglot-c-py
+    build_ready: false
     source: TB1
     difficulty: medium
     phase: train
     description: "编写同时可用 C 和 Python 运行的多语言文件"
 
   - task_id: broken-python
+    build_ready: false
     source: TB2
     difficulty: easy
     phase: train
     description: "修复损坏的系统级 pip 安装"
 
   - task_id: pypi-server
+    build_ready: false
     source: TB2
     difficulty: medium
     phase: train
@@ -111,18 +132,21 @@ software-engineering_train:
 
 software-engineering_test:
   - task_id: write-compressor
+    build_ready: false
     source: TB1
     difficulty: hard
     phase: test
     description: "从解压器反向实现 LZMA 压缩器"
 
   - task_id: regex-chess
+    build_ready: false
     source: TB2
     difficulty: hard
     phase: test
     description: "用正则替换列表实现下棋逻辑"
 
   - task_id: circuit-fibsqrt
+    build_ready: false
     source: TB2
     difficulty: hard
     phase: test
@@ -140,30 +164,35 @@ software-engineering_test:
 # =============================================================================
 system-administration_train:
   - task_id: fix-permissions
+    build_ready: false
     source: TB1
     difficulty: easy
     phase: train
     description: "修复脚本权限/属主问题使其可运行"
 
   - task_id: processing-pipeline
+    build_ready: false
     source: TB1
     difficulty: easy
     phase: train
     description: "调试损坏的多脚本数据处理管线"
 
   - task_id: nginx-request-logging
+    build_ready: false
     source: TB1
     difficulty: medium
     phase: train
     description: "配置 Nginx 自定义访问日志"
 
   - task_id: log-summary
+    build_ready: false
     source: TB2
     difficulty: easy
     phase: train
     description: "聚合多个服务日志文件生成摘要"
 
   - task_id: broken-networking
+    build_ready: false
     source: TB2
     difficulty: medium
     phase: train
@@ -171,18 +200,21 @@ system-administration_train:
 
 system-administration_test:
   - task_id: configure-git-webserver
+    build_ready: false
     source: TB1
     difficulty: hard
     phase: test
     description: "搭建 Git-over-SSH 服务器含 post-receive hook 自动部署"
 
   - task_id: home-server-https
+    build_ready: false
     source: TB2
     difficulty: medium
     phase: test
     description: "搭建可通过 HTTPS 访问的家庭服务器"
 
   - task_id: mailman
+    build_ready: false
     source: TB2
     difficulty: medium
     phase: test
@@ -201,30 +233,35 @@ system-administration_test:
 # =============================================================================
 security_train:
   - task_id: extract-safely
+    build_ready: false
     source: TB1
     difficulty: easy
     phase: train
     description: "安全提取 tar 归档（防路径穿越攻击）"
 
   - task_id: git-workflow-hack
+    build_ready: false
     source: TB1
     difficulty: easy
     phase: train
     description: "利用 GitHub Actions workflow 漏洞"
 
   - task_id: openssl-selfsigned-cert
+    build_ready: false
     source: TB1
     difficulty: medium
     phase: train
     description: "生成自签名 TLS 证书"
 
   - task_id: sql-injection-attack
+    build_ready: false
     source: TB2
     difficulty: easy
     phase: train
     description: "通过 SQL 注入利用登录漏洞"
 
   - task_id: vul-flask
+    build_ready: false
     source: TB2
     difficulty: medium
     phase: train
@@ -232,18 +269,21 @@ security_train:
 
 security_test:
   - task_id: crack-7z-hash
+    build_ready: false
     source: TB1
     difficulty: medium
     phase: test
     description: "破解密码保护的 7z 归档"
 
   - task_id: fix-code-vulnerability
+    build_ready: false
     source: TB2
     difficulty: hard
     phase: test
     description: "识别并修复 CWE 分类的代码漏洞"
 
   - task_id: vul-flink
+    build_ready: false
     source: TB2
     difficulty: hard
     phase: test
