@@ -87,15 +87,25 @@ class CognitiveAgent(BaseAgent):
 
         task_meta = (
             f"{instruction}\n\n"
-            "## 重要说明\n"
+            "## 环境说明\n"
             "你正在一个 Docker 容器内的终端环境中工作。所有文件操作和命令执行"
             "都在容器内进行。\n"
-            "使用 terminal 工具执行命令，read_file 读取文件，grep 搜索文件内容。\n"
+            "使用 terminal 工具执行命令，read_file 读取文件，grep 搜索文件内容。\n\n"
+            "## terminal 工具使用要点\n"
+            "- 每次调用只执行一条 shell 命令（避免 && 串联多条，出错不易定位）\n"
+            "- git 命令加 --no-pager 或预先 export PAGER=cat（已自动设置）\n"
+            "- 多行输出（如 heredoc）可以直接使用，工具会自动处理换行\n"
+            "- 命令执行后检查输出，根据结果决定下一步\n\n"
+            "## 完成任务\n"
             "当任务完成时，明确输出 done=true 并在 result 中说明你做了什么。\n"
             "最终 test feedback（任务结束后的自动化测试结果）是 golden standard，"
-            "判断任务是否成功的唯一标准。\n"
+            "判断任务是否成功的唯一标准。\n\n"
+            "## 反思与学习（train 模式）\n"
+            "任务结束后会收到测试反馈。PASS 时请反思成功经验，FAIL 时分析失败原因。\n"
+            "将可复用的经验通过 record_learning 记录到对应的 domain。"
         )
         self._task_meta = task_meta
+        _history = ""
 
         current_feedback = _trim_pane(initial_pane, _INITIAL_PANE_LINES)
 
@@ -112,7 +122,8 @@ class CognitiveAgent(BaseAgent):
 
         for round_idx in range(_MAX_ROUNDS):
             t_round = time.time()
-            obs = self._build_observation(task_meta, current_feedback, round_idx)
+            obs = self._build_observation(task_meta, current_feedback, round_idx,
+                                          history=_history)
 
             try:
                 result = self._executor.execute(obs)
@@ -129,6 +140,12 @@ class CognitiveAgent(BaseAgent):
             l1_notify = notify.get("l0_5_1", {})
             done = l1_notify.get("done", False)
             action_text = str(result.get("action_text", ""))[:500]
+
+            # Accumulate round history for next round
+            _history += (
+                f"\n[Round {round_idx}] "
+                f"{action_text}\n"
+            )
 
             elapsed = time.time() - t_round
             tokens_so_far = llm.total_tokens
@@ -179,13 +196,14 @@ class CognitiveAgent(BaseAgent):
             failure_mode=FailureMode.NONE,
         )
 
-    def _build_observation(self, task_meta: str, feedback: str, round_idx: int):
+    def _build_observation(self, task_meta: str, feedback: str, round_idx: int,
+                           history: str = ""):
         from core.types import TaskObservation
         return TaskObservation(
             meta=task_meta,
             state={
                 "current": feedback,
-                "history": "",
+                "history": history,
                 "round": round_idx,
             },
             session={
@@ -223,6 +241,7 @@ class CognitiveAgent(BaseAgent):
             parser_results, is_resolved, exhausted
         )
         current_feedback = _trim_pane(pane, _INITIAL_PANE_LINES)
+        _history = ""
 
         max_rounds = (
             self._REFLECT_MAX_ROUNDS
@@ -236,7 +255,8 @@ class CognitiveAgent(BaseAgent):
         )
 
         for round_idx in range(max_rounds):
-            obs = self._build_observation(feedback_meta, current_feedback, round_idx)
+            obs = self._build_observation(feedback_meta, current_feedback, round_idx,
+                                          history=_history)
             try:
                 result = self._executor.execute(obs)
             except Exception as e:
@@ -246,6 +266,12 @@ class CognitiveAgent(BaseAgent):
             notify = result.get("notify_layers", {})
             l1_notify = notify.get("l0_5_1", {})
             done = l1_notify.get("done", False)
+            action_text = str(result.get("action_text", ""))[:500]
+
+            _history += (
+                f"\n[Feedback Round {round_idx}] "
+                f"{action_text}\n"
+            )
 
             logger.info(
                 "Feedback round %d: done=%s action=%s",
