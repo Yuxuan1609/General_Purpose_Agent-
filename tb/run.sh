@@ -11,8 +11,8 @@
 #   bash tb/run.sh software-engineering       # run Software Engineering (8)
 #   bash tb/run.sh system-administration      # run System Administration (8)
 #   bash tb/run.sh security                   # run Security category (8)
-#   bash tb/run.sh parallel <task...>         # parallel test run (processes)
-#   bash tb/run.sh parallel-train <task...>   # parallel train run (processes)
+#   bash tb/run.sh parallel <task...>         # parallel test with queue (max 4)
+#   bash tb/run.sh parallel-train <task...>   # parallel train with queue (max 4)
 #
 # Requires: terminal-bench installed (pip), Docker running, DEEPSEEK_API_KEY set
 
@@ -119,13 +119,13 @@ _run() {
         --no-cleanup
 }
 
-_run_bg() {
+_run_task() {
     local task="$1"
     local phase="${2:-train}"
     local log="$OUTPUT_DIR/parallel/${task}.log"
     local run_id="${task}-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$OUTPUT_DIR/parallel"
-    echo "  [launch] $task ($phase) → $log"
+    echo "  [launch] $task ($phase)"
     TB_PHASE="$phase" python3.13 -m tb.runner run \
         --agent-import-path "$AGENT" \
         --dataset-path "$DATASET_PATH" \
@@ -138,29 +138,67 @@ _run_bg() {
         > "$log" 2>&1 &
 }
 
-_poll_and_summary() {
-    _PS_TASKS=("$@")
-    trap '_show_summary "${_PS_TASKS[@]}"' EXIT
-    local done=0 total=${#_PS_TASKS[@]}
+_run_queue() {
+    local max_n="${1:-4}"
+    shift
+    local phase="$1"
+    shift
+    local tasks=("$@")
+    local total=${#tasks[@]}
+    local launched=0
+    local done=0
+    local running_pids=()
+
+    echo "Queue: $total tasks, max $max_n concurrent, phase=$phase"
+    echo ""
+
+    trap '_show_results "${tasks[@]}"' EXIT
+
     while [ $done -lt $total ]; do
-        sleep 10
-        done=0
-        for task in "${_PS_TASKS[@]}"; do
-            local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
-            if [ -f "$json" ]; then done=$((done + 1)); fi
+        # Launch new tasks if slots available
+        while [ $launched -lt $total ] && [ ${#running_pids[@]} -lt $max_n ]; do
+            local task="${tasks[$launched]}"
+            _run_task "$task" "$phase"
+            running_pids+=($!)
+            launched=$((launched + 1))
+            sleep 1
         done
+
+        # Check which PIDs are still alive, and which have results.json
+        local still_running=()
+        done=0
+        for pid in "${running_pids[@]}"; do
+            if kill -0 $pid 2>/dev/null; then
+                still_running+=($pid)
+            else
+                done=$((done + 1))
+            fi
+        done
+        running_pids=("${still_running[@]}")
+
+        # Also count by results.json (more reliable than PID)
+        local has_results=0
+        for task in "${tasks[@]}"; do
+            local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
+            if [ -f "$json" ]; then has_results=$((has_results + 1)); fi
+        done
+        done=$has_results
+
         if [ $done -lt $total ]; then
-            echo "  [$done/$total] done, checking in 10s..."
+            echo "  [$done/$total] done, ${#running_pids[@]} running, waiting..."
+            sleep 10
         fi
     done
+
     trap - EXIT
-    _show_summary "${_PS_TASKS[@]}"
+    _show_results "${tasks[@]}"
 }
 
-_show_summary() {
+_show_results() {
     local tasks=("$@")
     echo ""
-    echo "=== Parallel Results ==="
+    echo "=== Results ==="
+    local pass=0 fail=0
     for task in "${tasks[@]}"; do
         local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
         if [ -f "$json" ]; then
@@ -168,17 +206,17 @@ _show_summary() {
 import json
 d = json.load(open('$json'))
 r = d.get('results', [d])[0] if d.get('results') else d
-k = r.get('task_id','?')
 v = str(r.get('is_resolved','?'))
-ti = r.get('total_input_tokens',0)
-to = r.get('total_output_tokens',0)
-fm = r.get('failure_mode','')
-print(f'  {k:30s} resolved={v:5s}  failure={fm:20s}  tokens={ti}/{to}')
+print(f'  {r.get(\"task_id\",\"?\"):30s} resolved={v:5s}  tokens={r.get(\"total_input_tokens\",0)}/{r.get(\"total_output_tokens\",0)}')
 " 2>/dev/null
+            resolved=$(python3.13 -c "import json; print(1 if json.load(open('$json')).get('n_resolved',0)>0 else 0)" 2>/dev/null || echo 0)
+            if [ "$resolved" = "1" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); fi
         else
-            printf "  %-30s (still running)\n" "$task"
+            printf "  %-30s (no results)\n" "$task"
         fi
     done
+    echo ""
+    echo "PASS: $pass / ${#tasks[@]}  FAIL: $fail"
 }
 
 if [ -n "$1" ]; then
@@ -209,17 +247,11 @@ if [ -n "$1" ]; then
             ;;
         parallel)
             shift
-            echo "Running in parallel: $# tasks"
-            for task in "$@"; do _run_bg "$task" "test"; done
-            echo ""
-            _poll_and_summary "$@"
+            _run_queue 4 "test" "$@"
             ;;
         parallel-train)
             shift
-            echo "Running in parallel (train): $# tasks"
-            for task in "$@"; do _run_bg "$task" "train"; done
-            echo ""
-            _poll_and_summary "$@"
+            _run_queue 4 "train" "$@"
             ;;
         *)
             if [ -n "$2" ]; then
