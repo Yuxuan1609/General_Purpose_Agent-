@@ -126,7 +126,8 @@ _run_task() {
     local run_id="${task}-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$OUTPUT_DIR/parallel"
     echo "  [launch] $task ($phase)"
-    cd /home/tonyyang  # avoid /mnt/c CWD-gets-deleted issue in Docker
+    cd /home/tonyyang
+    set -a; source "$PROJECT_ROOT/.env" 2>/dev/null; set +a
     TB_PHASE="$phase" python3.13 -m tb.runner run \
         --agent-import-path "$AGENT" \
         --dataset-path "$DATASET_PATH" \
