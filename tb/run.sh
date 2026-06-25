@@ -126,6 +126,7 @@ _run_task() {
     local run_id="${task}-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$OUTPUT_DIR/parallel"
     echo "  [launch] $task ($phase)"
+    cd /home/tonyyang  # avoid /mnt/c CWD-gets-deleted issue in Docker
     TB_PHASE="$phase" python3.13 -m tb.runner run \
         --agent-import-path "$AGENT" \
         --dataset-path "$DATASET_PATH" \
@@ -164,25 +165,27 @@ _run_queue() {
             sleep 1
         done
 
-        # Check which PIDs are still alive, and which have results.json
+        # Check running PIDs, mark dead processes as failed if no results.json
         local still_running=()
-        done=0
         for pid in "${running_pids[@]}"; do
             if kill -0 $pid 2>/dev/null; then
                 still_running+=($pid)
-            else
-                done=$((done + 1))
             fi
         done
         running_pids=("${still_running[@]}")
 
-        # Also count by results.json (more reliable than PID)
-        local has_results=0
+        # Count results.json (reliable source of truth)
+        done=0
         for task in "${tasks[@]}"; do
             local json=$(find "$OUTPUT_DIR/parallel/$task" -name results.json -maxdepth 6 2>/dev/null | head -1)
-            if [ -f "$json" ]; then has_results=$((has_results + 1)); fi
+            if [ -f "$json" ]; then done=$((done + 1)); fi
         done
-        done=$has_results
+
+        # If all PIDs dead but results < launched, mark as done (tasks crashed)
+        if [ ${#running_pids[@]} -eq 0 ] && [ $launched -eq $total ] && [ $done -lt $total ]; then
+            echo "  [!] All processes exited but only $done/$total have results (some crashed)"
+            break
+        fi
 
         if [ $done -lt $total ]; then
             echo "  [$done/$total] done, ${#running_pids[@]} running, waiting..."
