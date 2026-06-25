@@ -209,11 +209,17 @@ _show_results() {
             python3.13 -c "
 import json
 d = json.load(open('$json'))
-r = d.get('results', [d])[0] if d.get('results') else d
-v = str(r.get('is_resolved','?'))
-print(f'  {r.get(\"task_id\",\"?\"):30s} resolved={v:5s}  tokens={r.get(\"total_input_tokens\",0)}/{r.get(\"total_output_tokens\",0)}')
+r = d.get('results', [d])[0] if d.get('results') else {}
+ri = r.get('is_resolved')
+v = 'PASS' if ri else 'FAIL' if ri is False else 'HARNESS'
+print(f'  {r.get(\"task_id\",\"?\"):30s} {v:8s}  tokens={r.get(\"total_input_tokens\",0)}/{r.get(\"total_output_tokens\",0)}')
 " 2>/dev/null
-            resolved=$(python3.13 -c "import json; print(1 if json.load(open('$json')).get('n_resolved',0)>0 else 0)" 2>/dev/null || echo 0)
+            resolved=$(python3.13 -c "
+import json
+d=json.load(open('$json'))
+n = d.get('n_resolved', 0) or 0
+print(1 if n > 0 else 0)
+" 2>/dev/null || echo 0)
             if [ "$resolved" = "1" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); fi
         else
             printf "  %-30s (no results)\n" "$task"
