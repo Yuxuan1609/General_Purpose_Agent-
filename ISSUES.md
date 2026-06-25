@@ -119,3 +119,35 @@
 | 6 | 🟢 | L3Agent 缺 done fallback | l3/manager.py:193-195 | ✅ 已加兜底 |
 | 7 | 🟢 | 纯文本回复 reasoning 丢失 | base.py:407-408 | ⏸ 保持原状（已知限制） |
 | 8 | 🟢 | drain 重复调用 | base.py:220,228 | ✅ 只调一次 |
+
+---
+
+# Terminal-Bench Baseline Issues
+
+> 2026-06-25: 16-task test baseline (4 concurrency, process isolation)
+
+## 1. 容器内测试脚本依赖 apt-get → 网络超时/解析失败 🔴
+
+- **位置**: 4 道 task 的 `run-tests.sh` 以 `apt-get update && apt-get install -y curl`
+- **现象**: TUN VPN 下 `deb.debian.org` 间歇返回 502，导致：
+  - `overfull-hbox`: test_timeout (60s) — apt-get 卡住
+  - `swe-bench-fsspec`: test_timeout (180s) — apt-get + pip install
+  - `modernize-fortran-build`: parse_error — apt-get 失败→curl 未装→pytest 未跑→解析器找不到输出
+  - `circuit-fibsqrt`: parse_error — 同上 + LLM 连接错误
+- **测试脚本依赖链**: `apt-get update` → `curl` → `uv` → `pytest==8.4.1`
+- **修复方案**:
+  - A) 预装 `curl` + `uv` + `pytest==8.4.1` 到容器镜像（重建镜像，受网络限制）
+  - B) Mount 修改后的 `run-tests.sh` 跳过已装包的 apt-get（需改 TB harness 或 docker-compose）
+  - C) TB runner 支持 `--global-test-timeout-sec` 但超时的是 `apt-get` 本身，非全局超时
+  - D) 跑 baseline 时加 `--no-cleanup`，手动 `docker exec` 进容器跑测试脚本做二次验证
+
+## 2. 并发 Docker compose 启动失败 🟡
+
+- **现象**: 16 并发时多个 task 容器启动失败（`subprocess.CalledProcessError`）
+- **修复**: 进程队列 + max 4 并发 + 1s launch gap → 已解决
+
+## 3. LLM API 偶发连接错误 🟡
+
+- **现象**: `polyglot-c-py`: "Executor failed at round 0: Connection error"
+- **影响**: 0 token，agent 完全没启动
+- **修复**: 重试即可（非 task 本身问题）
