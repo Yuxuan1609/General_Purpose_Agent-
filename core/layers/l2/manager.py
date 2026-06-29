@@ -257,22 +257,11 @@ class L2Agent(LayerAgent):
         system = self._build_system_prompt(instruction, meta)
         nodes_section = self._format_domain_nodes(selected_nodes)
 
-        # Build context history from previous L2 calls (within same executor trace)
-        context_text = ""
-        ctx_history = state.get("context_history", [])
-        if ctx_history:
-            lines = []
-            for i, h in enumerate(ctx_history):
-                lines.append(f"第{i+1}次查询: {h.get('query', '')[:300]}")
-                lines.append(f"第{i+1}次结果摘要: {h.get('reply', '')[:500]}")
-            context_text = "\n".join(lines)
 
-        ctx_section = f"[本轮上下文]\n{context_text}\n\n" if context_text else ""
         meta_section = f"[任务背景]\n{meta}\n\n" if meta else ""
         user = (
             f"{meta_section}"
             f"[上层查询]\n{query}\n\n"
-            f"{ctx_section}"
             f"{nodes_section}"
             f"[学习数据]\n{self._build_learning_section(state)}\n\n"
             f"[知识卡片]\n{cards_text}\n\n"

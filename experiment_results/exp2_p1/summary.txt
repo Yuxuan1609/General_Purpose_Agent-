@@ -1,0 +1,70 @@
+[exp2_p1 06-27 17:05:19] START Exp2 Phase-1 TRAIN  rounds=3  mult=1.5  cases=5
+[exp2_p1 06-27 17:05:19] train cohort: build-linux-kernel-qemu build-initramfs-qemu build-stp build-pmars compile-compcert
+[exp2_p1 06-27 17:05:19] seed restored (l1=0 l2=1 l3=0 pending=0 archive=0)
+[exp2_p1 06-27 17:05:19] snapshot exp2_train_start (clean train start)
+[exp2_p1 06-27 17:05:19] === TRAIN round 1/3 ===  before: l1=0 l2=1 l3=0 pending=0 archive=0
+    L2 domains: general:1
+    L1 domains: (err no such column: domain)
+=== EPOCH [r1] mode=train start 06-27 17:05:19 ===
+  [r1] build-linux-kernel-qemu start (deadline=2700s cap=3900s) 17:05:19
+  [r1] build-linux-kernel-qemu => PASS (17:15:43)
+  [r1] build-initramfs-qemu start (deadline=1350s cap=2550s) 17:15:43
+  [r1] build-initramfs-qemu => ERR (17:58:13)
+  [r1] build-stp start (deadline=1350s cap=2550s) 17:58:14
+  [r1] build-stp => PASS (18:03:51)
+  [r1] build-pmars start (deadline=1350s cap=2550s) 18:03:51
+  [r1] build-pmars => PASS (18:12:58)
+  [r1] compile-compcert start (deadline=3600s cap=4800s) 18:12:58
+  [r1] compile-compcert => FAIL (18:21:38)
+  [r1] PASS 3/5
+[exp2_p1 06-27 18:21:38]   r1 training done; draining pending → L1/L2/L3 ...
+[exp2_p1 06-27 18:21:38]   drain[1]: consolidating pending (domain=terminal-bench) → L1/L2/L3 ...
+[exp2_p1 06-27 18:24:17]   drain[2]: consolidating pending (domain=terminal-bench) → L1/L2/L3 ...
+[exp2_p1 06-27 18:25:06] round 1 DONE: train PASS 3/5 | l1=0 l2=7 l3=0 pending=0 archive=10 | snapshot=exp2_p1_after_r1
+    L2 domains: terminal-bench/build-install:3, terminal-bench/linux-kernel:2, terminal-bench/stp:1, general:1
+    L1 domains: (err no such column: domain)
+[exp2_p1 06-27 18:25:06] === TRAIN round 2/3 ===  before: l1=0 l2=7 l3=0 pending=0 archive=10
+    L2 domains: terminal-bench/build-install:3, terminal-bench/linux-kernel:2, terminal-bench/stp:1, general:1
+    L1 domains: (err no such column: domain)
+=== EPOCH [r2] mode=train start 06-27 18:25:06 ===
+  [r2] build-linux-kernel-qemu start (deadline=2700s cap=3900s) 18:25:06
+  [r2] build-linux-kernel-qemu => PASS (18:34:58)
+  [r2] build-initramfs-qemu start (deadline=1350s cap=2550s) 18:34:58
+  [r2] build-initramfs-qemu => ERR (19:17:28)
+  [r2] build-stp start (deadline=1350s cap=2550s) 19:17:28
+  [r2] build-stp => PASS (19:21:14)
+  [r2] build-pmars start (deadline=1350s cap=2550s) 19:21:14
+  [r2] build-pmars => FAIL (19:42:16)
+  [r2] compile-compcert start (deadline=3600s cap=4800s) 19:42:16
+  [r2] compile-compcert => FAIL (20:56:19)
+  [r2] PASS 2/5
+[exp2_p1 06-27 20:56:19]   r2 training done; draining pending → L1/L2/L3 ...
+[exp2_p1 06-27 20:56:19]   drain[1]: consolidating pending (domain=terminal-bench) → L1/L2/L3 ...
+[exp2_p1 06-27 20:57:14] round 2 DONE: train PASS 2/5 | l1=2 l2=7 l3=0 pending=0 archive=16 | snapshot=exp2_p1_after_r2
+    L2 domains: terminal-bench/build-install:3, terminal-bench/linux-kernel:2, terminal-bench/stp:1, general:1
+    L1 domains: (err no such column: domain)
+[exp2_p1 06-27 20:57:14] === TRAIN round 3/3 ===  before: l1=2 l2=7 l3=0 pending=0 archive=16
+    L2 domains: terminal-bench/build-install:3, terminal-bench/linux-kernel:2, terminal-bench/stp:1, general:1
+    L1 domains: (err no such column: domain)
+=== EPOCH [r3] mode=train start 06-27 20:57:14 ===
+  [r3] build-linux-kernel-qemu start (deadline=2700s cap=3900s) 20:57:14
+  [r3] build-linux-kernel-qemu => ERR (22:02:15)
+  [r3] build-initramfs-qemu start (deadline=1350s cap=2550s) 22:02:16
+  [r3] build-initramfs-qemu => ERR (22:44:46)
+  [r3] build-stp start (deadline=1350s cap=2550s) 22:44:47
+  [r3] build-stp => PASS (22:47:55)
+  [r3] build-pmars start (deadline=1350s cap=2550s) 22:47:55
+  [r3] build-pmars => FAIL (22:55:03)
+  [r3] compile-compcert start (deadline=3600s cap=4800s) 22:55:03
+  [r3] compile-compcert => FAIL (22:58:35)
+  [r3] PASS 1/5
+[exp2_p1 06-27 22:58:35]   r3 training done; draining pending → L1/L2/L3 ...
+[exp2_p1 06-27 22:58:35]   drain[1]: consolidating pending (domain=terminal-bench) → L1/L2/L3 ...
+[exp2_p1 06-27 23:04:27] round 3 DONE: train PASS 1/5 | l1=2 l2=8 l3=0 pending=0 archive=23 | snapshot=exp2_p1_after_r3
+    L2 domains: terminal-bench/build-install:4, terminal-bench/linux-kernel:2, terminal-bench/stp:1, general:1
+    L1 domains: (err no such column: domain)
+[exp2_p1 06-27 23:04:28] snapshot exp2_after_train (final learned state)
+[exp2_p1 06-27 23:04:28] === Phase-1 DONE === final: l1=2 l2=8 l3=0 pending=0 archive=23
+    L2 domains: terminal-bench/build-install:4, terminal-bench/linux-kernel:2, terminal-bench/stp:1, general:1
+    L1 domains: (err no such column: domain)
+[exp2_p1 06-27 23:04:28] Next: Phase-2 eval (held-out: build-tcc-qemu build-cython-ext sudo-llvm-ir) bench/pass@3 on exp2_after_train

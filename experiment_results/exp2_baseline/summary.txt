@@ -1,0 +1,62 @@
+[exp2-base 06-27 10:27:46] waiting for Exp1 (pid=785868) to finish...
+[exp2-base 06-27 10:37:47] waiting for Exp1 (pid=785868) to finish...
+[exp2-base 06-27 10:59:47] Exp1 finished; starting Exp2 pass@3 baseline
+[exp2-base 06-27 10:59:51] seed restored (clean baseline, no transfer)
+[exp2-base 06-27 10:59:51] pass@3 [validate]: 1 个任务 (mode=bench, TB_MAX_REPAIRS=2, serial)
+=== EPOCH [validate] mode=bench start 06-27 10:59:51 ===
+  [validate] build-stp start (deadline=900s cap=2400s) 10:59:51
+  [validate] build-stp => ERR (11:39:51)
+  [validate] PASS 0/1
+[exp2-base 06-27 11:39:51] === Exp2 [validate] DONE — review ===
+    build-stp ERR
+[exp2-base 06-27 11:40:00] waiting for Exp1 (pid=785868) to finish...
+[exp2-base 06-27 11:40:00] Exp1 finished; starting Exp2 pass@3 baseline
+[exp2-base 06-27 11:40:03] seed restored (clean baseline, no transfer)
+[exp2-base 06-27 11:40:03] pass@3 [validate2]: 1 个任务 (mode=bench, TB_MAX_REPAIRS=2, serial)
+=== EPOCH [validate2] mode=bench start 06-27 11:40:03 ===
+  [validate2] build-stp start (deadline=900s cap=2400s) 11:40:03
+  [validate2] build-stp => PASS (11:50:27)
+  [validate2] PASS 1/1
+[exp2-base 06-27 11:50:27] === Exp2 [validate2] DONE — review ===
+    build-stp PASS
+[exp2-base 06-27 12:11:07] waiting for Exp1 (pid=785868) to finish...
+[exp2-base 06-27 12:11:07] Exp1 finished; starting Exp2 pass@3 baseline
+[exp2-base 06-27 12:11:10] seed restored (clean baseline, no transfer)
+[exp2-base 06-27 12:11:10] pass@3 [validate3]: 1 个任务 (mode=bench, TB_MAX_REPAIRS=2, serial)
+=== EPOCH [validate3] mode=bench start 06-27 12:11:10 ===
+  [validate3] build-stp start (deadline=900s cap=2400s) 12:11:10
+  [validate3] build-stp => PASS (12:16:48)
+  [validate3] PASS 1/1
+[exp2-base 06-27 12:16:48] === Exp2 [validate3] DONE — review ===
+    build-stp PASS
+[exp2-base 06-27 12:36:21] waiting for Exp1 (pid=785868) to finish...
+[exp2-base 06-27 12:36:21] Exp1 finished; starting Exp2 pass@3 baseline
+[exp2-base 06-27 12:36:24] seed restored (clean baseline, no transfer)
+[exp2-base 06-27 12:36:24] pass@3 [pass3]: 8 个任务 (mode=bench, TB_MAX_REPAIRS=2, serial)
+=== EPOCH [pass3] mode=bench start 06-27 12:36:24 ===
+  [pass3] build-stp start (deadline=900s cap=2400s) 12:36:24
+  [pass3] build-stp => PASS (12:41:34)
+  [pass3] build-tcc-qemu start (deadline=900s cap=2400s) 12:41:34
+  [pass3] build-tcc-qemu => ERR (13:21:34)
+  [pass3] build-cython-ext start (deadline=900s cap=2400s) 13:21:34
+  [pass3] build-cython-ext => ERR (14:01:34)
+  [pass3] compile-compcert start (deadline=2400s cap=3600s) 14:01:35
+  [pass3] compile-compcert => PASS (14:11:02)
+  [pass3] build-linux-kernel-qemu start (deadline=1800s cap=3000s) 14:11:02
+  [pass3] build-linux-kernel-qemu => PASS (14:21:06)
+  [pass3] build-initramfs-qemu start (deadline=900s cap=2400s) 14:21:07
+  [pass3] build-initramfs-qemu => FAIL (14:42:42)
+  [pass3] build-pmars start (deadline=900s cap=2400s) 14:42:42
+  [pass3] build-pmars => PASS (14:48:52)
+  [pass3] sudo-llvm-ir start (deadline=900s cap=2400s) 14:48:52
+  [pass3] sudo-llvm-ir => ERR (15:28:52)
+  [pass3] PASS 4/8
+[exp2-base 06-27 15:28:52] === Exp2 [pass3] DONE — review ===
+    build-stp PASS
+    build-tcc-qemu ERR
+    build-cython-ext ERR
+    compile-compcert PASS
+    build-linux-kernel-qemu PASS
+    build-initramfs-qemu FAIL
+    build-pmars PASS
+    sudo-llvm-ir ERR

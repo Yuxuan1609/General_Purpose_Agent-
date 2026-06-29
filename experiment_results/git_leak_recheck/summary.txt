@@ -1,0 +1,11 @@
+[git-leak-recheck 06-28 15:50:55] waiting for cohort (PID=1573975) to finish ...
+[git-leak-recheck 06-28 16:22:07] waiting for cohort (PID=1573975) to finish ...
+[git-leak-recheck 06-28 16:52:07] cohort finished; settling 20s ...
+[git-leak-recheck 06-28 16:52:27] restored git_after_train (l1=1 l2=6 l3=0) — git-leak RECHECK WITH learning, deadline=1800s cap=3600s
+[git-leak-recheck 06-28 16:52:27] === GIT-LEAK RECHECK (git_after_train, bench/pass@3, deadline=1800s cap=3600s) — vs baseline FAIL / eval ERR ===
+=== EPOCH [git_leak_recheck] mode=bench start 06-28 16:52:27 ===
+  [git_leak_recheck] git-leak-recovery start (deadline=1800s cap=3600s) 16:52:27
+  [git_leak_recheck] git-leak-recovery => PASS (16:56:43)
+  [git_leak_recheck] PASS 1/1
+[git-leak-recheck 06-28 16:56:43] === RECHECK DONE ===
+  结果: git-leak-recovery PASS

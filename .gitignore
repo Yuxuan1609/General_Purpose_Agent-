@@ -19,3 +19,4 @@ embeddinggemma-transformers-embeddinggemma-300m-v1.tar.gz
 data/cognitive/
 runs/
 tb/runs/
+data_backup/

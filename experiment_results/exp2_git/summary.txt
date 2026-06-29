@@ -1,0 +1,37 @@
+[git-baseline 06-28 00:19:25] restoring exp1_seed (clean) ...
+[git-baseline 06-28 00:19:25] restored exp1_seed (l1=0 l2=1 l3=0) — git baseline NO learning
+[git-baseline 06-28 00:19:25] === GIT pass@3 BASELINE (5 tasks, bench/pass@3, NO learning, 1.0x) ===
+=== EPOCH [git_baseline] mode=bench start 06-28 00:19:25 ===
+  [git_baseline] merge-diff-arc-agi-task start (deadline=900s cap=2400s) 00:19:25
+[git-baseline 06-28 00:41:52] restoring exp1_seed (clean) ...
+[git-baseline 06-28 00:41:52] restored exp1_seed (l1=0 l2=1 l3=0) — git baseline NO learning
+[git-baseline 06-28 00:41:52] === GIT pass@3 BASELINE (5 tasks, bench/pass@3, NO learning, 1.0x) ===
+=== EPOCH [git_baseline] mode=bench start 06-28 00:41:52 ===
+  [git_baseline] merge-diff-arc-agi-task start (deadline=900s cap=2400s) 00:41:52
+  [git_baseline] merge-diff-arc-agi-task => ERR (00:41:56)
+  [git_baseline] git-leak-recovery start (deadline=900s cap=2400s) 00:41:56
+  [git_baseline] git-leak-recovery => ERR (00:41:59)
+  [git_baseline] git-multibranch start (deadline=900s cap=2400s) 00:41:59
+  [git_baseline] git-multibranch => ERR (00:42:03)
+  [git_baseline] sanitize-git-repo start (deadline=900s cap=2400s) 00:42:03
+  [git_baseline] sanitize-git-repo => ERR (00:42:06)
+  [git_baseline] configure-git-webserver start (deadline=900s cap=2400s) 00:42:06
+  [git_baseline] configure-git-webserver => ERR (00:42:10)
+  [git_baseline] PASS 0/5
+[git-baseline 06-28 00:42:10] === GIT BASELINE DONE: PASS 0/5 ===
+[git-baseline 06-28 00:44:12] restoring exp1_seed (clean) ...
+[git-baseline 06-28 00:44:12] restored exp1_seed (l1=0 l2=1 l3=0) — git baseline NO learning
+[git-baseline 06-28 00:44:12] === GIT pass@3 BASELINE (5 tasks, bench/pass@3, NO learning, 1.0x) ===
+=== EPOCH [git_baseline] mode=bench start 06-28 00:44:13 ===
+  [git_baseline] merge-diff-arc-agi-task start (deadline=900s cap=2400s) 00:44:13
+  [git_baseline] merge-diff-arc-agi-task => PASS (01:05:26)
+  [git_baseline] git-leak-recovery start (deadline=900s cap=2400s) 01:05:26
+  [git_baseline] git-leak-recovery => FAIL (01:27:14)
+  [git_baseline] git-multibranch start (deadline=900s cap=2400s) 01:27:14
+  [git_baseline] git-multibranch => PASS (01:48:34)
+  [git_baseline] sanitize-git-repo start (deadline=900s cap=2400s) 01:48:34
+  [git_baseline] sanitize-git-repo => PASS (01:51:19)
+  [git_baseline] configure-git-webserver start (deadline=900s cap=2400s) 01:51:19
+  [git_baseline] configure-git-webserver => FAIL (02:18:21)
+  [git_baseline] PASS 3/5
+[git-baseline 06-28 02:18:21] === GIT BASELINE DONE: PASS 3/5 ===

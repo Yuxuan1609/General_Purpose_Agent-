@@ -17,9 +17,9 @@ class DecisionNode:
     def to_dict(self) -> dict:
         return {
             "layer": self.layer,
-            "query": self.query[:1000],
-            "result": self.result[:2000],
-            "reasoning": self.reasoning[:2000],
+            "query": self.query[:10000],
+            "result": self.result[:10000],
+            "reasoning": self.reasoning[:10000],
             "children": [c.to_dict() for c in self.children],
         }
 

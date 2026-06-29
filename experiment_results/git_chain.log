@@ -1,0 +1,6 @@
+[git-chain 06-28 09:11:47] === GIT EXPERIMENT CHAIN START ===
+[git-chain 06-28 09:11:47] >>> Phase 1/2: TRAIN
+[git-chain 06-28 11:10:08] >>> Phase 1/2 TRAIN done
+[git-chain 06-28 11:10:08] >>> Phase 2/2: EVAL (held-out, WITH learning)
+[git-chain 06-28 11:52:56] >>> Phase 2/2 EVAL done
+[git-chain 06-28 11:52:56] === GIT EXPERIMENT CHAIN DONE === eval PASS 1/2 vs baseline 0/2 — review for transfer signal

@@ -1,0 +1,26 @@
+############ Exp1 ONE-ROUND start Fri Jun 26 09:48:55 AM CST 2026 ############
+[start state: l2_cards=1]
+=== EPOCH [e1_train] mode=train start 06-26 09:48:55 ===
+  [e1_train] conda-env-conflict-resolution => PASS (10:01:38)
+  [e1_train] overfull-hbox => PASS (10:09:39)
+  [e1_train] modernize-fortran-build => PASS (10:11:18)
+  [e1_train] mailman => FAIL (10:27:05)
+  [e1_train] vul-flink => PASS (10:49:25)
+  [e1_train] polyglot-c-py => ERR (11:29:25)
+  [e1_train] regex-chess => ERR (12:09:25)
+  [e1_train] PASS 4/7
+forked data/ → /home/admin/cognitive-agent/data_snapshots/exp1_after_e1_train
+  -- learning track after train --
+record_learning calls: 4
+downstream status:     ok=4
+auto_learning:         (none)
+file: data/learning/record_learning_track.jsonl
+  state: l2_cards=1 l3_skills=0
+=== EPOCH [e1_test] mode=test start 06-26 12:09:25 ===
+  [e1_test] conda-env-conflict-resolution => PASS (12:20:05)
+[exp1 06-26 20:40:51] START  rounds=3  cases=9
+[exp1 06-26 20:40:51] cohort: conda-env-conflict-resolution overfull-hbox mailman broken-networking polyglot-c-py write-compressor nginx-request-logging circuit-fibsqrt regex-chess
+[exp1 06-26 20:40:51] seed restored (l1=0 l2=1 l3=0 pending=0 archive=0)
+[exp1 06-26 20:40:51] === TRAIN round 1/3 ===  (before: l1=0 l2=1 l3=0 pending=0 archive=0)
+=== EPOCH [r1] mode=train start 06-26 20:40:51 ===
+  [r1] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 20:40:51

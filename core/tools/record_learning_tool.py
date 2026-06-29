@@ -248,7 +248,7 @@ SUB_AGENT_PROMPT = """你是一个学习记录分析员。根据 learning_target
 
 规则：
 - 只提取与 learning_target 语义相关的 observation。不相关的跳过。
-- evidence 必须是 decision_tree 中某节点的 result 原文（截取前 500 字），不能编造。
+- evidence 必须是 decision_tree 中某节点的 result 原文（截取前 10000 字），不能编造。
 - implication 是推论：例如"因为 L2 没有该领域的卡片，所以应该补充"。
 - 如果某节点在某轮中无实质发现（result 为空或纯状态信息如 status:ok），跳过该节点。
 - 最多每层返回 5 条 observation，按 relevance 降序。
@@ -277,11 +277,11 @@ def _format_tree_for_llm(nodes: list) -> str:
         else:
             return
         label = {"l0_5_1": "L1", "l2": "L2", "l3": "L3"}.get(layer, layer)
-        lines.append(f"[{prefix}{label}] query: {str(query)[:200]}")
+        lines.append(f"[{prefix}{label}] query: {str(query)[:10000]}")
         if result:
-            lines.append(f"[{prefix}{label}] result: {str(result)[:500]}")
+            lines.append(f"[{prefix}{label}] result: {str(result)[:10000]}")
         if reasoning:
-            lines.append(f"[{prefix}{label}] reasoning: {str(reasoning)[:300]}")
+            lines.append(f"[{prefix}{label}] reasoning: {str(reasoning)[:10000]}")
         children = getattr(node, 'children', []) if hasattr(node, 'children') else node.get('children', [])
         for c_idx, child in enumerate(children):
             _walk(child, f"{prefix}{c_idx + 1}.")

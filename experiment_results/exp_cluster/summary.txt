@@ -1,0 +1,33 @@
+[queue 16:19:43] waiting for baseline-14 (pid=486847)...
+[queue 18:07:43] baseline-14 finished; starting cluster test
+=== EPOCH [cluster_build_git] mode=test start 06-26 18:07:48 ===
+  [cluster_build_git] build-cython-ext start (deadline=900s cap=2400s) 18:07:48
+  [cluster_build_git] build-cython-ext => FAIL (18:11:54)
+  [cluster_build_git] build-pmars start (deadline=900s cap=2400s) 18:11:54
+  [cluster_build_git] build-pmars => PASS (18:13:58)
+  [cluster_build_git] build-stp start (deadline=900s cap=2400s) 18:13:58
+  [cluster_build_git] build-stp => FAIL (18:17:08)
+  [cluster_build_git] gcc-compiler-optimization start (deadline=900s cap=2400s) 18:17:08
+  [cluster_build_git] gcc-compiler-optimization => PASS (18:19:07)
+  [cluster_build_git] sudo-llvm-ir start (deadline=900s cap=2400s) 18:19:07
+  [cluster_build_git] sudo-llvm-ir => FAIL (18:25:21)
+  [cluster_build_git] build-tcc-qemu start (deadline=900s cap=2400s) 18:25:21
+  [cluster_build_git] build-tcc-qemu => FAIL (18:37:56)
+  [cluster_build_git] build-initramfs-qemu start (deadline=900s cap=2400s) 18:37:56
+  [cluster_build_git] build-initramfs-qemu => FAIL (18:49:09)
+  [cluster_build_git] compile-compcert start (deadline=2400s cap=3600s) 18:49:09
+  [cluster_build_git] compile-compcert => FAIL (18:51:29)
+  [cluster_build_git] build-linux-kernel-qemu start (deadline=1800s cap=3000s) 18:51:29
+  [cluster_build_git] build-linux-kernel-qemu => PASS (19:09:11)
+  [cluster_build_git] merge-diff-arc-agi-task start (deadline=900s cap=2400s) 19:09:11
+  [cluster_build_git] merge-diff-arc-agi-task => PASS (19:11:28)
+  [cluster_build_git] git-leak-recovery start (deadline=900s cap=2400s) 19:11:28
+  [cluster_build_git] git-leak-recovery => PASS (19:12:47)
+  [cluster_build_git] git-multibranch start (deadline=900s cap=2400s) 19:12:47
+  [cluster_build_git] git-multibranch => FAIL (19:16:30)
+  [cluster_build_git] sanitize-git-repo start (deadline=900s cap=2400s) 19:16:30
+  [cluster_build_git] sanitize-git-repo => FAIL (19:18:29)
+  [cluster_build_git] configure-git-webserver start (deadline=900s cap=2400s) 19:18:29
+  [cluster_build_git] configure-git-webserver => FAIL (19:39:20)
+  [cluster_build_git] PASS 5/14
+[queue 19:39:20] cluster test DONE

@@ -1,0 +1,6 @@
+[cohort-learned 06-29 08:39:28] restored exp1_cohort_after_train (l1=1 l2=23 l3=0) — cohort LEARNED pass@3 WITH learning
+[cohort-learned 06-29 08:39:28] === EXP1 COHORT LEARNED pass@3 (9 tasks, bench/pass@3, WITH learning) — vs base 3/9, 1-shot 1/9 ===
+=== EPOCH [cohort_learned] mode=bench start 06-29 08:39:28 ===
+  [cohort_learned] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 08:39:28
+  [cohort_learned] conda-env-conflict-resolution => PASS (08:43:07)
+  [cohort_learned] overfull-hbox start (deadline=750s cap=2400s) 08:43:07

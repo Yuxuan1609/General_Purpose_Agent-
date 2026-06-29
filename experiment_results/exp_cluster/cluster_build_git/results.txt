@@ -1,0 +1,14 @@
+build-cython-ext FAIL
+build-pmars PASS
+build-stp FAIL
+gcc-compiler-optimization PASS
+sudo-llvm-ir FAIL
+build-tcc-qemu FAIL
+build-initramfs-qemu FAIL
+compile-compcert FAIL
+build-linux-kernel-qemu PASS
+merge-diff-arc-agi-task PASS
+git-leak-recovery PASS
+git-multibranch FAIL
+sanitize-git-repo FAIL
+configure-git-webserver FAIL

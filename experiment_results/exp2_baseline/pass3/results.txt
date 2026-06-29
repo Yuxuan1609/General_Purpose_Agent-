@@ -1,0 +1,8 @@
+build-stp PASS
+build-tcc-qemu ERR
+build-cython-ext ERR
+compile-compcert PASS
+build-linux-kernel-qemu PASS
+build-initramfs-qemu FAIL
+build-pmars PASS
+sudo-llvm-ir ERR

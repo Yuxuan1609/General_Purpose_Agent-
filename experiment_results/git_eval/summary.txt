@@ -1,0 +1,12 @@
+[git-eval 06-28 11:10:08] restored git_after_train (l1=1 l2=6 l3=0) — git EVAL WITH learning
+[git-eval 06-28 11:10:08] === GIT EVAL (held-out 2, bench/pass@3, WITH learning) — compare to git baseline 0/2 ===
+[git-eval 06-28 11:10:08] held-out: git-leak-recovery configure-git-webserver
+=== EPOCH [git_eval] mode=bench start 06-28 11:10:08 ===
+  [git_eval] git-leak-recovery start (deadline=900s cap=2400s) 11:10:08
+  [git_eval] git-leak-recovery => ERR (11:50:08)
+  [git_eval] configure-git-webserver start (deadline=900s cap=2400s) 11:50:08
+  [git_eval] configure-git-webserver => PASS (11:52:56)
+  [git_eval] PASS 1/2
+[git-eval 06-28 11:52:56] === GIT EVAL DONE: PASS 1/2 (baseline was 0/2) ===
+  git-leak-recovery ERR
+  configure-git-webserver PASS

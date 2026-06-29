@@ -74,6 +74,16 @@ class L1Agent(LayerAgent):
             "L2/L3的详细evidence会由后台自动补充。\n"
             "注意：如果之前已提交过内容相似的 learning_target，不要重复调用 record_learning。\n"
         )
+        domain_guide = (
+            "## 领域管理\n"
+            "你是唯一有权限管理 domain 的层。domain 是 L2 知识卡片和 L3 技能的归类组织方式。\n"
+            "你应该主动维护 domain 结构：\n"
+            "- 当发现某个主题积累了一定量的知识/技能，用 create_domain 创建新 domain\n"
+            "- 用 query_domain 检查 domain 当前的内容分布\n"
+            "- 对于内容过少或重复的 domain，用 merge_domain 合并到更合适的父 domain\n"
+            "- domain 废弃用 deprecate_domain（需先迁移其中的内容）\n"
+            "domain 路径建议分层命名，如 game/leduc、interaction/file-processing。\n\n"
+        )
         l1_query_guide = (
             "## l1_query 工具用法\n"
             "l1_query 是向 L2 层发起查询的工具。使用场景：\n"
@@ -96,6 +106,7 @@ class L1Agent(LayerAgent):
             f"你只实际执行相对简单的任务。对于需要多步骤操作的复杂任务，"
             f"你进行拆解并通过 l1_query 逐个部分下发。\n"
             f"需要工具调用（如 web_search、terminal、读文件等）的任务，通过 l1_query 下发给 L2/L3 执行。\n\n"
+            f"{domain_guide}"
             f"{l1_query_guide}\n"
             f"{tool_rules}\n"
             f"{learning_guidance}\n"

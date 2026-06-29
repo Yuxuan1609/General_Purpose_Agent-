@@ -1,0 +1,2 @@
+=== EPOCH [train7] mode=train start 06-26 15:28:51 ===
+  [train7] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 15:28:51

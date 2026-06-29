@@ -1,0 +1,243 @@
+=== Test Baseline: 16 tasks ===
+Start: Wed Jun 24 15:26:49 CST 2026
+--- fix-pandas-version ---
+[92m15:26:55 - LiteLLM:WARNING[0m: get_model_cost_map.py:271 - LiteLLM: Failed to fetch remote model cost map from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: _ssl.c:1015: The handshake operation timed out. Falling back to local backup.
+Starting harness run
+Run ID: 2026-06-24__15-26-57
+Executor failed at round 0: Request timed out.
+  Running tasks (1/1, Accuracy: 0.00%) - Last: fix-pandas-version ✗ ━━ 100% 0:0…
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/tonyyang/.local/lib/python3.13/site-packages/terminal_bench/cli/tb/run │
+│ s.py:403 in create                                                           │
+│                                                                              │
+│   400 │   )                                                                  │
+│   401 │                                                                      │
+│   402 │   results = harness.run()                                            │
+│ ❱ 403 │   _print_rich_results(results, harness._results_output_path)         │
+│   404                                                                        │
+│   405                                                                        │
+│   406 @runs_app.command()                                                    │
+│                                                                              │
+│ /home/tonyyang/.local/lib/python3.13/site-packages/terminal_bench/cli/tb/run │
+│ s.py:95 in _print_rich_results                                               │
+│                                                                              │
+│    92 │                                                                      │
+│    93 │   print("\nResults Summary:")                                        │
+│    94 │   print(tabulate(data, headers=headers, tablefmt="grid"))            │
+│ ❱  95 │   rich_print(f"\nResults written to [bold                            │
+│       green]{output_path.absolute()}[/]")                                    │
+│    96                                                                        │
+│    97                                                                        │
+│    98 def create(                                                            │
+│                                                                              │
+│ /usr/lib/python3.13/pathlib/_local.py:649 in absolute                        │
+│                                                                              │
+│   646 │   │   │   # There is a CWD on each drive-letter drive.               │
+│   647 │   │   │   cwd = os.path.abspath(self.drive)                          │
+│   648 │   │   else:                                                          │
+│ ❱ 649 │   │   │   cwd = os.getcwd()                                          │
+│   650 │   │   if not self._tail:                                             │
+│   651 │   │   │   # Fast path for "empty" paths, e.g. Path("."), Path("") or │
+│       Path().                                                                │
+│   652 │   │   │   # We pass only one argument to with_segments() to avoid    │
+│       the cost                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+FileNotFoundError: [Errno 2] No such file or directory
+
+Results Summary:
++-------------------+---------+
+| Metric            | Value   |
++===================+=========+
+| Resolved Trials   | 0       |
++-------------------+---------+
+| Unresolved Trials | 1       |
++-------------------+---------+
+| Accuracy          | 0.00%   |
++-------------------+---------+
+RESULT: FAIL (exit 1)
+
+--- conda-env-conflict-resolution ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fbdb9b89000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- incompatible-python-fasttext ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f7ac9765000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- cpp-compatibility ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f8b1dfb2000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- classifier-debug ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fa4bf60f000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- swe-bench-fsspec ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f4e8a507000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- overfull-hbox ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fd982653000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- swe-bench-astropy-1 ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f7be5e63000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- fix-git ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f82b31a8000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- modernize-fortran-build ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f335282b000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- polyglot-c-py ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f6fac0b3000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- broken-python ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fc798a13000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- pypi-server ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fb5250de000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- write-compressor ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007f6617474000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- regex-chess ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fd89820f000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+--- circuit-fibsqrt ---
+Exception ignored in running getpath:
+Traceback (most recent call last):
+  File "<frozen getpath>", line 668, in <module>
+OSError: failed to make path absolute
+Fatal Python error: error evaluating path
+Python runtime state: core initialized
+
+Current thread 0x00007fbd7165e000 (most recent call first):
+  <no Python frame>
+RESULT: FAIL (exit 1)
+
+=== Summary ===
+PASS:  0 / 16
+FAIL:  16
+ERROR: 0
+End: Wed Jun 24 15:27:43 CST 2026

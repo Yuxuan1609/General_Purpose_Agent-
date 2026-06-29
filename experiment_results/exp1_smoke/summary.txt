@@ -1,0 +1,28 @@
+[exp1_smoke 06-26 19:51:00] START  rounds=2  cases=1
+[exp1_smoke 06-26 19:51:00] cohort: polyglot-c-py
+[exp1_smoke 06-26 19:51:00] seed restored (l1=0 l2=1 l3=0 pending=0 archive=0)
+[exp1_smoke 06-26 19:51:00] === TRAIN round 1/2 ===  (before: l1=0 l2=1 l3=0 pending=0 archive=0)
+=== EPOCH [r1] mode=train start 06-26 19:51:00 ===
+  [r1] polyglot-c-py start (deadline=900s cap=2400s) 19:51:00
+  [r1] polyglot-c-py => PASS (19:55:49)
+  [r1] PASS 1/1
+[exp1_smoke 06-26 19:55:49]   r1 training done; draining pending → L1/L2/L3 ...
+[exp1_smoke 06-26 19:55:49]   drain[1]: consolidating pending (domain=interaction) → L1/L2/L3 ...
+[exp1_smoke 06-26 19:56:18] round 1 DONE: train PASS 1/1 | learning: l1=0 l2=2 l3=0 pending=0 archive=2 | snapshot=exp1_smoke_after_r1
+[exp1_smoke 06-26 19:56:18] === TRAIN round 2/2 ===  (before: l1=0 l2=2 l3=0 pending=0 archive=2)
+=== EPOCH [r2] mode=train start 06-26 19:56:18 ===
+  [r2] polyglot-c-py start (deadline=900s cap=2400s) 19:56:18
+  [r2] polyglot-c-py => PASS (19:59:45)
+  [r2] PASS 1/1
+[exp1_smoke 06-26 19:59:45]   r2 training done; draining pending → L1/L2/L3 ...
+[exp1_smoke 06-26 19:59:45]   drain[1]: consolidating pending (domain=interaction) → L1/L2/L3 ...
+[exp1_smoke 06-26 20:02:13] round 2 DONE: train PASS 1/1 | learning: l1=0 l2=2 l3=0 pending=0 archive=3 | snapshot=exp1_smoke_after_r2
+[exp1_smoke 06-26 20:02:13] === EVAL (test mode, learned state) ===  (learning: l1=0 l2=2 l3=0 pending=0 archive=3)
+=== EPOCH [eval] mode=test start 06-26 20:02:13 ===
+  [eval] polyglot-c-py start (deadline=900s cap=2400s) 20:02:13
+  [eval] polyglot-c-py => FAIL (20:04:00)
+  [eval] PASS 0/1
+[exp1_smoke 06-26 20:04:00] === RESULTS: eval PASS 0/1  (clean baseline was 0/1) ===
+    polyglot-c-py FAIL
+[exp1_smoke 06-26 20:04:00] final learning state: l1=0 l2=2 l3=0 pending=0 archive=3
+[exp1_smoke 06-26 20:04:00] DONE

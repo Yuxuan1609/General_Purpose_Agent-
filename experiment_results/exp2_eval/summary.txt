@@ -1,0 +1,8 @@
+[exp2-eval 06-27 22:03:43] waiting for Phase-1 (PID=1285943) to finish ...
+[exp2-eval 06-27 23:04:43] Phase-1 finished; settling 15s ...
+[exp2-eval 06-27 23:04:58] restored exp2_after_train (l1=2 l2=8 l3=0) — build eval WITH learning
+[exp2-eval 06-27 23:04:58] === BUILD EVAL (held-out 3, bench/pass@3, WITH learning) — compare to build pass@3 baseline 0/3 ===
+=== EPOCH [build_eval] mode=bench start 06-27 23:04:58 ===
+  [build_eval] build-tcc-qemu start (deadline=900s cap=2400s) 23:04:58
+  [build_eval] build-tcc-qemu => ERR (23:44:58)
+  [build_eval] build-cython-ext start (deadline=900s cap=2400s) 23:44:59

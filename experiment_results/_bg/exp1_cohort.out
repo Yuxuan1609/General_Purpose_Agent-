@@ -1,0 +1,35 @@
+[exp1-cohort 06-28 09:53:29] waiting for git experiment (PID=1564225) to finish ...
+[exp1-cohort 06-28 11:53:29] git experiment finished; settling 20s ...
+[exp1-cohort 06-28 11:53:49] restored exp1_seed (l1=0 l2=1 l3=0) — BASE pass@3 NO learning
+[exp1-cohort 06-28 11:53:49] === EXP1 COHORT BASE pass@3 (9 tasks, bench/pass@3, NO learning) — vs 1-shot baseline 0/9 ===
+=== EPOCH [cohort_base] mode=bench start 06-28 11:53:49 ===
+  [cohort_base] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 11:53:49
+  [cohort_base] conda-env-conflict-resolution => PASS (12:05:15)
+  [cohort_base] overfull-hbox start (deadline=750s cap=2400s) 12:05:15
+  [cohort_base] overfull-hbox => ERR (12:45:15)
+  [cohort_base] mailman start (deadline=1800s cap=3000s) 12:45:15
+  [cohort_base] mailman => PASS (12:50:24)
+  [cohort_base] broken-networking start (deadline=900s cap=2400s) 12:50:24
+  [cohort_base] broken-networking => FAIL (13:00:50)
+  [cohort_base] polyglot-c-py start (deadline=900s cap=2400s) 13:00:50
+  [cohort_base] polyglot-c-py => PASS (13:06:35)
+  [cohort_base] write-compressor start (deadline=900s cap=2400s) 13:06:35
+  [cohort_base] write-compressor => FAIL (13:27:38)
+  [cohort_base] nginx-request-logging start (deadline=900s cap=2400s) 13:27:38
+  [cohort_base] nginx-request-logging => FAIL (13:49:04)
+  [cohort_base] circuit-fibsqrt start (deadline=3600s cap=4800s) 13:49:04
+  [cohort_base] circuit-fibsqrt => ERR (15:09:04)
+  [cohort_base] regex-chess start (deadline=3600s cap=4800s) 15:09:05
+  [cohort_base] regex-chess => FAIL (16:11:07)
+  [cohort_base] PASS 3/9
+[exp1-cohort 06-28 16:11:07] BASE done: PASS 3/9
+[exp1-cohort 06-28 16:11:07] restored exp1_after_r3 (l1=7 l2=10 l3=0) — LEARNED pass@3 WITH learning
+[exp1-cohort 06-28 16:11:07] === EXP1 COHORT LEARNED pass@3 (9 tasks, bench/pass@3, WITH learning) — vs 1-shot eval 1/9 ===
+=== EPOCH [cohort_learned] mode=bench start 06-28 16:11:07 ===
+  [cohort_learned] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 16:11:08
+  [cohort_learned] conda-env-conflict-resolution => FAIL (16:25:28)
+  [cohort_learned] overfull-hbox start (deadline=750s cap=2400s) 16:25:29
+  [cohort_learned] overfull-hbox => PASS (16:44:15)
+  [cohort_learned] mailman start (deadline=1800s cap=3000s) 16:44:15
+  [cohort_learned] mailman => PASS (16:48:49)
+  [cohort_learned] broken-networking start (deadline=900s cap=2400s) 16:48:49

@@ -1,0 +1,9 @@
+conda-env-conflict-resolution PASS
+overfull-hbox ERR
+mailman FAIL
+broken-networking PASS
+polyglot-c-py PASS
+write-compressor PASS
+nginx-request-logging FAIL
+circuit-fibsqrt FAIL
+regex-chess FAIL

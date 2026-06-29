@@ -1,0 +1,91 @@
+[exp1 06-26 20:55:42] START  rounds=3  cases=9
+[exp1 06-26 20:55:42] cohort: conda-env-conflict-resolution overfull-hbox mailman broken-networking polyglot-c-py write-compressor nginx-request-logging circuit-fibsqrt regex-chess
+[exp1 06-26 20:55:42] seed restored (l1=0 l2=1 l3=0 pending=0 archive=0)
+[exp1 06-26 20:55:42] === TRAIN round 1/3 ===  (before: l1=0 l2=1 l3=0 pending=0 archive=0)
+=== EPOCH [r1] mode=train start 06-26 20:55:42 ===
+  [r1] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 20:55:42
+  [r1] conda-env-conflict-resolution => PASS (21:11:55)
+  [r1] overfull-hbox start (deadline=750s cap=2400s) 21:11:55
+  [r1] overfull-hbox => FAIL (21:43:20)
+  [r1] mailman start (deadline=1800s cap=3000s) 21:43:20
+  [r1] mailman => PASS (21:49:01)
+  [r1] broken-networking start (deadline=900s cap=2400s) 21:49:01
+  [r1] broken-networking => FAIL (21:56:30)
+  [r1] polyglot-c-py start (deadline=900s cap=2400s) 21:56:30
+  [r1] polyglot-c-py => PASS (22:03:18)
+  [r1] write-compressor start (deadline=900s cap=2400s) 22:03:18
+  [r1] write-compressor => FAIL (22:24:12)
+  [r1] nginx-request-logging start (deadline=900s cap=2400s) 22:24:12
+  [r1] nginx-request-logging => PASS (22:27:34)
+  [r1] circuit-fibsqrt start (deadline=3600s cap=4800s) 22:27:34
+  [r1] circuit-fibsqrt => FAIL (23:16:42)
+  [r1] regex-chess start (deadline=3600s cap=4800s) 23:16:42
+  [r1] regex-chess => FAIL (00:04:18)
+  [r1] PASS 4/9
+[exp1 06-27 00:04:18]   r1 training done; draining pending → L1/L2/L3 ...
+[exp1 06-27 00:04:18] round 1 DONE: train PASS 4/9 | learning: l1=5 l2=4 l3=0 pending=0 archive=10 | snapshot=exp1_after_r1
+[exp1 06-27 00:04:18] === TRAIN round 2/3 ===  (before: l1=5 l2=4 l3=0 pending=0 archive=10)
+=== EPOCH [r2] mode=train start 06-27 00:04:18 ===
+  [r2] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 00:04:18
+  [r2] conda-env-conflict-resolution => PASS (00:23:59)
+  [r2] overfull-hbox start (deadline=750s cap=2400s) 00:23:59
+  [r2] overfull-hbox => FAIL (00:47:36)
+  [r2] mailman start (deadline=1800s cap=3000s) 00:47:36
+  [r2] mailman => FAIL (01:03:26)
+  [r2] broken-networking start (deadline=900s cap=2400s) 01:03:26
+  [r2] broken-networking => FAIL (01:13:14)
+  [r2] polyglot-c-py start (deadline=900s cap=2400s) 01:13:14
+  [r2] polyglot-c-py => PASS (01:17:13)
+  [r2] write-compressor start (deadline=900s cap=2400s) 01:17:13
+  [r2] write-compressor => FAIL (01:34:25)
+  [r2] nginx-request-logging start (deadline=900s cap=2400s) 01:34:25
+  [r2] nginx-request-logging => PASS (01:36:55)
+  [r2] circuit-fibsqrt start (deadline=3600s cap=4800s) 01:36:55
+  [r2] circuit-fibsqrt => ERR (02:56:59)
+  [r2] regex-chess start (deadline=3600s cap=4800s) 02:57:02
+  [r2] regex-chess => FAIL (04:14:10)
+  [r2] PASS 3/9
+[exp1 06-27 04:14:10]   r2 training done; draining pending → L1/L2/L3 ...
+[exp1 06-27 04:14:10]   drain[1]: consolidating pending (domain=interaction) → L1/L2/L3 ...
+[exp1 06-27 04:16:30] round 2 DONE: train PASS 3/9 | learning: l1=6 l2=4 l3=0 pending=0 archive=19 | snapshot=exp1_after_r2
+[exp1 06-27 04:16:30] === TRAIN round 3/3 ===  (before: l1=6 l2=4 l3=0 pending=0 archive=19)
+=== EPOCH [r3] mode=train start 06-27 04:16:30 ===
+  [r3] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 04:16:30
+  [r3] conda-env-conflict-resolution => PASS (04:22:43)
+  [r3] overfull-hbox start (deadline=750s cap=2400s) 04:22:43
+  [r3] overfull-hbox => ERR (05:02:43)
+  [r3] mailman start (deadline=1800s cap=3000s) 05:02:43
+  [r3] mailman => FAIL (05:48:04)
+  [r3] broken-networking start (deadline=900s cap=2400s) 05:48:04
+  [r3] broken-networking => PASS (05:59:18)
+  [r3] polyglot-c-py start (deadline=900s cap=2400s) 05:59:18
+  [r3] polyglot-c-py => PASS (06:03:58)
+  [r3] write-compressor start (deadline=900s cap=2400s) 06:03:58
+  [r3] write-compressor => PASS (06:21:15)
+  [r3] nginx-request-logging start (deadline=900s cap=2400s) 06:21:15
+  [r3] nginx-request-logging => FAIL (06:43:01)
+  [r3] circuit-fibsqrt start (deadline=3600s cap=4800s) 06:43:01
+  [r3] circuit-fibsqrt => FAIL (07:44:03)
+  [r3] regex-chess start (deadline=3600s cap=4800s) 07:44:04
+  [r3] regex-chess => FAIL (08:42:14)
+  [r3] PASS 4/9
+[exp1 06-27 08:42:14]   r3 training done; draining pending → L1/L2/L3 ...
+[exp1 06-27 08:42:14]   drain[1]: consolidating pending (domain=interaction) → L1/L2/L3 ...
+[exp1 06-27 08:45:44] round 3 DONE: train PASS 4/9 | learning: l1=7 l2=10 l3=0 pending=0 archive=33 | snapshot=exp1_after_r3
+[exp1 06-27 08:45:44] === EVAL (test mode, learned state) ===  (learning: l1=7 l2=10 l3=0 pending=0 archive=33)
+=== EPOCH [eval] mode=test start 06-27 08:45:44 ===
+  [eval] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 08:45:44
+  [eval] conda-env-conflict-resolution => FAIL (08:57:16)
+  [eval] overfull-hbox start (deadline=750s cap=2400s) 08:57:16
+  [eval] overfull-hbox => FAIL (09:06:18)
+  [eval] mailman start (deadline=1800s cap=3000s) 09:06:18
+  [eval] mailman => FAIL (09:41:55)
+  [eval] broken-networking start (deadline=900s cap=2400s) 09:41:55
+  [eval] broken-networking => FAIL (09:47:27)
+  [eval] polyglot-c-py start (deadline=900s cap=2400s) 09:47:27
+  [eval] polyglot-c-py => FAIL (09:51:53)
+  [eval] write-compressor start (deadline=900s cap=2400s) 09:51:53
+  [eval] write-compressor => FAIL (10:12:21)
+  [eval] nginx-request-logging start (deadline=900s cap=2400s) 10:12:22
+  [eval] nginx-request-logging => PASS (10:14:17)
+  [eval] circuit-fibsqrt start (deadline=3600s cap=4800s) 10:14:17

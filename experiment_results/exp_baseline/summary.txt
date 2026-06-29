@@ -1,0 +1,30 @@
+=== EPOCH [baseline14] mode=test start 06-26 15:40:37 ===
+  [baseline14] conda-env-conflict-resolution start (deadline=1000s cap=2400s) 15:40:37
+  [baseline14] conda-env-conflict-resolution => FAIL (15:53:26)
+  [baseline14] overfull-hbox start (deadline=750s cap=2400s) 15:53:26
+  [baseline14] overfull-hbox => FAIL (15:57:22)
+  [baseline14] modernize-fortran-build start (deadline=900s cap=2400s) 15:57:22
+  [baseline14] modernize-fortran-build => PASS (15:58:34)
+  [baseline14] mailman start (deadline=1800s cap=3000s) 15:58:34
+  [baseline14] mailman => FAIL (16:02:07)
+  [baseline14] vul-flink start (deadline=1800s cap=3000s) 16:02:07
+  [baseline14] vul-flink => PASS (16:17:07)
+  [baseline14] broken-networking start (deadline=900s cap=2400s) 16:17:07
+  [baseline14] broken-networking => FAIL (16:20:19)
+  [baseline14] polyglot-c-py start (deadline=900s cap=2400s) 16:20:19
+  [baseline14] polyglot-c-py => FAIL (16:22:28)
+  [baseline14] cpp-compatibility start (deadline=900s cap=2400s) 16:22:28
+  [baseline14] cpp-compatibility => PASS (16:33:46)
+  [baseline14] classifier-debug start (deadline=900s cap=2400s) 16:33:46
+  [baseline14] classifier-debug => PASS (16:49:12)
+  [baseline14] write-compressor start (deadline=900s cap=2400s) 16:49:12
+  [baseline14] write-compressor => FAIL (17:09:41)
+  [baseline14] nginx-request-logging start (deadline=900s cap=2400s) 17:09:41
+  [baseline14] nginx-request-logging => FAIL (17:30:11)
+  [baseline14] home-server-https start (deadline=900s cap=2400s) 17:30:11
+  [baseline14] home-server-https => PASS (17:32:38)
+  [baseline14] circuit-fibsqrt start (deadline=3600s cap=4800s) 17:32:38
+  [baseline14] circuit-fibsqrt => FAIL (17:48:34)
+  [baseline14] regex-chess start (deadline=3600s cap=4800s) 17:48:34
+  [baseline14] regex-chess => FAIL (18:07:07)
+  [baseline14] PASS 5/14

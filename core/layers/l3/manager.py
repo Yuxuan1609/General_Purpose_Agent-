@@ -154,22 +154,11 @@ class L3Agent(LayerAgent):
         system = self._build_system_prompt(instruction, meta)
         query_section = f"[上层查询]\n完成 L2 下发的任务：{l3_task}\n\n" if l3_task else ""
 
-        # Build context history from previous L3 calls (within same executor trace)
-        context_text = ""
-        ctx_history = state.get("context_history", [])
-        if ctx_history:
-            lines = []
-            for i, h in enumerate(ctx_history):
-                lines.append(f"第{i+1}次请求: {h.get('query', '')[:300]}")
-                lines.append(f"第{i+1}次结果: {h.get('reply', '')[:500]}")
-            context_text = "\n".join(lines)
 
-        ctx_section = f"[本轮上下文]\n{context_text}\n\n" if context_text else ""
         user = (
             f"{fb_section}"
             f"{learning_data}"
             f"{query_section}"
-            f"{ctx_section}"
             f"[当前局面]\n{current}\n\n"
             f"[可用技能]\n{skills_text}"
         )

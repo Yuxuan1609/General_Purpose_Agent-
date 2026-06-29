@@ -1,0 +1,5 @@
+build-linux-kernel-qemu ERR
+build-initramfs-qemu ERR
+build-stp PASS
+build-pmars FAIL
+compile-compcert FAIL

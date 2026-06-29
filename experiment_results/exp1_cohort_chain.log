@@ -1,0 +1,6 @@
+[cohort-chain 06-28 17:46:42] === EXP1 COHORT RETRAIN CHAIN START (B: clean retrain, current fixed system) ===
+[cohort-chain 06-28 17:46:42] >>> Phase 1/2: TRAIN (3 rounds, 9 cohort tasks)
+[cohort-chain 06-28 21:09:17] === EXP1 COHORT RETRAIN CHAIN START (B: clean retrain, current fixed system) ===
+[cohort-chain 06-28 21:09:17] >>> Phase 1/2: TRAIN (3 rounds, 9 cohort tasks)
+[cohort-chain 06-29 07:06:45] >>> Phase 1/2 TRAIN done
+[cohort-chain 06-29 07:06:45] >>> Phase 2/2: LEARNED EVAL (bench/pass@3, WITH learning)

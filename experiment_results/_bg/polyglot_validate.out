@@ -1,0 +1,4 @@
+=== EPOCH [validate] mode=train start 06-28 20:57:25 ===
+  [validate] polyglot-c-py start (deadline=900s cap=2400s) 20:57:25
+  [validate] polyglot-c-py => PASS (21:05:04)
+  [validate] PASS 1/1
