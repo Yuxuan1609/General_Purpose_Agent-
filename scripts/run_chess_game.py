@@ -106,9 +106,8 @@ def _build_obs(env):
     from core.types import TaskObservation
     state = env._build_observation()
     return TaskObservation(
-        meta="你正在与 Maia3 国际象棋引擎对弈。每轮是独立上下文，请完整分析当前局面。"
-             "分析后选择最佳合法走法。以 'move: <uci>' 结尾（如 move: e2e4）。"
-             "可使用 terminal 工具运行 python-chess，不要使用网络搜索。",
+        meta="你正在与 Maia3 下棋。每轮独立上下文。合法走法已列出——直接从中选择最佳。"
+             "分析局面后以 'move: <uci>' 结尾。禁止安装外部引擎（Stockfish等）。",
         state={
             "current": state.observation,
             "history": env._format_move_history(),

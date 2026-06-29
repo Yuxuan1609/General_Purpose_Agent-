@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = (
     "你正在与 Maia3 国际象棋引擎对弈。\n\n"
     "**每轮是独立上下文**：你不会看到之前的分析内容，只有当前局面和历史走法列表。\n"
-    "因此每轮请完整分析当前局面，不要假设你记得上一轮的推理。\n\n"
+    "请完整分析当前局面，不要假设你记得上一轮的推理。\n"
+    "合法走法已由环境列出——你只需从中选择最佳的一个。\n\n"
+    "**禁止安装或调用外部引擎（如 Stockfish、Leela）**。\n"
+    "环境已提供所有所需信息（FEN + ASCII 棋盘 + 合法走法列表）。\n\n"
     "输出要求：\n"
     "- 分析当前局面（中心控制、王安全、子力活动性、战术威胁）\n"
     "- 列出 2-3 个候选走法并简要比较\n"
-    "- 最终选择一步走法，以格式 'move: <uci>' 结尾（如 move: e2e4）\n\n"
-    "你可以使用 terminal 工具运行 python-chess 分析局面、验证走法合法性。\n"
-    "不要使用网络搜索——仅依靠你的棋类知识和工具分析。\n"
-    "如果上一步走法被引擎拒绝（非法/无效），请检查你的 UCI 格式是否正确。"
+    "- 最终选择一步走法，以格式 'move: <uci>' 结尾（如 move: e2e4）"
 )
 
 
@@ -144,14 +144,15 @@ class ChessGameEnv(Environment):
         legal = [m.uci() for m in self._board.legal_moves]
         move_history = self._format_move_history()
         board_text = _board_to_ascii(self._board)
+        legal_text = _format_legal_moves(self._board)
 
         observation = (
             f"[第 {self._move_count + 1} 步] {side}走棋\n"
             f"FEN: {self._board.fen()}\n"
             f"\n{board_text}\n"
-            f"合法走法数: {len(legal)}\n\n"
+            f"{legal_text}\n"
             f"{move_history}"
-            f"请分析局面并选择走法。以 'move: <uci>' 结尾。"
+            f"请分析局面并从上方合法走法中选择一步。以 'move: <uci>' 结尾。"
         )
         return EnvState(observation=observation, info=info)
 
@@ -364,8 +365,7 @@ class ChessGameEnv(Environment):
     @property
     def tool_policy(self) -> dict | None:
         return {
-            "allowed": ["read_file", "grep", "terminal", "sysinfo",
-                        "ask_user", "l1_query"],
+            "allowed": ["read_file", "grep", "sysinfo", "ask_user", "l1_query"],
         }
 
     @property
@@ -408,4 +408,23 @@ def _board_to_ascii(board: chess.Board) -> str:
     for r in range(8):
         lines.append(f"  {8 - r}  {rank_lines[r]}  {8 - r}")
     lines.append("     a b c d e f g h")
+    return "\n".join(lines)
+
+
+def _format_legal_moves(board: chess.Board) -> str:
+    """Group legal moves by piece type for LLM readability."""
+    piece_names = {
+        chess.PAWN: "兵", chess.KNIGHT: "马", chess.BISHOP: "象",
+        chess.ROOK: "车", chess.QUEEN: "后", chess.KING: "王",
+    }
+    groups: dict[str, list[str]] = {}
+    for move in board.legal_moves:
+        piece = board.piece_at(move.from_square)
+        name = piece_names.get(piece.piece_type, "?") if piece else "?"
+        groups.setdefault(name, []).append(move.uci())
+
+    lines = [f"[合法走法] 共 {board.legal_moves.count()} 步"]
+    for name in ("王", "后", "车", "象", "马", "兵"):
+        if name in groups:
+            lines.append(f"  {name}: {', '.join(sorted(groups[name]))}")
     return "\n".join(lines)
