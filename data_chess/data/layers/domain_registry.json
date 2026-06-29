@@ -1,0 +1,74 @@
+{
+  "nodes": {
+    "general": {
+      "parent": null,
+      "description": "通用领域，跨域知识的默认归属",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "tb": {
+      "parent": "general",
+      "description": "Terminal-Bench 任务根域，涵盖所有 TB benchmark 任务",
+      "correlations": {
+        "learning/reflect": 0.3
+      },
+      "relations": "",
+      "embedding_vector": null
+    },
+    "tb/debugging": {
+      "parent": "tb",
+      "description": "调试类任务：修复代码错误、环境兼容性、编译问题",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "tb/software-engineering": {
+      "parent": "tb",
+      "description": "软件工程类任务：git操作、构建系统、包管理",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "tb/system-administration": {
+      "parent": "tb",
+      "description": "系统管理类任务：权限、网络、日志、服务配置",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "tb/security": {
+      "parent": "tb",
+      "description": "安全类任务：加密、漏洞修复、安全配置",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "learning/reflect": {
+      "parent": "general",
+      "description": "学习反思域，消费执行记录分析策略问题和改进机会",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "learning/compile": {
+      "parent": "learning/reflect",
+      "description": "知识编译域，将高激活同域卡片编译为L3技能",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    },
+    "learning/consolidate": {
+      "parent": "learning/reflect",
+      "description": "知识整理域，管理知识库容量",
+      "correlations": {},
+      "relations": "",
+      "embedding_vector": null
+    }
+  },
+  "reverse_index": {
+    "l2": {},
+    "l3": {},
+    "tool": {}
+  }
+}

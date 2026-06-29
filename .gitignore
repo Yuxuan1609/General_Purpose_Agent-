@@ -20,3 +20,5 @@ data/cognitive/
 runs/
 tb/runs/
 data_backup/
+data_chess/data/cognitive/
+data_chess/data/learning/
