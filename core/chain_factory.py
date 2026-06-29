@@ -25,7 +25,7 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
 
     from core.seed_knowledge import init_registry
     from core.model_manager import set_model_path
-    set_model_path(str(data_root / "embeddinggemma"))
+    set_model_path(str(Path(__file__).resolve().parent.parent / "embeddinggemma"))
     reg = init_registry(data_root / "data" / "layers" / "domain_registry.json",
                         db_path=data_path / "domain.db")
 
