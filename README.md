@@ -116,10 +116,13 @@ experiment_results/           # 所有实验轮次的原始运行结果
 cogagent_exp_report_20260629.tar.gz  # 完整实验包（含 data_snapshots 状态快照）
 ```
 
-### 已知限制
+### 已知限制与升级方向
 
-1. **Domain 系统尚处早期**：当前采用索引式设计，domain 维护和跨 domain 抽象有待增强
-2. **Scale-up 未完成**：目前仅在一个领域（git 簇）证明学习有效，多 domain 跨领域归纳/抽象能力未测
+**Domain 系统尚处早期。** 当前采用索引式设计，domain 由其下的 skill 和 knowledge card 定义——类似 RL 中 explore/exploit 的问题，domain 的归属更新策略尚未系统化解决。多 domain 场景下 agent 的跨域归纳抽象能力也未测试（理想情况：python 知识可迁移到 Java，数据结构知识可迁移到实际代码设计）。
+
+**Scale-up 未完成。** 项目原始目标是大规模跨领域训练/学习提升模型能力，但受限于个人时间资源，目前仅在单个领域（git 簇，3 train + 2 eval）初步证明了框架学习有效性。Exp2 的 2/2 翻转作为 proof of concept 通过，但 5 个 case 样本量无法覆盖 LLM 固有的随机性波动。
+
+**学习稳定性。** LLM 随机性 + 多轮 tool 调用的级联方差导致同一学习态的结果不稳定（如 git-leak：同份学习一次 40min ERR、一次 4min PASS）。需要多 seed 重复实验验证。
 
 ## 项目结构
 
