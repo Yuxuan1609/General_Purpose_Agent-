@@ -114,7 +114,7 @@ class L2Agent(LayerAgent):
         l2_query_guide = (
             "## l2_query 工具用法\n"
             "l2_query 是向 L3 层下发技能执行任务的工具。使用场景：\n"
-            "- 需要 L3 执行终端命令、文件搜索、网络搜索等具体操作\n"
+            "- 需要 L3 执行具体操作（环境允许的工具）\n"
             "- 需要 L3 按标准化流程（SKILL.md）完成复杂任务\n"
             "每次 l2_query 下发一个任务，L3 会返回执行结果。收到结果后：\n"
             "- 如果还需要 L3 执行更多操作 → 再发一次 l2_query\n"
@@ -124,8 +124,8 @@ class L2Agent(LayerAgent):
         return (
             f"## 认知层架构\n"
             f"- L1：管理行为准则，负责顶层任务拆解与最终决策\n"
-            f"- L2（你）：管理概率性知识卡片，负责相关知识检索与技能调度。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n"
-            f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用 terminal/web_search/read_file/grep/tool_proposal 等工具。\n\n"
+            f"- L2（你）：管理概率性知识卡片，负责相关知识检索与技能调度。可调用环境允许的工具执行具体操作。\n"
+            f"- L3：管理 SKILL.md 技能，负责标准化流程执行。可调用环境允许的工具执行具体操作。\n\n"
             f"## 领域边界\n"
             f"你只管理 L2 知识卡片（Knowledge Cards）。\n"
             f"不要修改 L1 的行为准则或 L3 的技能。\n\n"

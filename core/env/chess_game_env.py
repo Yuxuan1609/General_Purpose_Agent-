@@ -44,13 +44,15 @@ class ChessGameEnv(Environment):
 
     def __init__(self, model: str = "maia3-5m", elo: int = 1500,
                  temperature: float = 0.0, device: str = "cpu",
-                 max_moves: int = 80, agent_plays: str = "white"):
+                 max_moves: int = 80, agent_plays: str = "white",
+                 enable_learning: bool = True):
         self._model_name = model
         self._elo = elo
         self._temperature = temperature
         self._device = device
         self._max_moves = max_moves
         self._agent_plays = agent_plays  # "white" or "black"
+        self._enable_learning = enable_learning
 
         self._engine = None
         self._board: chess.Board | None = None
@@ -161,13 +163,24 @@ class ChessGameEnv(Environment):
             return ""
         agent_side = "白方" if self._agent_plays == "white" else "黑方"
         maia_side = "黑方" if self._agent_plays == "white" else "白方"
+        recent = self._history[-5:]
         lines = [f"[对局历史] 你是{agent_side}，Maia3是{maia_side}"]
-        for h in self._history:
+        for h in recent:
             agent_col = h.get(self._agent_plays, "")
             maia_col = h.get("maia3_move", "")
+            mark = '+' if h.get('agent_reward', 0) > 0 else '-' if h.get('agent_reward', 0) < 0 else ' '
+            mat = h.get('material_diff', 0)
+            mat_str = f"子力: {mat:+d}" if self._agent_plays == "white" else f"子力: {-mat:+d}"
+            cap_parts = []
+            if h.get("agent_captured"):
+                cap_parts.append(f"你吃{h['agent_captured']}")
+            if h.get("maia3_captured"):
+                cap_parts.append(f"被吃{h['maia3_captured']}")
+            cap_str = "  ".join(cap_parts) if cap_parts else ""
             lines.append(
                 f"  {h['move_num']:2d}. 你: {agent_col or '--':6s}  Maia3: {maia_col or '--':6s}"
-                f"  {'+' if h.get('agent_reward', 0) > 0 else '-' if h.get('agent_reward', 0) < 0 else ' '}"
+                f"  {mark}  {mat_str}"
+                + (f"  {cap_str}" if cap_str else "")
             )
         return "\n".join(lines) + "\n\n"
 
@@ -246,6 +259,9 @@ class ChessGameEnv(Environment):
         except Exception as e:
             logger.warning("Maia3 eval failed: %s", e)
 
+        # Capture info before push
+        agent_captured = _piece_name(self._board.piece_at(agent_move.to_square))
+
         # Push agent's move
         self._board.push(agent_move)
         self._move_count += 1
@@ -257,6 +273,8 @@ class ChessGameEnv(Environment):
         entry[side_key] = move_uci
         entry["agent_reward"] = reward
         entry["eval"] = eval_str
+        entry["agent_captured"] = agent_captured
+        entry["material_diff"] = _material_balance(self._board)
 
         self._total_reward += reward
 
@@ -269,8 +287,10 @@ class ChessGameEnv(Environment):
             )
 
         # Maia3 responds
-        self._make_maia3_move()
-        entry["maia3_move"] = self._board.peek().uci()
+        maia3_captured = self._make_maia3_move()
+        entry["maia3_move"] = self._board.peek().uci() if self._move_count > 0 else ""
+        entry["maia3_captured"] = maia3_captured
+        entry["material_diff"] = _material_balance(self._board)
 
         if self._check_game_over():
             return EnvStep(
@@ -295,18 +315,22 @@ class ChessGameEnv(Environment):
             done=False,
         )
 
-    def _make_maia3_move(self):
+    def _make_maia3_move(self) -> str | None:
+        """Make Maia3's move. Returns captured piece name (or None)."""
         try:
             engine_board = self._board.copy()
             self._engine.board = engine_board
             self._engine._reset_history()
             move, _ = self._engine.score_moves()
             if move is None:
-                return
+                return None
+            captured = _piece_name(self._board.piece_at(move.to_square))
             self._board.push(move)
             self._move_count += 1
+            return captured
         except Exception as e:
             logger.warning("Maia3 move failed: %s", e)
+            return None
 
     def _check_game_over(self) -> bool:
         if not self._board.is_game_over():
@@ -337,7 +361,9 @@ class ChessGameEnv(Environment):
             if h["move_num"] == move_num:
                 return h
         entry = {"move_num": move_num, "white": "", "black": "",
-                 "agent_reward": 0.0, "eval": "", "maia3_move": ""}
+                 "agent_reward": 0.0, "eval": "", "maia3_move": "",
+                 "agent_captured": None, "maia3_captured": None,
+                 "material_diff": 0}
         self._history.append(entry)
         return entry
 
@@ -364,9 +390,10 @@ class ChessGameEnv(Environment):
 
     @property
     def tool_policy(self) -> dict | None:
-        return {
-            "allowed": ["read_file", "grep", "sysinfo", "ask_user", "l1_query"],
-        }
+        allowed = ["l1_query", "l2_query", "query_domain", "create_domain"]
+        if self._enable_learning:
+            allowed.append("record_learning")
+        return {"allowed": allowed}
 
     @property
     def is_game_over(self) -> bool:
@@ -399,6 +426,29 @@ def _find_rank(move_uci: str, top_list: list[str]) -> int:
         if m == move_uci:
             return i
     return -1
+
+
+_PIECE_VALUE = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+
+_PIECE_NAME_CN = {chess.PAWN: "兵", chess.KNIGHT: "马", chess.BISHOP: "象",
+                   chess.ROOK: "车", chess.QUEEN: "后", chess.KING: "王"}
+
+
+def _piece_name(piece: chess.Piece | None) -> str | None:
+    """Return Chinese piece name for a captured piece, or None."""
+    if piece is None:
+        return None
+    return _PIECE_NAME_CN.get(piece.piece_type)
+
+
+def _material_balance(board: chess.Board) -> int:
+    """White material - Black material. Positive = White ahead."""
+    diff = 0
+    for piece in board.piece_map().values():
+        val = _PIECE_VALUE[piece.piece_type]
+        diff += val if piece.color == chess.WHITE else -val
+    return diff
 
 
 def _board_to_ascii(board: chess.Board) -> str:

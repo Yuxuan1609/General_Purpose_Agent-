@@ -20,7 +20,8 @@ _TOOL_RULES = (
     "- sync=false 的任务用 collect_tasks(task_ids) 收割结果\n"
     "- check_task(task_id) 可查单个任务状态\n"
     "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
-    "- 长耗时任务（kb_fill_gap、terminal 跑 shell 脚本等）建议设 sync=false\n"
+    "- 长耗时任务建议设 sync=false\n"
+    "- 只能调用当前 tools 列表中提供的工具，不要调用列表之外的工具\n"
 )
 
 
@@ -219,6 +220,24 @@ class LayerAgent(ABC):
                     if capture_tools and tc.function.name in capture_tools:
                         capture_call = tc
                     else:
+                        if self._context is not None:
+                            ctx = self._context
+                            if ctx.allowed_tools and tc.function.name not in ctx.allowed_tools:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": json.dumps({"error": f"Tool '{tc.function.name}' not available in this environment"}),
+                                })
+                                self._log.warning("  ├─ blocked by env policy: %s", tc.function.name)
+                                continue
+                            if ctx.denied_tools and tc.function.name in ctx.denied_tools:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": json.dumps({"error": f"Tool '{tc.function.name}' not available in this environment"}),
+                                })
+                                self._log.warning("  ├─ blocked by env policy: %s", tc.function.name)
+                                continue
                         executable_calls.append(tc)
 
                 async_dispatched = 0
