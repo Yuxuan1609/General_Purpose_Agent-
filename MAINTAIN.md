@@ -9,6 +9,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-06-29 | **Chess/Maia3 环境**：新增 `core/env/chess_env.py` — ChessEnv，基于 Maia3 人棋预测引擎的棋类学习环境。支持 puzzle/random 两种模式，通过 `score_moves()` 获取 Maia3 首选走法 + WDL 评估，按 agent 走法与 Maia3 的匹配度给 reward。新增 `scripts/run_chess_agent.py` — 完整 cognitive agent + Maia3 流程入口，支持 `--no-llm` 直接测 Maia3 准确率。vendor/ 下 clone maia3 依赖。 |
 | 2026-06-24 | **Layer Loop 缺陷修复（ISSUES.md #1-6,#8）**：`downward_comm_tool` 去掉 `threading.Thread+join(timeout)`，改纯同步执行（放弃 downward 超时），修复 thread-local RoundTree 栈被线程割裂致 L2/L3 节点丢失 (#1)；`_extract_reply` 签名 `str→dict{reply,reasoning}`，下层 reasoning 向上传递 (#4)；`L2Manager.query` pop 后 append l2_node 到 `current_node()`，对齐 L3 (#2)；`L3Agent.decide` normal mode 加 done 兜底（_raw/result 拼装），对齐 L1/L2 (#6)；`base.py _call_llm` capture 改延迟语义——同轮 executable 先执行再 return capture (#3)；统一 `async_dispatched` 计数器驱动 "Pending async/collect_tasks" 提醒，覆盖 downward 路径 (#5)；capture 命中 `_drain_pending_async` 只调一次 (#8)。#7 经确认保持原状（纯文本回复 reasoning 仍为空，LLMResponse 无独立 thinking 字段）。新增 `tests/test_call_llm_tool_loop.py`，扩展 `test_downward_comm_tool.py`/`test_layers.py`。 |
 | 2026-06-24 | **TB 测试反馈机制**：新增 `tb/feedback_harness.py` — `FeedbackHarness(Harness)` 子类重写 `_run_trial`，将 `_parse_results` 移入 `with spin_up_terminal()` 块内，在容器存活期间插入修复循环（最多 3 轮修复）。`tb/agent/cognitive_agent.py` 新增 `receive_test_results()`/`_build_feedback_meta()` 方法 — 接收 pass/fail 结果驱动 Executor 反思/修复。新增 `tb/runner.py` — monkey-patch `terminal_bench.Harness = FeedbackHarness` 后调用 Typer CLI。新增 `tb/env.py` — `apply_learning_context(chain, enable)` 用 `AgentContext(denied_tools={...})` 实现 train/test 工具过滤（test 禁用 record_learning/kb_add/kb_fill_gap）。`tb/run.sh` 改用 `python -m tb.runner run` 入口；加 `_run()` 函数支持 `$2` phase 参数 → `TB_PHASE` 环境变量。`tb/config/tasks_data.yaml` 更新为 32 道 Debugging/SoftwareEng/SystemAdmin/Security 四类任务（20 train + 12 test）。 |
 | 2026-06-23 | **Terminal-Bench 集成**：新增 `tb/` 模块 — TB 评估环境。`tb/agent/cognitive_agent.py`：`CognitiveAgent(BaseAgent)` 将 cognitive-agent 的 Executor+三层链封装为 TB Agent，`perform_task` 内多轮循环（TaskObservation → Executor → tool call via tmux → capture_pane 反馈 → 直到 done）。`tb/tools/`：`tb_terminal`/`tb_read_file`/`tb_grep` — 同名覆盖原工具（`override=True`），走 `TmuxSession.send_keys()` + `capture_pane()` 在 Docker 容器内执行。`tb/session_holder.py`：模块级 `_current` 引用供 TB 工具取 session。`tb/config/tasks_data.yaml`：Data & File Processing 8 道 task 列表（5 train + 3 test）。`tb/run.sh`：`tb run --agent-import-path` 入口脚本。`core/llm_client.py`：`LLMResponse` 新增 `prompt_tokens`/`completion_tokens` 字段；`LLMClient` 新增 `total_tokens` 属性 + `reset_token_counts()` 方法（累积计数 + 可重置）。`CognitiveAgent.perform_task` 增强：per-round 日志（tokens/耗时/action）、summary.json 摘要文件（含时间戳/轮次/token 统计）。 |
@@ -566,6 +567,20 @@
 | `InteractionEnv.session_info` | `() → dict` | 返回当前会话元信息 {id, turns, started_at, enable_learning} | interactive_agent.py | — |
 | `InteractionEnv._format_history_for_prompt` | `() → str` | 将 history 格式化为 `[用户]: ...\n[助手]: ...` 文本 | build_task_observation() | — |
 
+## core/env/chess_env.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `ChessEnv` | `__init__(model, elo, temperature, device, puzzles, max_turns)` | 基于 Maia3 的棋类学习环境，支持 puzzle/random 模式。走法评分按与 Maia3 首选匹配度给 reward | run_chess_agent.py | Maia3UCIEngine, chess.Board |
+| `ChessEnv.reset` | `(task_description) → EnvState` | 加载 Maia3 引擎 + 重置棋局 | run_chess_agent.py | _ensure_engine(), _next_puzzle() |
+| `ChessEnv.step` | `(action: str) → EnvStep` | 解析 agent 走法、调用 Maia3 score_moves、计算 reward | run_chess_agent.py | _engine.score_moves() |
+| `ChessEnv._ensure_engine` | `() → None` | 懒加载 Maia3UCIEngine（下载 checkpoint + 加载模型） | reset() | resolve_model_spec, Maia3UCIEngine |
+| `ChessEnv._next_puzzle` | `() → EnvState` | 加载下一个 puzzle 并构造观察文本 | reset(), step() | — |
+| `ChessPuzzle` | `dataclass(fen, expected_move, description, elo_target)` | 单个棋局 puzzle 数据类 | ChessEnv, generate_random_puzzles | — |
+| `generate_random_puzzles` | `(count) → list[ChessPuzzle]` | 生成随机合法棋局 | run_chess_agent.py | chess.Board |
+| `_extract_move` | `(action: str) → str` | 从 agent 回复中提取 UCI 走法（正则） | ChessEnv.step() | — |
+| `_find_rank` | `(move_uci, top_list) → int` | 查找走法在 Maia3 推荐列表中的排名 | ChessEnv.step() | — |
+
 ## core/env/threshold_scorer.py (Phase 2.3 — 从 core/orchestrator/ 迁移)
 
 | 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
@@ -604,6 +619,15 @@
 | `main` | `() → None` | CLI 交互式认知 Agent 入口（/new, /info, /quit） | 直接运行 | _setup_executor, InteractionEnv, Executor.execute |
 | `_setup_executor` | `() → Executor` | 委托 `core.setup.setup_executor(PROJECT_ROOT)` 并返回 executor（chain 丢弃） | main | setup_executor |
 | `_show_notifies` | `(notify_layers: dict) → None` | 打印三层 NOTIFY payload（debug 模式） | main | — |
+
+## scripts/run_chess_agent.py
+
+| 函数/类 | 签名 | 作用 | 上游调用者 | 下游调用 |
+|----------|------|------|-----------|---------|
+| `main` | `() → None` | Chess cognitive agent 入口，支持 --no-llm 直接测 Maia3 / 完整 LLM 流程 | 直接运行 | _setup_cognitive, ChessEnv, Executor.execute |
+| `_run_maia3_only` | `(args) → None` | 跳过 LLM，直接运行 Maia3 测 puzzle 准确率 | main (--no-llm) | ChessEnv._ensure_engine, score_moves |
+| `_setup_cognitive` | `(args) → (chain, executor, registry)` | 委托 setup_executor + 注册 chess 工具 + 可选 seed 棋类知识 | main | setup_executor, _seed_chess_knowledge |
+| `_seed_chess_knowledge` | `(chain) → None` | 向 L1 哲学层注入棋类分析规则（去重） | _setup_cognitive (--seed) | Philosophy.add_rule |
 
 ## capability/ — Phase 3 能力系统
 
