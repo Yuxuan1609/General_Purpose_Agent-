@@ -335,6 +335,27 @@ class ChessGameEnv(Environment):
                 done=True,
             )
 
+        # Fast-loss check: agent behind by >=15 material points
+        mat_diff = _material_balance(self._board)
+        if self._agent_plays == "white" and mat_diff <= -15:
+            self._game_over = True
+            self._game_result = "maia3 wins (material deficit)"
+            logger.info("Fast-loss: agent behind by %d material points", abs(mat_diff))
+            return EnvStep(
+                state=self._build_observation(),
+                reward=reward - 2.0,
+                done=True,
+            )
+        elif self._agent_plays == "black" and mat_diff >= 15:
+            self._game_over = True
+            self._game_result = "maia3 wins (material deficit)"
+            logger.info("Fast-loss: agent behind by %d material points", abs(mat_diff))
+            return EnvStep(
+                state=self._build_observation(),
+                reward=reward - 2.0,
+                done=True,
+            )
+
         if self._move_count >= self._max_moves:
             self._game_over = True
             self._game_result = "draw (max_moves)"
@@ -427,11 +448,12 @@ class ChessGameEnv(Environment):
     @property
     def tool_policy(self) -> dict | None:
         allowed = ["terminal", "web_search", "tavily_search", "read_file", "grep",
-                   "kb_query", "kb_modify", "kb_fill_gap",
                    "chess_analyze",
                    "l1_query", "l2_query"]
         if self._enable_learning:
-            allowed.append("record_learning")
+            allowed += ["kb_query", "kb_modify", "kb_fill_gap", "record_learning"]
+        else:
+            allowed.append("kb_query")
         return {
             "allowed": allowed,
             "call_groups": {
