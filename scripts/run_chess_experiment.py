@@ -23,7 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 logger = logging.getLogger("chess_experiment")
 
 _DEFAULT_GAMES = {"baseline": 10, "learning": 20}
-_ELO_START = 800
+_ELO_START = 700
 _ELO_MIN = 600
 _ELO_MAX = 2000
 _ELO_STEP = 100
@@ -279,35 +279,39 @@ def _setup_cognitive(env, data_root: Path, enable_learning: bool):
     from core.runtime_registry import register_runtime
 
     chain = _build_chain(data_root, auxiliary_llm=build_llm_client(),
-                         seed=True, env=env)
+                         seed=False, env=env)
     executor = Executor(chain, build_llm_client())
     register_runtime(chain, executor)
 
-    if enable_learning:
-        phil = chain._philosophy
-        existing = {r.content for r in phil.all_rules()}
-        rules = [
-            "对于象棋对局这种长程任务，积极使用中间结果和反馈进行分析和学习记录",
-            "长程任务（如完整棋局）中：每几步后检查是否有值得固化的经验，"
-            "及时调用 record_learning，不要等到全部结束后才学习",
-            "如果发现某类走法持续有效或无效，立即 record_learning 记录模式",
-            "当子力对比变化（吃子/被吃）时，这是关键转折信号，立即评估并考虑 record_learning",
-            "复杂局面（被将军、多路分支、吃子决策）时，必须通过 l1_query 下发给L2/L3分析，不要独自判断",
-            "分析棋局时优先评估中心控制、王安全、子力活动性三个维度",
-        ]
-        for rule in rules:
-            if rule not in existing:
-                try:
-                    phil.add_rule(rule, source="l1")
-                except Exception:
-                    pass
+    _seed_l1_only(chain, enable_learning)
 
     return executor
 
 
+def _seed_l1_only(chain, enable_learning: bool):
+    phil = chain._philosophy
+    existing = {r.content for r in phil.all_rules()}
+    base_rules = [
+        "分析棋局时优先评估中心控制、王安全、子力活动性三个维度",
+        "面对不确定局面时，不要假设答案，仔细分析候选走法的优劣",
+    ]
+    if enable_learning:
+        base_rules += [
+            "对于象棋对局这种长程任务，积极使用中间结果和反馈进行分析和学习记录",
+            "长程任务中每几步后检查是否有值得固化的经验，及时调用 record_learning",
+            "当子力对比变化（吃子/被吃）时，评估是否为关键转折点并考虑 record_learning",
+            "复杂局面（被将军、多路分支、吃子决策）时，通过 l1_query 下发给L2/L3分析",
+        ]
+    for rule in base_rules:
+        if rule not in existing:
+            try:
+                phil.add_rule(rule, source="l1")
+            except Exception:
+                pass
+
+
 def _fork_data(group: str, out_root: Path) -> Path:
-    """Create isolated data directory for this group."""
-    import shutil
+    """Create clean data directory for this group — no pre-existing knowledge."""
     data_root = out_root / f"data_{group}"
     data_dir = data_root / "data"
 
@@ -316,17 +320,12 @@ def _fork_data(group: str, out_root: Path) -> Path:
 
     data_root.mkdir(parents=True, exist_ok=True)
     (data_dir / "cognitive").mkdir(parents=True, exist_ok=True)
-    (data_dir / "layers").mkdir(parents=True, exist_ok=True)
+    (data_dir / "layers" / "knowledge").mkdir(parents=True, exist_ok=True)
+    (data_dir / "layers" / "skills").mkdir(parents=True, exist_ok=True)
     (data_dir / "learning").mkdir(parents=True, exist_ok=True)
     (data_dir / "knowledge").mkdir(parents=True, exist_ok=True)
 
-    src_layers = PROJECT_ROOT / "data" / "layers"
-    dst_layers = data_dir / "layers"
-    for f in src_layers.glob("*.json"):
-        if not (dst_layers / f.name).exists():
-            shutil.copy2(f, dst_layers / f.name)
-
-    logger.info("Data forked for %s: %s", group, data_root)
+    logger.info("Clean data created for %s: %s", group, data_root)
     return data_root
 
 
