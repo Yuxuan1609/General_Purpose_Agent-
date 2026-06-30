@@ -16,6 +16,42 @@ from core.types import TaskObservation
 
 logger = logging.getLogger(__name__)
 
+_STOCKFISH_ELO = 1400
+
+
+def _stockfish_elo_filter(command: str) -> str:
+    """Terminal command filter: force Stockfish to Elo-limited wrapper.
+
+    Detects any stockfish invocation (by exe name, full path, or alias) and
+    reroutes to stockfish_1400. The agent cannot bypass this by using full
+    paths to the raw exe.
+    """
+    if not command:
+        return command
+    lower = command.lower()
+    if "stockfish" not in lower:
+        return command
+    # Already using the wrapper — no change needed
+    if "stockfish_1400" in lower:
+        return command
+    import re
+    # Replace any stockfish reference (full path, exe name, or bare) with stockfish_1400
+    filtered = re.sub(
+        r'[A-Za-z]:[^\s|&"]*stockfish[^\s|&"]*\.exe',
+        'stockfish_1400',
+        command,
+        flags=re.IGNORECASE,
+    )
+    filtered = re.sub(
+        r'\bstockfish(?:-windows-x86-64-avx2)?(?:\.exe)?\b',
+        'stockfish_1400',
+        filtered,
+        flags=re.IGNORECASE,
+    )
+    if filtered != command:
+        logger.debug("terminal filter: rerouted stockfish -> stockfish_1400 (Elo %d)", _STOCKFISH_ELO)
+    return filtered
+
 _SYSTEM_PROMPT = (
     "你正在与 Maia3 国际象棋引擎对弈。\n\n"
     "**每轮是独立上下文**：你不会看到之前的分析内容，只有当前局面和历史走法列表。\n"
@@ -390,10 +426,19 @@ class ChessGameEnv(Environment):
 
     @property
     def tool_policy(self) -> dict | None:
-        allowed = ["l1_query", "l2_query", "query_domain", "create_domain"]
+        allowed = ["terminal", "web_search", "tavily_search", "read_file", "grep",
+                   "kb_query", "kb_modify", "kb_fill_gap",
+                   "chess_analyze",
+                   "l1_query", "l2_query"]
         if self._enable_learning:
             allowed.append("record_learning")
-        return {"allowed": allowed}
+        return {
+            "allowed": allowed,
+            "call_groups": {
+                "search": {"max": 2, "tools": ["web_search", "tavily_search"]},
+            },
+            "terminal_command_filter": _stockfish_elo_filter,
+        }
 
     @property
     def is_game_over(self) -> bool:

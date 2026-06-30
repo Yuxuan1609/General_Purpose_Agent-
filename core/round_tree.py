@@ -55,6 +55,16 @@ def get_round_history() -> RoundHistory:
     return _history
 
 
+def reset_round_history() -> None:
+    """Reset the global singleton — clear all prior rounds.
+
+    Called at the start of a new game/session to prevent cross-game
+    context leakage into record_learning snapshots.
+    """
+    global _history
+    _history = RoundHistory()
+
+
 # ── Thread-local node stack for RoundTree construction ──
 
 import threading

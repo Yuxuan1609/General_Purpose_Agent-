@@ -22,6 +22,10 @@ _TOOL_RULES = (
     "- 同一轮内多个 sync=true 工具并行执行，互不阻塞\n"
     "- 长耗时任务建议设 sync=false\n"
     "- 只能调用当前 tools 列表中提供的工具，不要调用列表之外的工具\n"
+    "\n"
+    "## chess_analyze 工具用法\n"
+    "- chess_analyze(fen, depth=15) 用 Stockfish（Elo 1400）分析局面，返回 bestmove/score_cp/pv\n"
+    "- 收到棋局分析任务时优先用 chess_analyze，不要用 terminal 调 stockfish\n"
 )
 
 
@@ -85,6 +89,7 @@ class LayerAgent(ABC):
         self._llm = llm_client
         self._log = log
         self._injector = None  # set externally after construction
+        self._context = None  # set via set_context() when env has tool_policy
         from core.config_loader import get_section
         self._max_tool_turns = get_section('runtime', default={}).get('max_tool_turns', 5)
 
@@ -237,6 +242,21 @@ class LayerAgent(ABC):
                                     "content": json.dumps({"error": f"Tool '{tc.function.name}' not available in this environment"}),
                                 })
                                 self._log.warning("  ├─ blocked by env policy: %s", tc.function.name)
+                                continue
+                            if hasattr(ctx, 'check_call_limit') and not ctx.check_call_limit(tc.function.name):
+                                limit_desc = ""
+                                for gname, (max_calls, tools) in getattr(ctx, 'call_groups', {}).items():
+                                    if tc.function.name in tools:
+                                        limit_desc = f" (group '{gname}' max {max_calls} calls/step)"
+                                        break
+                                if not limit_desc:
+                                    limit_desc = f" (max {ctx.call_limits.get(tc.function.name, 0)} calls/step)"
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": json.dumps({"error": f"Tool '{tc.function.name}' call limit reached for this step{limit_desc}"}),
+                                })
+                                self._log.warning("  ├─ blocked by call limit: %s%s", tc.function.name, limit_desc)
                                 continue
                         executable_calls.append(tc)
 

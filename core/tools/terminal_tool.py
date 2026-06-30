@@ -8,6 +8,15 @@ import time
 logger = logging.getLogger(__name__)
 
 _SHELL = None
+_command_filter = None
+
+
+def set_command_filter(fn):
+    """Set a global command filter for the terminal tool.
+    Called by chain_factory when env provides terminal_command_filter in tool_policy.
+    """
+    global _command_filter
+    _command_filter = fn
 
 
 def _get_shell():
@@ -37,6 +46,10 @@ def register_terminal_tool(registry, allowed_commands: list[str] | None = None):
             return json.dumps({"error": "No command provided"})
         if allowed_commands and not any(command.startswith(cmd) for cmd in allowed_commands):
             return json.dumps({"error": f"Command not allowed: {command}"})
+
+        # Apply terminal command filter (e.g. stockfish Elo limit)
+        if _command_filter:
+            command = _command_filter(command)
         try:
             shell = _get_shell()
             if shell != "cmd":

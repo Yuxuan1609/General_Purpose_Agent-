@@ -1,4 +1,6 @@
 from __future__ import annotations
+import json
+import logging
 from dataclasses import dataclass, field
 
 
@@ -64,7 +66,15 @@ class LLMClient:
                 if isinstance(t, dict) and "function" in t else t
                 for t in tools
             ]
-        resp = self._client.chat.completions.create(**params)
+        try:
+            resp = self._client.chat.completions.create(**params)
+        except Exception as e:
+            logging.getLogger("llm_client").warning(
+                "LLM API call failed: %s", e)
+            return LLMResponse(
+                text=json.dumps({"error": f"LLM API error: {e}"}),
+                tool_calls=[],
+            )
         msg = resp.choices[0].message
         usage = getattr(resp, "usage", None)
         prompt_tokens = usage.prompt_tokens if usage else 0

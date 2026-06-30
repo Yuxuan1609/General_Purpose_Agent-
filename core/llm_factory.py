@@ -16,6 +16,7 @@ def build_llm_client(config_path: Path | None = None, model=None,
     """
     import yaml
     from openai import OpenAI
+    import httpx
 
     from core.llm_client import LLMClient
 
@@ -31,7 +32,9 @@ def build_llm_client(config_path: Path | None = None, model=None,
 
     base_url = cfg.get("base_url", "https://api.deepseek.com")
     api_key = os.environ.get(cfg.get("api_key_env", "DEEPSEEK_API_KEY"), "")
-    oai = OpenAI(base_url=base_url, api_key=api_key)
+    oai = OpenAI(base_url=base_url, api_key=api_key,
+                 timeout=httpx.Timeout(600.0, connect=30.0),
+                 max_retries=1)
 
     llm = LLMClient(oai, model or cfg.get("model", "deepseek-v4-flash"))
     llm.temperature = temperature

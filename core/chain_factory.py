@@ -59,6 +59,11 @@ def build_default_chain(data_root: Path | None = None, auxiliary_llm=None,
             for layer in _iter_layers(chain):
                 if layer._agent:
                     layer._agent.set_context(ctx)
+        # Set terminal command filter if env provides one
+        terminal_filter = policy.get("terminal_command_filter") if policy else None
+        if terminal_filter:
+            from core.tools.terminal_tool import set_command_filter
+            set_command_filter(terminal_filter)
 
     return chain
 
@@ -75,6 +80,7 @@ def _mount_tools(chain, data_root: Path):
     register_all_tools(registry, proposal_dir=data_root / "data" / "tool_proposals")
 
     from core.tools.consolidation_injection import set_consolidation_stores
+    from core.tools.record_learning_tool import set_pending_dir
     l2 = chain._downstream
     l3 = l2._downstream if l2 else None
     set_consolidation_stores(
@@ -83,6 +89,7 @@ def _mount_tools(chain, data_root: Path):
          "l3": l3._skill_layer if l3 else None},
         registry=chain._registry,
     )
+    set_pending_dir(data_root / "data" / "learning" / "pending")
 
     from core.tools.downward_comm_tool import set_layer_downstreams
     downstream_map = {}

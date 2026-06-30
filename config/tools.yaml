@@ -7,7 +7,7 @@ tools:
   terminal:
     sync: true
     timeout: 300
-    allowlist: [l1, l2, l3]
+    allowlist: [l2, l3]
     fallback:
       max_retries: 2
       degrade:
@@ -238,6 +238,15 @@ tools:
   sysinfo:
     sync: true
     timeout: 10
+    allowlist: [l1, l2, l3]
+    fallback:
+      max_retries: 0
+      degrade: []
+
+  # ── Chess analysis ──
+  chess_analyze:
+    sync: true
+    timeout: 60
     allowlist: [l1, l2, l3]
     fallback:
       max_retries: 0

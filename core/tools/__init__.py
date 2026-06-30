@@ -33,6 +33,9 @@ def register_all_tools(registry, proposal_dir: Path | None = None):
     from core.tools.record_learning_tool import register_record_learning
     register_record_learning(registry)
 
+    from core.tools.chess_analyze_tool import register_chess_analyze_tool
+    register_chess_analyze_tool(registry)
+
     from core.tools.downward_comm_tool import register_downward_tools
     register_downward_tools(registry)
 

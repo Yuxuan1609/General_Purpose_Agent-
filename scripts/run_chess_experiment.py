@@ -22,7 +22,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger("chess_experiment")
 
-_DEFAULT_GAMES = {"baseline": 10, "learning": 20}
+_DEFAULT_GAMES = {"baseline": 10, "learning": 20, "train": 20, "eval": 3}
 _ELO_START = 700
 _ELO_MIN = 600
 _ELO_MAX = 2000
@@ -32,24 +32,47 @@ _MAX_MOVES = 80
 
 def main():
     parser = argparse.ArgumentParser(description="Chess self-play experiment")
-    parser.add_argument("--group", default="both", choices=["baseline", "learning", "both"])
+    parser.add_argument("--group", default="both",
+                        choices=["baseline", "learning", "both", "train", "eval"])
     parser.add_argument("--games", type=int, default=None, help="Override games per group")
     parser.add_argument("--model", default="maia3-5m", choices=["maia3-5m", "maia3-23m", "maia3-79m"])
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     parser.add_argument("--resume", default=None, help="Snapshot dir to resume from")
     parser.add_argument("--out-dir", default=None, help="Output directory (default: auto timestamp)")
+    parser.add_argument("--eval-elo", type=int, default=None, help="Fixed Elo for eval (no adaptation)")
     args = parser.parse_args()
 
     _setup_logging()
+
+    import shutil as _shutil
+    import os as _os
+    # Only expose the Elo-limited wrapper (vendor/bin/stockfish_1400.bat) in PATH.
+    # The raw stockfish exe is NOT in PATH — agent cannot bypass the 1400 limit.
+    _bin_dir = PROJECT_ROOT / "vendor" / "bin"
+    if not (_bin_dir / "stockfish_1400.bat").exists():
+        logger.error("stockfish_1400.bat not found in %s", _bin_dir)
+        sys.exit(1)
+    _os.environ["PATH"] = str(_bin_dir) + _os.pathsep + _os.environ.get("PATH", "")
+    if not _shutil.which("stockfish_1400"):
+        logger.error("stockfish_1400 not findable in PATH after adding vendor/bin")
+        sys.exit(1)
+    logger.info("stockfish_1400 wrapper available (Elo limited to 1400)")
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_root = Path(args.out_dir) if args.out_dir else PROJECT_ROOT / "experiment_results" / f"chess_{stamp}"
     out_root.mkdir(parents=True, exist_ok=True)
 
-    groups = ["baseline", "learning"] if args.group == "both" else [args.group]
+    if args.group == "both":
+        groups = ["baseline", "learning"]
+    elif args.group == "train":
+        groups = ["train"]
+    elif args.group == "eval":
+        groups = ["eval"]
+    else:
+        groups = [args.group]
 
     for grp in groups:
-        n = args.games or _DEFAULT_GAMES[grp]
+        n = args.games or _DEFAULT_GAMES.get(grp, 20)
         run_group(grp, n, args, out_root)
 
     _write_summary(out_root)
@@ -58,21 +81,30 @@ def main():
 def run_group(group: str, n_games: int, args, out_root: Path):
     from core.env.chess_game_env import ChessGameEnv, _material_balance
 
-    grp_dir = out_root / group
+    if group == "eval":
+        elo_subdir = f"elo_{args.eval_elo or 1000}"
+        grp_dir = out_root / group / elo_subdir
+    else:
+        grp_dir = out_root / group
     grp_dir.mkdir(parents=True, exist_ok=True)
     snapshot_dir = grp_dir / "snapshots"
     snapshot_dir.mkdir(exist_ok=True)
 
-    data_root = _fork_data(group, out_root)
+    data_root = _fork_data(group, out_root, grp_dir)
 
-    enable_learning = (group == "learning")
+    enable_learning = group in ("learning", "train")
     current_elo = _ELO_START
     start_game = 1
+
+    if group == "eval":
+        current_elo = args.eval_elo or 1000
 
     if args.resume:
         resume_dir = Path(args.resume)
         if resume_dir.exists():
             current_elo, start_game = _load_resume_state(resume_dir, data_root, group)
+            if group == "eval":
+                current_elo = args.eval_elo or current_elo
             logger.info("Resumed from %s: elo=%d, start_game=%d", resume_dir, current_elo, start_game)
 
     csv_path = grp_dir / "elo_progression.csv"
@@ -120,7 +152,9 @@ def run_group(group: str, n_games: int, args, out_root: Path):
         shutil.copytree(data_root / "data", snap_path, dirs_exist_ok=False)
         logger.info("  Snapshot saved: %s", snap_path)
 
-        current_elo = result["elo_after"]
+        if group != "eval":
+            current_elo = result["elo_after"]
+        # eval: fixed Elo, no adaptation
 
     csv_f.close()
     logger.info("=== %s group done: %d games ===", group, n_games)
@@ -147,6 +181,7 @@ def run_single_game(game_id: int, group: str, elo: int,
     total_moves = 0
 
     while not env.is_game_over:
+        _reset_step_counters(executor._root)
         obs = _build_obs(env, game_id, group)
         t0 = time.time()
         result = executor.execute(obs)
@@ -254,22 +289,52 @@ _SYSTEM_PROMPT = (
     "**每轮是独立上下文**：你不会看到之前的分析内容，只有当前局面和最近几步历史。\n"
     "请完整分析当前局面，不要假设你记得上一轮的推理。\n"
     "合法走法已由环境列出——你只需从中选择最佳的一个。\n\n"
-    "**禁止安装或调用外部引擎（如 Stockfish、Leela）或搜索 chess 包**。\n"
-    "环境已提供所有所需信息（FEN + ASCII 棋盘 + 合法走法列表 + 子力变化）。\n\n"
+    "**可用工具**：\n"
+    "- chess_analyze：用 Stockfish 引擎分析当前局面（强度固定 Elo 1400）。**优先使用此工具**：\n"
+    "    chess_analyze(fen=\"<FEN>\", depth=15)\n"
+    "  返回 bestmove、score_cp（厘兵值）、pv（主要变例）。建议 depth 10-15。\n"
+    "  **不是无条件听从 Stockfish**：引擎走法可能仍有缺陷，需结合理论和认知层分析判断。\n"
+    "- terminal：可执行其他 shell 命令（通过 l1_query 下发给 L2/L3 执行）。chess 局面分析请优先用 chess_analyze，不要用 terminal 调 stockfish。\n"
+    "- web_search / tavily_search：搜索**思路和理论**（开局原则、战术模式名称、残局技巧），"
+    "**不要搜索当前具体棋局的 FEN 或走法**——用 Stockfish 分析具体局面。"
+    "web_search 和 tavily_search **共享**每步最多 2 次调用限额。\n"
+    "- read_file / grep：搜索本地 chess 相关文件\n"
+    "- kb_query / kb_modify / kb_fill_gap：知识库查询/修改/补缺\n"
+    "- l1_query / l2_query：下发内部认知层做深度分析\n\n"
+    "**建议流程**：\n"
+    "1. 用 chess_analyze 分析当前 FEN（获取最佳走法 + 评估）\n"
+    "2. 如需理论背景，用 web_search/tavily_search 查开局名称或战术概念（不查具体局面）\n"
+    "3. 用 kb_query 检索已有知识卡片，用 l1_query 下发深度分析\n"
+    "4. 综合引擎评估和知识，选择最佳走法\n"
+    "5. [train 组] 如果发现有效的工具使用模式或战术经验，调用 record_learning 记录\n\n"
+    "**搜索硬性限制**：\n"
+    "- web_search 和 tavily_search 共享每步最多 2 次调用（环境强制，超限自动拒绝并返回错误）\n"
+    "- 搜索只用于查思路和工具用法，不要搜当前 FEN/具体走法\n\n"
     "**重要——使用 l1_query 调用下层认知**：\n"
     "- 在复杂局面（被将军、吃子决策、多路分支）时，必须调用 l1_query 下发给L2/L3做深度分析\n"
     "- l1_query 可以让L2检索知识卡片、让L3调用技能执行计算\n"
     "- 收到L2回复后，综合信息做决策，不要跳过l1_query直接出结果\n\n"
     "**重要——中间学习记录**：\n"
     "- 每当子力对比发生变化（吃子/被吃），立即评估是否为关键转折点\n"
-    "- 如果出现失败模式（走法被Maia3否决、持续丢分），立即调用 record_learning\n"
     "- 如果发现某类走法（如开局模式、战术组合）在本局持续有效，记录为成功经验\n"
     "- 不要等到整局结束才学习——及时固化中间发现\n\n"
+    "**禁止**：\n"
+    "- 不要安装或调用 Stockfish 以外的外部引擎（如 Leela、Komodo）\n\n"
     "输出要求：\n"
-    "- 先用 l1_query 下发分析任务（复杂局面时必做）\n"
-    "- 如L2返回了信息，在Move之前总结关键发现\n"
     "- 最终选择一步走法，以格式 'move: <uci>' 结尾（如 move: e2e4）"
 )
+
+
+def _reset_step_counters(chain) -> None:
+    """Reset per-step call counters on all layer agents' AgentContext."""
+    from core.agent_context import AgentContext
+    node = chain
+    while node is not None:
+        if node._agent is not None:
+            ctx = getattr(node._agent, '_context', None)
+            if isinstance(ctx, AgentContext):
+                ctx.reset_call_counters()
+        node = node._downstream
 
 
 def _setup_cognitive(env, data_root: Path, enable_learning: bool):
@@ -277,6 +342,11 @@ def _setup_cognitive(env, data_root: Path, enable_learning: bool):
     from core.llm_factory import build_llm_client
     from core.executor import Executor
     from core.runtime_registry import register_runtime
+    from core.round_tree import reset_round_history
+
+    # Each game is an independent episode — clear prior rounds so record_learning
+    # snapshots don't bleed decision trees from the previous game into this one.
+    reset_round_history()
 
     chain = _build_chain(data_root, auxiliary_llm=build_llm_client(),
                          seed=False, env=env)
@@ -310,9 +380,12 @@ def _seed_l1_only(chain, enable_learning: bool):
                 pass
 
 
-def _fork_data(group: str, out_root: Path) -> Path:
+def _fork_data(group: str, out_root: Path, grp_dir: Path = None) -> Path:
     """Create clean data directory with minimal chess-only domain preset."""
-    data_root = out_root / f"data_{group}"
+    if group == "eval" and grp_dir is not None:
+        data_root = grp_dir / "data_eval"
+    else:
+        data_root = out_root / f"data_{group}"
     data_dir = data_root / "data"
 
     if data_root.exists():

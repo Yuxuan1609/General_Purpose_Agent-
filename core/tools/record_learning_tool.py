@@ -6,6 +6,20 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Pending dir is set per-chain by chain_factory._mount_tools so that isolated
+# data roots (e.g. chess experiment forks) get their own learning pipeline.
+# Default keeps backward compat for CLI/standalone usage.
+_pending_dir: Path = Path("data/learning/pending")
+
+
+def set_pending_dir(path: Path | str) -> None:
+    """Set the pending dir used by record_learning handlers.
+
+    Called once per chain build from chain_factory._mount_tools.
+    """
+    global _pending_dir
+    _pending_dir = Path(path)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -46,12 +60,20 @@ def _record_learning_handler(args=None, **kwargs):
 
     domain = "interaction"
 
+    # Capture current thread-local node BEFORE submitting to worker thread.
+    # current_node() uses threading.local — a pool worker can't see the caller's
+    # stack, so the in-progress round's decision tree would be lost without this.
+    from core.round_tree import current_node
+    current = current_node()
+
     if d.get("sync", False):
-        record = _build_and_save(domain, target, importance, reasoning)
+        record = _build_and_save(domain, target, importance, reasoning,
+                                  current_node=current)
         return json.dumps(record, ensure_ascii=False, default=str)
 
     def _run():
-        return _build_and_save(domain, target, importance, reasoning)
+        return _build_and_save(domain, target, importance, reasoning,
+                               current_node=current)
 
     from core.task_runner import get_shared_runner
     from core.session import get_task_context, get_session_store
@@ -69,9 +91,16 @@ def _record_learning_handler(args=None, **kwargs):
     return json.dumps({"task_id": tid, "status": "running"})
 
 
-def _build_and_save(domain, target, importance, reasoning):
+def _build_and_save(domain, target, importance, reasoning, current_node=None):
     from core.round_tree import get_round_history
     tree_nodes = get_round_history().snapshot()
+
+    # The in-progress round's L1 node is on the thread-local stack (pushed by
+    # L0_5_1Manager.query before agent.decide runs record_learning), but NOT yet
+    # in RoundHistory (which is pushed only after decide returns). Without this,
+    # the very round that triggered learning is invisible to the LLM observer.
+    if current_node is not None and not any(current_node is n for n in tree_nodes):
+        tree_nodes = tree_nodes + [current_node]
 
     record = {
         "id": uuid.uuid4().hex,
@@ -88,7 +117,7 @@ def _build_and_save(domain, target, importance, reasoning):
 
     _fill_observations_llm(record, tree_nodes, target)
 
-    pending_path = Path("data/learning/pending")
+    pending_path = _pending_dir
     pending_path.mkdir(parents=True, exist_ok=True)
     stamp = _now().replace(":", "-")
     filepath = pending_path / f"{record['id']}_{stamp}.json"
