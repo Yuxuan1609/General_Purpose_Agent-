@@ -311,7 +311,7 @@ def _seed_l1_only(chain, enable_learning: bool):
 
 
 def _fork_data(group: str, out_root: Path) -> Path:
-    """Create clean data directory for this group — no pre-existing knowledge."""
+    """Create clean data directory with minimal chess-only domain preset."""
     data_root = out_root / f"data_{group}"
     data_dir = data_root / "data"
 
@@ -325,7 +325,20 @@ def _fork_data(group: str, out_root: Path) -> Path:
     (data_dir / "learning").mkdir(parents=True, exist_ok=True)
     (data_dir / "knowledge").mkdir(parents=True, exist_ok=True)
 
-    logger.info("Clean data created for %s: %s", group, data_root)
+    # Pre-create minimal domain_registry so init_registry() skips _seed_domain_nodes
+    domain_json = data_dir / "layers" / "domain_registry.json"
+    domain_json.write_text(json.dumps({
+        "nodes": {
+            "general": {"path": "general", "parent": None,
+                        "description": "通用领域", "correlations": {}, "relations": ""},
+            "chess": {"path": "chess", "parent": "general",
+                      "description": "国际象棋策略域", "correlations": {}, "relations": ""},
+            "chess/game": {"path": "chess/game", "parent": "chess",
+                           "description": "对弈实战经验", "correlations": {}, "relations": ""},
+        }
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    logger.info("Clean chess data created for %s: %s", group, data_root)
     return data_root
 
 
