@@ -62,9 +62,11 @@ class LLMClient:
         params.update(kwargs)
         if tools:
             params["tools"] = [
-                {"type": "function", "function": t["function"]}
-                if isinstance(t, dict) and "function" in t else t
+                {"type": "function", "function": fn}
+                if isinstance(fn := t.get("function") if isinstance(t, dict) else None, dict)
+                else t
                 for t in tools
+                if isinstance(t, dict)
             ]
         try:
             resp = self._client.chat.completions.create(**params)

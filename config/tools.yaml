@@ -247,7 +247,7 @@ tools:
   chess_analyze:
     sync: true
     timeout: 60
-    allowlist: [l1, l2, l3]
+    allowlist: [l2, l3]
     fallback:
       max_retries: 0
       degrade: []

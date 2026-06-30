@@ -62,8 +62,6 @@ class L1Agent(LayerAgent):
             f"- [{r.id}] {r.content}" for r in rules
         ) if rules else "（无）"
         extra = f"\n{static_context}\n" if static_context else ""
-        from core.layers.base import _TOOL_RULES
-        tool_rules = _TOOL_RULES
         learning_guidance = (
             "## 学习记录\n"
             "如果本轮产生了值得固化的知识，调用 record_learning。判断标准:\n"
@@ -108,7 +106,6 @@ class L1Agent(LayerAgent):
             f"需要工具调用的任务，通过 l1_query 下发给 L2/L3 执行。\n\n"
             f"{domain_guide}"
             f"{l1_query_guide}\n"
-            f"{tool_rules}\n"
             f"{learning_guidance}\n"
             f"【行为准则】\n{rules_text}\n\n"
             f"你必须遵守以上【行为准则】并基于行为准则进行思考。\n"

@@ -31,7 +31,7 @@ def _search_searxng(query: str, max_results: int = 5, timeout: int = 10) -> list
     return None
 
 
-def _search_ddgs(query: str, max_results: int = 5) -> list[dict]:
+def _search_ddgs(query: str, max_results: int = 5, timeout: int = 30) -> list[dict]:
     """Fallback: DuckDuckGo search via ddgs library."""
     try:
         from ddgs import DDGS
@@ -40,12 +40,19 @@ def _search_ddgs(query: str, max_results: int = 5) -> list[dict]:
             from duckduckgo_search import DDGS
         except ImportError:
             return []
+    deadline = time.monotonic() + timeout
     for attempt in range(3):
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-        if results:
+        if time.monotonic() >= deadline:
             break
-        time.sleep(1.0)
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+            if results:
+                break
+        except Exception as e:
+            logger.warning("DDGS attempt %d failed: %s", attempt + 1, e)
+        if time.monotonic() < deadline:
+            time.sleep(min(1.0, max(deadline - time.monotonic(), 0)))
     formatted = []
     for r in results:
         formatted.append({
@@ -62,10 +69,12 @@ def register_web_search_tool(registry):
         if not query:
             return json.dumps({"error": "No query provided"})
         max_results = int((args or {}).get("max_results", 5))
+        deadline = time.monotonic() + min(timeout, 60)
 
-        results = _search_searxng(query, max_results, timeout=timeout)
-        if results is None:
-            results = _search_ddgs(query, max_results)
+        results = _search_searxng(query, max_results, timeout=min(timeout, 10))
+        if results is None and time.monotonic() < deadline:
+            remaining = max(int(deadline - time.monotonic()), 5)
+            results = _search_ddgs(query, max_results, timeout=remaining)
 
         return json.dumps(results, ensure_ascii=False)
 
